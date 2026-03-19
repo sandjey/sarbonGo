@@ -1,0 +1,609 @@
+package swaggerui
+
+import (
+	"net/http"
+	"os"
+	"path/filepath"
+
+	"github.com/gin-gonic/gin"
+
+	"sarbonNew/internal/server/resp"
+)
+
+// Minimal swagger UI without codegen, using docs/openapi.yaml.
+func Register(r *gin.Engine) {
+	r.GET("/openapi.yaml", func(c *gin.Context) {
+		if p, ok := findUp("docs/openapi.yaml", 10); ok {
+			c.File(p)
+			return
+		}
+		resp.ErrorLang(c, http.StatusNotFound, "openapi_not_found")
+	})
+
+	r.GET("/docs", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, swaggerHTML)
+	})
+
+	r.GET("/ws-test", func(c *gin.Context) {
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, wsTestHTML)
+	})
+}
+
+func findUp(rel string, maxDepth int) (string, bool) {
+	if maxDepth <= 0 {
+		maxDepth = 6
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	for i := 0; i <= maxDepth; i++ {
+		p := filepath.Join(dir, rel)
+		if _, err := os.Stat(p); err == nil {
+			return p, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", false
+}
+
+const swaggerHTML = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sarbon API — Документация</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+    <style>
+      .topbar { display: none; }
+
+      /* Always white background */
+      html, body { background: #fff; }
+
+      /* Top menu */
+      body { padding-top: 58px; }
+      .sarbon-topmenu {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 0 14px;
+        background: rgba(255,255,255,.92);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid rgba(0,0,0,.08);
+        z-index: 9999;
+      }
+      .sarbon-topmenu .brand {
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        font-weight: 700;
+        letter-spacing: .2px;
+        margin-right: 8px;
+        color: #111827;
+      }
+      .sarbon-topmenu .btn {
+        appearance: none;
+        border: 1px solid rgba(0,0,0,.12);
+        background: #fff;
+        color: #111827;
+        border-radius: 999px;
+        padding: 10px 14px;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+      }
+      .sarbon-topmenu .btn:hover { background: #f9fafb; }
+      .sarbon-topmenu .btn.active {
+        background: #111827;
+        color: #fff;
+        border-color: #111827;
+        box-shadow: 0 6px 18px rgba(17,24,39,.18);
+      }
+
+      /* Keep content width comfortable */
+      .swagger-ui .wrapper { max-width: 1240px; }
+
+      .sarbon-docs-hint {
+        padding: 10px 14px;
+        margin: 0 0 12px 0;
+        background: #f0f9ff;
+        border: 1px solid #bae6fd;
+        border-radius: 8px;
+        font-size: 13px;
+        color: #0c4a6e;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sarbon-docs-hint" id="sarbon-docs-hint">
+      Заголовки задаются в кнопке <b>Authorize</b>: X-Device-Type (web / ios / android), X-Language (ru / uz / en / tr / zh), X-Client-Token. Один раз выбранные значения действуют для <b>всех разделов</b> (Drivers, Freelance Dispatchers, Admin, Cargo, Chat, Company). Можно выбрать любой язык и любой тип устройства.
+    </div>
+    <div class="sarbon-topmenu" role="navigation" aria-label="API groups">
+      <div class="brand">Sarbon API</div>
+      <button class="btn" data-group="drivers">Drivers Mobile</button>
+      <button class="btn" data-group="dispatchers">Freelance Dispatchers</button>
+      <button class="btn" data-group="admin">Admin</button>
+      <button class="btn" data-group="cargo">Cargo API</button>
+      <button class="btn" data-group="chat">Chat</button>
+      <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">&#9889; WS Test</a>
+      <button class="btn" data-group="company">Company</button>
+      <button class="btn" data-group="reference">Reference</button>
+    </div>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+    <script>
+      window.onload = () => {
+        const LS_PREFIX = 'sarbon_auth_';
+        const DOCS_GROUP_KEY = LS_PREFIX + 'docs_group';
+          const K = {
+          DeviceTypeHeader: LS_PREFIX + 'DeviceTypeHeader',
+          LanguageHeader: LS_PREFIX + 'LanguageHeader',
+          ClientTokenHeader: LS_PREFIX + 'ClientTokenHeader',
+          UserTokenHeader: LS_PREFIX + 'UserTokenHeader',
+          UserIDHeader: LS_PREFIX + 'UserIDHeader',
+        };
+
+        function getLS(key, defVal) {
+          const v = localStorage.getItem(key);
+          if (v === null || v === undefined || v === '') return defVal;
+          return v;
+        }
+        function setLS(key, val) {
+          try { localStorage.setItem(key, val); } catch(e) {}
+        }
+
+        const SarbonAuthPlugin = function() {
+          return {
+            wrapComponents: {
+              apiKeyAuth: function(Original, system) {
+                return function(props) {
+                  const React = system.React;
+                  const Row = system.getComponent('Row');
+                  const Col = system.getComponent('Col');
+                  const Markdown = system.getComponent('Markdown', true);
+
+                  const name = props.name;
+                  const schema = props.schema;
+                  const authorized = props.authorized;
+
+                  const currentVal = (authorized && authorized.getIn([name, 'value'])) || '';
+
+                  const onChangeProxy = function(value) {
+                    setLS(K[name] || (LS_PREFIX + name), value);
+                    if (props.onChange) {
+                      props.onChange({ name: name, schema: schema, value: value });
+                    }
+                  };
+
+                  // Render select for device/language — same options in all sections (any language, any device).
+                  if (name === 'DeviceTypeHeader' || name === 'LanguageHeader') {
+                    const options = (name === 'DeviceTypeHeader')
+                      ? ['web', 'ios', 'android']
+                      : ['ru', 'uz', 'en', 'tr', 'zh'];
+                    const label = (name === 'DeviceTypeHeader')
+                      ? 'X-Device-Type (web | ios | android)'
+                      : 'X-Language (ru | uz | en | tr | zh)';
+                    var value = (currentVal && currentVal.toString && currentVal.toString().trim()) || getLS(K[name], '');
+                    if (value === '' || options.indexOf(value) === -1) value = options[0];
+
+                    return React.createElement(
+                      'div',
+                      { className: 'auth-container' },
+                      React.createElement('h4', null, label),
+                      React.createElement(
+                        Row,
+                        null,
+                        React.createElement(
+                          Col,
+                          null,
+                          React.createElement(
+                            'select',
+                            {
+                              value: value,
+                              onChange: function(e) { onChangeProxy(e.target.value); },
+                              style: { width: '100%', padding: '8px', borderRadius: '4px', maxWidth: '280px' }
+                            },
+                            options.map(function(o) {
+                              return React.createElement('option', { key: o, value: o }, o);
+                            })
+                          ),
+                          React.createElement('div', { style: { marginTop: '6px', fontSize: '12px', color: '#64748b' } },
+                            'Применяется ко всем разделам API.'
+                          )
+                        )
+                      )
+                    );
+                  }
+
+                  // For normal apiKey inputs: keep original but persist to localStorage on change
+                  const originalOnChange = props.onChange;
+                  const nextProps = Object.assign({}, props, {
+                    onChange: function(newState) {
+                      if (newState && newState.name) {
+                        setLS(K[newState.name] || (LS_PREFIX + newState.name), (newState.value || '').toString());
+                      }
+                      if (originalOnChange) originalOnChange(newState);
+                    }
+                  });
+
+                  return React.createElement(Original, nextProps);
+                }
+              }
+            }
+          }
+        };
+
+        function tagName(t) {
+          if (!t) return '';
+          if (typeof t === 'string') return t;
+          if (t.get && typeof t.get === 'function') return t.get('name') || '';
+          if (t.name) return t.name;
+          return String(t);
+        }
+
+        const TAG_ORDER = [
+          'Drivers / Auth',
+          'Drivers / Registration',
+          'Drivers / KYC',
+          'Drivers / Profile',
+          'Freelance Dispatchers / Auth',
+          'Freelance Dispatchers / Registration',
+          'Freelance Dispatchers / Profile',
+          'Admin / Auth',
+          'Admin / Companies',
+          'Cargo — Водитель',
+          'Cargo — Диспетчер, компания, админ',
+          'Chat',
+          'Calls (Voice)',
+          'Company',
+          'Reference',
+          'Reference / Drivers',
+          'Reference / Cargo',
+          'Reference / Company',
+          'Reference / Admin',
+          'Reference / Freelance Dispatchers',
+        ];
+        function tagIndex(t) {
+          const n = tagName(t);
+          const i = TAG_ORDER.indexOf(n);
+          return i === -1 ? 999 : i;
+        }
+
+        function normalizeGroup(g) {
+          if (g === 'drivers' || g === 'dispatchers' || g === 'admin' || g === 'cargo' || g === 'chat' || g === 'company' || g === 'reference') return g;
+          return 'drivers';
+        }
+
+        function getInitialGroup() {
+          // Allow quick switching by query string (?group=drivers|dispatchers|admin)
+          try {
+            const qs = new URLSearchParams(window.location.search || '');
+            const qg = qs.get('group');
+            if (qg) return normalizeGroup(qg);
+          } catch(e) {}
+          return normalizeGroup(getLS(DOCS_GROUP_KEY, 'drivers'));
+        }
+
+        function isTagInGroup(tag, group) {
+          if (!tag) return false;
+          var t = (typeof tag === 'string' ? tag : '').trim();
+          var tLower = t.toLowerCase();
+          if (group === 'drivers') return t.startsWith('Drivers /');
+          if (group === 'dispatchers') return t.startsWith('Freelance Dispatchers /');
+          if (group === 'admin') return t.startsWith('Admin /');
+          if (group === 'cargo') return t.startsWith('Cargo —');
+          if (group === 'chat') return t.startsWith('Chat') || t.startsWith('Calls');
+          if (group === 'company') return t.startsWith('Company') || tLower === 'company' || tLower.startsWith('company ');
+          if (group === 'reference') return t.startsWith('Reference');
+          return true;
+        }
+
+        function getSectionTagName(sec) {
+          const tagBtn = sec.querySelector('.opblock-tag');
+          if (!tagBtn) return (sec.querySelector('h3') && sec.querySelector('h3').textContent) || '';
+          var name = tagBtn.getAttribute('data-tag');
+          if (name) return name.trim();
+          return (tagBtn.textContent || '').trim().replace(/\s*\(\d+\)\s*$/, '');
+        }
+
+        function applyGroupFilter(group) {
+          const sections = document.querySelectorAll('#swagger-ui .opblock-tag-section');
+          sections.forEach((sec) => {
+            const t = getSectionTagName(sec);
+            sec.style.display = isTagInGroup(t, group) ? '' : 'none';
+          });
+        }
+
+        function setActiveMenu(group) {
+          document.querySelectorAll('.sarbon-topmenu .btn[data-group]').forEach((b) => {
+            b.classList.toggle('active', b.getAttribute('data-group') === group);
+          });
+        }
+
+        function setGroup(group) {
+          const g = normalizeGroup(group);
+          setLS(DOCS_GROUP_KEY, g);
+          setActiveMenu(g);
+          applyGroupFilter(g);
+        }
+
+        window.ui = SwaggerUIBundle({
+          url: '/openapi.yaml',
+          dom_id: '#swagger-ui',
+          deepLinking: true,
+          persistAuthorization: true,
+          docExpansion: 'none',
+          defaultModelsExpandDepth: -1,
+          tagsSorter: (a, b) => {
+            const ai = tagIndex(a);
+            const bi = tagIndex(b);
+            if (ai !== bi) return ai - bi;
+            const an = tagName(a).toLowerCase();
+            const bn = tagName(b).toLowerCase();
+            return an.localeCompare(bn);
+          },
+          plugins: [SarbonAuthPlugin],
+          requestInterceptor: (req) => {
+            // Failsafe: always inject required base headers from localStorage.
+            // This guarantees headers are sent even if Swagger UI didn't apply Authorize properly.
+            req.headers = req.headers || {};
+            const d = getLS(K.DeviceTypeHeader, 'web');
+            const l = getLS(K.LanguageHeader, 'ru');
+            const ct = getLS(K.ClientTokenHeader, '');
+            const ut = getLS(K.UserTokenHeader, '');
+            if (d) req.headers['X-Device-Type'] = d;
+            if (l) req.headers['X-Language'] = l;
+            if (ct) req.headers['X-Client-Token'] = ct;
+            if (ut) req.headers['X-User-Token'] = ut;
+            var uid = getLS(K.UserIDHeader, '');
+            if (uid) req.headers['X-User-ID'] = uid;
+            return req;
+          }
+        });
+
+        // Menu bindings + persist group selection
+        const initialGroup = getInitialGroup();
+        setActiveMenu(initialGroup);
+        document.querySelectorAll('.sarbon-topmenu .btn[data-group]').forEach((btn) => {
+          btn.addEventListener('click', () => setGroup(btn.getAttribute('data-group')));
+        });
+
+        // Swagger UI renders async; re-apply filter when DOM changes.
+        let filterTimer = null;
+        const mo = new MutationObserver(() => {
+          if (filterTimer) clearTimeout(filterTimer);
+          filterTimer = setTimeout(() => applyGroupFilter(getLS(DOCS_GROUP_KEY, initialGroup)), 30);
+        });
+        const root = document.getElementById('swagger-ui');
+        if (root) mo.observe(root, { childList: true, subtree: true });
+
+        // Auto-apply defaults from localStorage on page load (so refresh keeps headers)
+        try { window.ui.preauthorizeApiKey('DeviceTypeHeader', getLS(K.DeviceTypeHeader, 'web')); } catch(e) {}
+        try { window.ui.preauthorizeApiKey('LanguageHeader', getLS(K.LanguageHeader, 'ru')); } catch(e) {}
+        try { window.ui.preauthorizeApiKey('ClientTokenHeader', getLS(K.ClientTokenHeader, '')); } catch(e) {}
+        const ut = getLS(K.UserTokenHeader, '');
+        if (ut) {
+          try { window.ui.preauthorizeApiKey('UserTokenHeader', ut); } catch(e) {}
+        }
+        try { window.ui.preauthorizeApiKey('UserIDHeader', getLS(K.UserIDHeader, '')); } catch(e) {}
+
+        // Initial filter apply (after first paint)
+        setTimeout(() => setGroup(initialGroup), 0);
+      };
+    </script>
+  </body>
+</html>`
+
+const wsTestHTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sarbon — WebSocket Test</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f8fafc;color:#1e293b;padding:24px}
+    .container{max-width:860px;margin:0 auto}
+    h1{font-size:22px;margin-bottom:6px}
+    .subtitle{font-size:13px;color:#64748b;margin-bottom:20px}
+    .subtitle a{color:#3b82f6;text-decoration:none}
+    .subtitle a:hover{text-decoration:underline}
+    .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;margin-bottom:16px}
+    .card h2{font-size:15px;margin-bottom:12px;color:#334155}
+    label{display:block;font-size:13px;font-weight:500;color:#475569;margin-bottom:4px}
+    input,select{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;margin-bottom:10px;outline:none;transition:border .15s}
+    input:focus,select:focus{border-color:#3b82f6}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .row>div{flex:1;min-width:180px}
+    .actions{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
+    button{padding:9px 18px;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;transition:background .15s,box-shadow .15s}
+    .btn-connect{background:#16a34a;color:#fff}
+    .btn-connect:hover{background:#15803d}
+    .btn-disconnect{background:#dc2626;color:#fff}
+    .btn-disconnect:hover{background:#b91c1c}
+    .btn-send{background:#2563eb;color:#fff}
+    .btn-send:hover{background:#1d4ed8}
+    .btn-clear{background:#e2e8f0;color:#334155}
+    .btn-clear:hover{background:#cbd5e1}
+    .status{display:inline-block;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px}
+    .status-closed{background:#fee2e2;color:#991b1b}
+    .status-open{background:#dcfce7;color:#166534}
+    .status-connecting{background:#fef3c7;color:#92400e}
+    #log{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:14px;font-family:'Fira Code',Consolas,monospace;font-size:13px;line-height:1.6;height:340px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+    .log-in{color:#4ade80}
+    .log-out{color:#60a5fa}
+    .log-err{color:#f87171}
+    .log-info{color:#a78bfa}
+    .send-row{display:flex;gap:8px;margin-top:8px}
+    .send-row input{flex:1;margin-bottom:0}
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Sarbon WebSocket Test</h1>
+  <p class="subtitle"><a href="/docs">← Swagger Docs</a> &nbsp;|&nbsp; Chat & Calls real-time testing</p>
+
+  <div class="card">
+    <h2>Connection</h2>
+    <div class="row">
+      <div>
+        <label>Host (auto-detected)</label>
+        <input id="host" placeholder="ws://localhost:8080"/>
+      </div>
+      <div>
+        <label>Auth method</label>
+        <select id="authMethod">
+          <option value="token">JWT token (query ?token=)</option>
+          <option value="user_id">User ID (query ?user_id=)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Token / User ID</label>
+        <input id="authValue" placeholder="paste JWT or UUID"/>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>X-Device-Type</label>
+        <select id="deviceType"><option>ios</option><option>android</option><option selected>web</option></select>
+      </div>
+      <div>
+        <label>X-Language</label>
+        <select id="lang"><option>ru</option><option>uz</option><option selected>en</option><option>tr</option><option>zh</option></select>
+      </div>
+      <div>
+        <label>X-Client-Token</label>
+        <input id="clientToken" placeholder="client token"/>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn-connect" onclick="doConnect()">Connect</button>
+      <button class="btn-disconnect" onclick="doDisconnect()">Disconnect</button>
+      <span id="statusBadge" class="status status-closed">CLOSED</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Send message</h2>
+    <div class="send-row">
+      <input id="msgInput" placeholder='{"type":"typing","data":{"conversation_id":"..."}}' onkeydown="if(event.key==='Enter')doSend()"/>
+      <button class="btn-send" onclick="doSend()">Send</button>
+    </div>
+    <div style="margin-top:10px">
+      <label>Quick templates</label>
+      <div class="actions">
+        <button class="btn-clear" onclick="setMsg('typing')">typing</button>
+        <button class="btn-clear" onclick="setMsg('webrtc.offer')">webrtc.offer</button>
+        <button class="btn-clear" onclick="setMsg('webrtc.answer')">webrtc.answer</button>
+        <button class="btn-clear" onclick="setMsg('webrtc.ice')">webrtc.ice</button>
+        <button class="btn-clear" onclick="setMsg('call.end')">call.end</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <h2 style="margin-bottom:0">Log</h2>
+      <button class="btn-clear" onclick="clearLog()">Clear</button>
+    </div>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+let ws = null;
+const $ = id => document.getElementById(id);
+
+(function initHost(){
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  $('host').value = proto + location.host;
+})();
+
+function badge(state) {
+  const b = $('statusBadge');
+  b.textContent = state;
+  b.className = 'status status-' + state.toLowerCase();
+}
+
+function log(cls, prefix, text) {
+  const el = $('log');
+  const ts = new Date().toLocaleTimeString();
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = '[' + ts + '] ' + prefix + ' ' + text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function doConnect() {
+  if (ws && ws.readyState <= 1) { doDisconnect(); }
+  const host = $('host').value.replace(/\/+$/, '');
+  const method = $('authMethod').value;
+  const val = $('authValue').value.trim();
+  if (!val) { log('log-err', 'ERR', 'token / user_id is required'); return; }
+
+  const dt = $('deviceType').value;
+  const ln = $('lang').value;
+  const ct = $('clientToken').value.trim();
+
+  let url = host + '/v1/chat/ws?' + method + '=' + encodeURIComponent(val);
+  url += '&device_type=' + dt + '&language=' + ln;
+  if (ct) url += '&client_token=' + encodeURIComponent(ct);
+
+  log('log-info', 'SYS', 'connecting to ' + url);
+  badge('CONNECTING');
+
+  ws = new WebSocket(url);
+  ws.onopen = () => { badge('OPEN'); log('log-info', 'SYS', 'connected'); };
+  ws.onclose = (e) => { badge('CLOSED'); log('log-info', 'SYS', 'closed code=' + e.code + ' reason=' + (e.reason||'-')); ws = null; };
+  ws.onerror = (e) => { log('log-err', 'ERR', 'websocket error'); };
+  ws.onmessage = (e) => {
+    let text = e.data;
+    try { text = JSON.stringify(JSON.parse(e.data), null, 2); } catch(_){}
+    log('log-in', '← IN', text);
+  };
+}
+
+function doDisconnect() {
+  if (ws) { ws.close(); ws = null; }
+  badge('CLOSED');
+}
+
+function doSend() {
+  const msg = $('msgInput').value.trim();
+  if (!msg) return;
+  if (!ws || ws.readyState !== 1) { log('log-err', 'ERR', 'not connected'); return; }
+  ws.send(msg);
+  log('log-out', '→ OUT', msg);
+}
+
+function setMsg(type) {
+  const templates = {
+    'typing': '{"type":"typing","data":{"conversation_id":"CONV_ID"}}',
+    'webrtc.offer': '{"type":"webrtc.offer","data":{"call_id":"CALL_ID","payload":{"sdp":"..."}}}',
+    'webrtc.answer': '{"type":"webrtc.answer","data":{"call_id":"CALL_ID","payload":{"sdp":"..."}}}',
+    'webrtc.ice': '{"type":"webrtc.ice","data":{"call_id":"CALL_ID","payload":{"candidate":"..."}}}',
+    'call.end': '{"type":"call.end","data":{"call_id":"CALL_ID"}}'
+  };
+  $('msgInput').value = templates[type] || '';
+  $('msgInput').focus();
+}
+
+function clearLog() { $('log').innerHTML = ''; }
+</script>
+</body>
+</html>`
+
