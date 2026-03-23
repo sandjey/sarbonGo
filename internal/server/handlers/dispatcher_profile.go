@@ -261,6 +261,16 @@ func (h *DispatcherProfileHandler) GetPhoto(c *gin.Context) {
 	c.Data(http.StatusOK, contentType, data)
 }
 
+func (h *DispatcherProfileHandler) DeletePhoto(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if err := h.repo.DeletePhoto(c.Request.Context(), id); err != nil {
+		h.logger.Error("dispatcher delete photo failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	resp.OKLang(c, "photo_deleted", gin.H{"status": "ok", "event": "photo_deleted"})
+}
+
 func (h *DispatcherProfileHandler) Delete(c *gin.Context) {
 	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
 	if err := h.repo.DeleteAndArchive(c.Request.Context(), id); err != nil {

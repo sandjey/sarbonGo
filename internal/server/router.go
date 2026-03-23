@@ -319,6 +319,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.PATCH("/profile", dispProfileH.Patch)
 	dispAuthed.POST("/profile/photo", dispProfileH.UploadPhoto)
 	dispAuthed.GET("/profile/photo", dispProfileH.GetPhoto)
+	dispAuthed.DELETE("/profile/photo", dispProfileH.DeletePhoto)
 	dispAuthed.PUT("/profile/password", dispProfileH.ChangePassword)
 	dispAuthed.POST("/profile/phone-change/request", dispProfileH.PhoneChangeRequest)
 	dispAuthed.POST("/profile/phone-change/verify", dispProfileH.PhoneChangeVerify)

@@ -2629,11 +2629,19 @@ paths:
                 type: object
                 properties:
                   status: { type: string, example: "success" }
+                  code: { type: integer, example: 200 }
+                  description: { type: string, example: "Photo uploaded" }
                   data:
                     type: object
                     properties:
                       status: { type: string, example: "ok" }
                       event: { type: string, example: "photo_uploaded" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Photo uploaded", data: { status: "ok", event: "photo_uploaded" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Фото загружено", data: { status: "ok", event: "photo_uploaded" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Foto yuklandi", data: { status: "ok", event: "photo_uploaded" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Fotoğraf yüklendi", data: { status: "ok", event: "photo_uploaded" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "照片已上传", data: { status: "ok", event: "photo_uploaded" } } }
         "400": { description: "Нет файла, неверный тип или размер" }
         "401": { description: Не авторизован }
     get:
@@ -2651,6 +2659,38 @@ paths:
             image/png: { schema: { type: string, format: binary } }
         "401": { description: Не авторизован }
         "404": { description: Фото не найдено }
+    delete:
+      tags: ["Freelance Dispatchers / Profile"]
+      summary: "Удалить фото диспетчера"
+      description: |
+        Удаляет загруженное фото диспетчера из БД. После удаления has_photo = false.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200":
+          description: Фото удалено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "success" }
+                  code: { type: integer, example: 200 }
+                  description:
+                    type: string
+                    description: "Локализованное описание (зависит от X-Language)"
+                    example: "Photo deleted"
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, example: "ok" }
+                      event: { type: string, example: "photo_deleted" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Photo deleted", data: { status: "ok", event: "photo_deleted" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Фото удалено", data: { status: "ok", event: "photo_deleted" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Foto o'chirildi", data: { status: "ok", event: "photo_deleted" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Fotoğraf silindi", data: { status: "ok", event: "photo_deleted" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "照片已删除", data: { status: "ok", event: "photo_deleted" } } }
+        "401": { description: Не авторизован }
 
   /v1/dispatchers/profile/password:
     put:

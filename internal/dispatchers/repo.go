@@ -236,3 +236,9 @@ func (r *Repo) GetPhoto(ctx context.Context, id uuid.UUID) (data []byte, content
 	}
 	return data, contentType, nil
 }
+
+func (r *Repo) DeletePhoto(ctx context.Context, id uuid.UUID) error {
+	const q = `UPDATE freelance_dispatchers SET photo_data = NULL, photo_content_type = NULL, updated_at = now() WHERE id = $1`
+	_, err := r.pg.Exec(ctx, q, id)
+	return err
+}
