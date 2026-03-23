@@ -50,6 +50,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(mw.RequestLogger(logger, cfg.AppEnv == "local"))
+	terminalH := handlers.NewTerminalStreamHandler(logger)
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"*"},
@@ -64,6 +65,10 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 
 	// Swagger UI (OpenAPI served from local file)
 	swaggerui.Register(r)
+	r.GET("/terminal", terminalH.Page)
+	r.POST("/terminal/login", terminalH.Login)
+	r.GET("/terminal/logout", terminalH.Logout)
+	r.GET("/terminal/ws", terminalH.StreamWS)
 
 	// Вставка ссылки на кастомный CSS в страницы админки (тема не выводит CustomHeadHtml)
 	r.Use(goadmin.InjectCSSMiddleware())

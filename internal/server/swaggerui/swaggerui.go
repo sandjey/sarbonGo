@@ -137,6 +137,7 @@ const swaggerHTML = `<!doctype html>
       <button class="btn" data-group="cargo">Cargo API</button>
       <button class="btn" data-group="chat">Chat</button>
       <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">&#9889; WS Test</a>
+      <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">&#128187; Terminal</a>
       <button class="btn" data-group="company">Company</button>
       <button class="btn" data-group="reference">Reference</button>
     </div>

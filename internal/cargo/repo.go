@@ -2,9 +2,11 @@ package cargo
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -127,6 +129,8 @@ type RoutePointInput struct {
 	PointOrder   int  `validate:"required,min=1"`
 	IsMainLoad   bool // Первая точка load?
 	IsMainUnload bool // Последняя точка unload?
+	// PointAt — плановое время в UTC (хранится как timestamptz).
+	PointAt *time.Time
 }
 
 type PaymentInput struct {
@@ -155,14 +159,15 @@ func (r *Repo) Create(ctx context.Context, p CreateParams) (uuid.UUID, error) {
 	docJSON, _ := DocumentsToJSON(p.Documents)
 	var id uuid.UUID
 	q := `
-INSERT INTO cargo (name, weight, volume, ready_enabled, ready_at, load_comment, truck_type,
+INSERT INTO cargo (name, weight, volume, capacity_required, packaging, dimensions, photo_urls, ready_enabled, ready_at, load_comment, truck_type,
   temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
   documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, created_by_type, created_by_id, company_id, cargo_type_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, COALESCE(NULLIF(TRIM($19),''), 'PENDING_MODERATION'), now(), now(), NULL, $20, $21, $22, $23)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, COALESCE(NULLIF(TRIM($23),''), 'PENDING_MODERATION'), now(), now(), NULL, $24, $25, $26, $27)
 RETURNING id`
 	err = tx.QueryRow(ctx, q,
 		p.Name,
-		p.Weight, p.Volume, p.ReadyEnabled, p.ReadyAt, p.LoadComment, p.TruckType,
+		p.Weight, p.Volume, p.CapacityRequired, p.Packaging, p.Dimensions, p.Photos,
+		p.ReadyEnabled, p.ReadyAt, p.LoadComment, p.TruckType,
 		p.TempMin, p.TempMax, p.ADREnabled, p.ADRClass, p.LoadingTypes, p.Requirements, p.ShipmentType, p.BeltsCount,
 		docJSON, p.ContactName, p.ContactPhone, p.Status,
 		p.CreatedByType, p.CreatedByID, p.CompanyID, p.CargoTypeID,
@@ -173,9 +178,9 @@ RETURNING id`
 
 	for _, rp := range p.RoutePoints {
 		_, err = tx.Exec(ctx, `
-INSERT INTO route_points (cargo_id, type, city_code, region_code, address, orientir, lat, lng, comment, point_order, is_main_load, is_main_unload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-			id, rp.Type, emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload)
+INSERT INTO route_points (cargo_id, type, city_code, region_code, address, orientir, lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+			id, rp.Type, emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.PlaceID, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload, rp.PointAt)
 		if err != nil {
 			return uuid.Nil, err
 		}
@@ -199,7 +204,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 
 // GetByID returns cargo by id (excluding soft-deleted if needAll=false).
 func (r *Repo) GetByID(ctx context.Context, id uuid.UUID, includeDeleted bool) (*Cargo, error) {
-	q := `SELECT id, name, weight, volume, ready_enabled, ready_at, load_comment, truck_type,
+	q := `SELECT id, name, weight, volume, capacity_required, packaging, dimensions, COALESCE(photo_urls, ARRAY[]::text[]), ready_enabled, ready_at, load_comment, truck_type,
   temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
   documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, moderation_rejection_reason, created_by_type, created_by_id, company_id, cargo_type_id
 FROM cargo WHERE id = $1`
@@ -212,7 +217,7 @@ FROM cargo WHERE id = $1`
 // GetRoutePoints returns route points for a cargo.
 func (r *Repo) GetRoutePoints(ctx context.Context, cargoID uuid.UUID) ([]RoutePoint, error) {
 	rows, err := r.pg.Query(ctx, `
-SELECT id, cargo_id, type, COALESCE(city_code,''), COALESCE(region_code,''), address, COALESCE(orientir,''), lat, lng, comment, point_order, is_main_load, is_main_unload
+SELECT id, cargo_id, type, COALESCE(city_code,''), COALESCE(region_code,''), address, COALESCE(orientir,''), lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at
 FROM route_points WHERE cargo_id = $1 ORDER BY point_order`,
 		cargoID)
 	if err != nil {
@@ -222,7 +227,7 @@ FROM route_points WHERE cargo_id = $1 ORDER BY point_order`,
 	var list []RoutePoint
 	for rows.Next() {
 		var rp RoutePoint
-		err := rows.Scan(&rp.ID, &rp.CargoID, &rp.Type, &rp.CityCode, &rp.RegionCode, &rp.Address, &rp.Orientir, &rp.Lat, &rp.Lng, &rp.Comment, &rp.PointOrder, &rp.IsMainLoad, &rp.IsMainUnload)
+		err := rows.Scan(&rp.ID, &rp.CargoID, &rp.Type, &rp.CityCode, &rp.RegionCode, &rp.Address, &rp.Orientir, &rp.Lat, &rp.Lng, &rp.PlaceID, &rp.Comment, &rp.PointOrder, &rp.IsMainLoad, &rp.IsMainUnload, &rp.PointAt)
 		if err != nil {
 			return nil, err
 		}
@@ -308,8 +313,10 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 	var c Cargo
 	var docBytes []byte
 	var loadingTypes, requirements []string
+	var cap sql.NullFloat64
+	var packaging, dimensions sql.NullString
 	err := row.Scan(
-		&c.ID, &c.Name, &c.Weight, &c.Volume, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType,
+		&c.ID, &c.Name, &c.Weight, &c.Volume, &cap, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType,
 		&c.TempMin, &c.TempMax, &c.ADREnabled, &c.ADRClass, &loadingTypes, &requirements, &c.ShipmentType, &c.BeltsCount,
 		&docBytes, &c.ContactName, &c.ContactPhone, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.DeletedAt,
 		&c.ModerationRejectionReason, &c.CreatedByType, &c.CreatedByID, &c.CompanyID, &c.CargoTypeID,
@@ -319,6 +326,18 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 	}
 	c.LoadingTypes = loadingTypes
 	c.Requirements = requirements
+	if cap.Valid {
+		v := cap.Float64
+		c.CapacityRequired = &v
+	}
+	if packaging.Valid {
+		s := packaging.String
+		c.Packaging = &s
+	}
+	if dimensions.Valid {
+		s := dimensions.String
+		c.Dimensions = &s
+	}
 	if len(docBytes) > 0 {
 		c.Documents, _ = DocumentsFromJSON(docBytes)
 	}
@@ -406,7 +425,7 @@ func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
 		offset = 0
 	}
 	args = append(args, limit, offset)
-	q := `SELECT id, name, weight, volume, ready_enabled, ready_at, load_comment, truck_type,
+	q := `SELECT id, name, weight, volume, capacity_required, packaging, dimensions, COALESCE(photo_urls, ARRAY[]::text[]), ready_enabled, ready_at, load_comment, truck_type,
   temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
   documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, moderation_rejection_reason, created_by_type, created_by_id, company_id, cargo_type_id
 FROM cargo WHERE ` + where + ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(argNum) + ` OFFSET $` + strconv.Itoa(argNum+1)
@@ -509,6 +528,18 @@ func (r *Repo) Update(ctx context.Context, id uuid.UUID, p UpdateParams) error {
 	if p.Volume != nil {
 		add("volume", *p.Volume)
 	}
+	if p.CapacityRequired != nil {
+		add("capacity_required", *p.CapacityRequired)
+	}
+	if p.Packaging != nil {
+		add("packaging", *p.Packaging)
+	}
+	if p.Dimensions != nil {
+		add("dimensions", *p.Dimensions)
+	}
+	if p.Photos != nil {
+		add("photo_urls", p.Photos)
+	}
 	if p.ReadyEnabled != nil {
 		add("ready_enabled", *p.ReadyEnabled)
 	}
@@ -568,9 +599,9 @@ func (r *Repo) Update(ctx context.Context, id uuid.UUID, p UpdateParams) error {
 		_, _ = tx.Exec(ctx, "DELETE FROM route_points WHERE cargo_id = $1", id)
 		for _, rp := range p.RoutePoints {
 			_, err = tx.Exec(ctx, `
-INSERT INTO route_points (cargo_id, type, city_code, region_code, address, orientir, lat, lng, comment, point_order, is_main_load, is_main_unload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-				id, rp.Type, emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload)
+INSERT INTO route_points (cargo_id, type, city_code, region_code, address, orientir, lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+				id, rp.Type, emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.PlaceID, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload, rp.PointAt)
 			if err != nil {
 				return err
 			}
@@ -1024,7 +1055,7 @@ func (r *Repo) ListMatching(ctx context.Context, f MatchingFilter) (ListResult, 
 	}
 
 	args = append(args, limit, offset)
-	q := `SELECT id, name, weight, volume, ready_enabled, ready_at, load_comment, truck_type,
+	q := `SELECT id, name, weight, volume, capacity_required, packaging, dimensions, COALESCE(photo_urls, ARRAY[]::text[]), ready_enabled, ready_at, load_comment, truck_type,
   temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
   documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at,
   moderation_rejection_reason, created_by_type, created_by_id, company_id, cargo_type_id

@@ -54,6 +54,11 @@ type Cargo struct {
 	Name         *string
 	Weight       float64
 	Volume       float64
+	// CapacityRequired — требуемая грузоподъёмность ТС (тонны), из POST /api/cargo.
+	CapacityRequired *float64
+	Packaging        *string
+	Dimensions       *string
+	PhotoURLs        []string
 	ReadyEnabled bool
 	ReadyAt      *time.Time
 	LoadComment  *string
@@ -94,10 +99,13 @@ type RoutePoint struct {
 	Orientir     string // ориентир (что написать для водителя)
 	Lat          float64
 	Lng          float64
+	PlaceID      *string
 	Comment      *string
 	PointOrder   int
 	IsMainLoad   bool
 	IsMainUnload bool
+	// PointAt — плановая дата/время по точке (UTC в API как date).
+	PointAt *time.Time
 }
 
 // Payment model (table payments).

@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -88,6 +90,8 @@ type RoutePointReq struct {
 	PointOrder   int      `json:"point_order" binding:"required"`
 	IsMainLoad   bool     `json:"is_main_load"`
 	IsMainUnload bool     `json:"is_main_unload"`
+	// Date — плановая дата/время точки (RFC3339, хранится и отдаётся в UTC).
+	Date *string `json:"date" binding:"required"`
 }
 
 type PaymentReq struct {
@@ -116,6 +120,14 @@ func (h *CargoHandler) Create(c *gin.Context) {
 	}
 	if err := validateCargoCreate(req); err != nil {
 		h.logger.Info("cargo create validation failed", zap.Error(err))
+		resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
+			"fields": gin.H{"_": err.Error()},
+		})
+		return
+	}
+	routeInputs, err := buildRoutePointInputs(req.RoutePoints)
+	if err != nil {
+		h.logger.Info("cargo create route_points validation failed", zap.Error(err))
 		resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
 			"fields": gin.H{"_": err.Error()},
 		})
@@ -152,6 +164,7 @@ func (h *CargoHandler) Create(c *gin.Context) {
 		}
 	}
 	params := toCreateParams(req)
+	params.RoutePoints = routeInputs
 	params.CompanyID = req.CompanyID
 	// Автоматически записываем, кто создал груз: admin, dispatcher или company
 	raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken))
@@ -469,6 +482,14 @@ func (h *CargoHandler) Update(c *gin.Context) {
 		return
 	}
 	params := toUpdateParams(req)
+	if len(req.RoutePoints) > 0 {
+		rps, err := buildRoutePointInputs(req.RoutePoints)
+		if err != nil {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{"fields": gin.H{"_": err.Error()}})
+			return
+		}
+		params.RoutePoints = rps
+	}
 	if err := h.repo.Update(c.Request.Context(), id, params); err != nil {
 		if err == cargo.ErrCannotEditAfterAssigned {
 			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
@@ -769,7 +790,62 @@ func validateCargoUpdate(req UpdateCargoReq) error {
 			return errors.New("payment.remaining_type must be from reference GET /v1/reference/cargo → remaining_type")
 		}
 	}
+	if len(req.RoutePoints) > 0 {
+		for i, rp := range req.RoutePoints {
+			if rp.Date == nil || strings.TrimSpace(*rp.Date) == "" {
+				return fmt.Errorf("route_points[%d].date is required (RFC3339 UTC)", i)
+			}
+			if _, err := parseRFC3339UTC(*rp.Date); err != nil {
+				return fmt.Errorf("route_points[%d].date: %w", i, err)
+			}
+		}
+	}
 	return nil
+}
+
+// parseRFC3339UTC parses RFC3339 / RFC3339Nano and returns UTC instant.
+func parseRFC3339UTC(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, errors.New("empty")
+	}
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t, err = time.Parse(time.RFC3339, s)
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.UTC(), nil
+}
+
+func buildRoutePointInputs(points []RoutePointReq) ([]cargo.RoutePointInput, error) {
+	out := make([]cargo.RoutePointInput, 0, len(points))
+	for i, rp := range points {
+		if rp.Date == nil || strings.TrimSpace(*rp.Date) == "" {
+			return nil, fmt.Errorf("route_points[%d].date is required (RFC3339 UTC, e.g. 2026-03-23T10:45:30Z)", i)
+		}
+		pt, err := parseRFC3339UTC(*rp.Date)
+		if err != nil {
+			return nil, fmt.Errorf("route_points[%d].date must be RFC3339: %w", i, err)
+		}
+		out = append(out, cargo.RoutePointInput{
+			Type:         upperStr(rp.Type),
+			CityCode:     rp.CityCode,
+			RegionCode:   rp.RegionCode,
+			Address:      rp.Address,
+			Orientir:     rp.Orientir,
+			Lat:          rp.Lat,
+			Lng:          rp.Lng,
+			PlaceID:      rp.PlaceID,
+			Comment:      rp.Comment,
+			PointOrder:   rp.PointOrder,
+			IsMainLoad:   rp.IsMainLoad,
+			IsMainUnload: rp.IsMainUnload,
+			PointAt:      &pt,
+		})
+	}
+	return out, nil
 }
 
 func upperStr(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
@@ -818,22 +894,6 @@ func toCreateParams(req CreateCargoReq) cargo.CreateParams {
 		ContactName:      req.ContactName,
 		ContactPhone:     req.ContactPhone,
 		Status:           cargo.StatusPendingModeration, // фрилансер создаёт → модерация; админ принимает (searching) или отклоняет (rejected)
-	}
-	for _, rp := range req.RoutePoints {
-		p.RoutePoints = append(p.RoutePoints, cargo.RoutePointInput{
-			Type:         upperStr(rp.Type),
-			CityCode:     rp.CityCode,
-			RegionCode:   rp.RegionCode,
-			Address:      rp.Address,
-			Orientir:     rp.Orientir,
-			Lat:          rp.Lat,
-			Lng:          rp.Lng,
-			PlaceID:      rp.PlaceID,
-			Comment:      rp.Comment,
-			PointOrder:   rp.PointOrder,
-			IsMainLoad:   rp.IsMainLoad,
-			IsMainUnload: rp.IsMainUnload,
-		})
 	}
 	if req.Payment != nil {
 		p.Payment = &cargo.PaymentInput{
@@ -887,12 +947,6 @@ func toUpdateParams(req UpdateCargoReq) cargo.UpdateParams {
 	p.Documents = req.Documents
 	p.ContactName = req.ContactName
 	p.ContactPhone = req.ContactPhone
-	for _, rp := range req.RoutePoints {
-		p.RoutePoints = append(p.RoutePoints, cargo.RoutePointInput{
-			Type: upperStr(rp.Type), CityCode: rp.CityCode, RegionCode: rp.RegionCode, Address: rp.Address, Orientir: rp.Orientir,
-			Lat: rp.Lat, Lng: rp.Lng, Comment: rp.Comment, PointOrder: rp.PointOrder, IsMainLoad: rp.IsMainLoad, IsMainUnload: rp.IsMainUnload,
-		})
-	}
 	if req.Payment != nil {
 		p.Payment = &cargo.PaymentInput{
 			IsNegotiable: req.Payment.IsNegotiable, PriceRequest: req.Payment.PriceRequest,
@@ -916,7 +970,9 @@ func toCargoListItems(items []cargo.Cargo) []gin.H {
 
 func toCargoItem(c *cargo.Cargo) gin.H {
 	out := gin.H{
-		"id": c.ID.String(), "weight": c.Weight, "volume": c.Volume,
+		"id": c.ID.String(), "name": c.Name, "weight": c.Weight, "volume": c.Volume,
+		"capacity_required": c.CapacityRequired,
+		"packaging": c.Packaging, "dimensions": c.Dimensions, "photos": c.PhotoURLs,
 		"ready_enabled": c.ReadyEnabled, "ready_at": c.ReadyAt, "load_comment": c.LoadComment,
 		"truck_type": c.TruckType, "temp_min": c.TempMin, "temp_max": c.TempMax,
 		"adr_enabled": c.ADREnabled, "adr_class": c.ADRClass, "loading_types": c.LoadingTypes, "requirements": c.Requirements,
@@ -933,6 +989,12 @@ func toCargoItem(c *cargo.Cargo) gin.H {
 	if c.CompanyID != nil {
 		out["company_id"] = c.CompanyID.String()
 	}
+	if c.CargoTypeID != nil {
+		out["cargo_type_id"] = c.CargoTypeID.String()
+	}
+	if c.ModerationRejectionReason != nil {
+		out["moderation_rejection_reason"] = *c.ModerationRejectionReason
+	}
 	return out
 }
 
@@ -946,12 +1008,16 @@ func toCargoDetail(c *cargo.Cargo, points []cargo.RoutePoint, pay *cargo.Payment
 func toRoutePointsResp(p []cargo.RoutePoint) []gin.H {
 	out := make([]gin.H, 0, len(p))
 	for _, rp := range p {
-		out = append(out, gin.H{
-			"id": rp.ID.String(), "cargo_id": rp.CargoID.String(), "type": rp.Type,
+		item := gin.H{
+			"id": rp.ID.String(), "cargo_id": rp.CargoID.String(), "type": upperStr(rp.Type),
 			"city_code": rp.CityCode, "region_code": rp.RegionCode, "address": rp.Address, "orientir": rp.Orientir,
-			"lat": rp.Lat, "lng": rp.Lng, "comment": rp.Comment,
+			"lat": rp.Lat, "lng": rp.Lng, "place_id": rp.PlaceID, "comment": rp.Comment,
 			"point_order": rp.PointOrder, "is_main_load": rp.IsMainLoad, "is_main_unload": rp.IsMainUnload,
-		})
+		}
+		if rp.PointAt != nil {
+			item["date"] = rp.PointAt.UTC().Format(time.RFC3339)
+		}
+		out = append(out, item)
 	}
 	return out
 }

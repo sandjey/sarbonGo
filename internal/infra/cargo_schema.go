@@ -72,7 +72,11 @@ ALTER TABLE cargo
   ADD COLUMN IF NOT EXISTS created_by_type VARCHAR NULL,
   ADD COLUMN IF NOT EXISTS created_by_id UUID NULL,
   ADD COLUMN IF NOT EXISTS company_id UUID NULL,
-  ADD COLUMN IF NOT EXISTS cargo_type_id UUID NULL;
+  ADD COLUMN IF NOT EXISTS cargo_type_id UUID NULL,
+  ADD COLUMN IF NOT EXISTS capacity_required DOUBLE PRECISION NULL,
+  ADD COLUMN IF NOT EXISTS packaging VARCHAR(500) NULL,
+  ADD COLUMN IF NOT EXISTS dimensions VARCHAR(500) NULL,
+  ADD COLUMN IF NOT EXISTS photo_urls TEXT[] NULL;
 `)
 	if err != nil {
 		return err
@@ -129,6 +133,12 @@ CREATE TABLE IF NOT EXISTS route_points (
 		return err
 	}
 	if _, err := pg.Exec(ctx, `ALTER TABLE route_points ADD COLUMN IF NOT EXISTS orientir VARCHAR(500) NULL;`); err != nil {
+		return err
+	}
+	if _, err := pg.Exec(ctx, `ALTER TABLE route_points ADD COLUMN IF NOT EXISTS place_id VARCHAR(255) NULL;`); err != nil {
+		return err
+	}
+	if _, err := pg.Exec(ctx, `ALTER TABLE route_points ADD COLUMN IF NOT EXISTS point_at TIMESTAMPTZ NULL;`); err != nil {
 		return err
 	}
 	_, err = pg.Exec(ctx, `

@@ -556,6 +556,10 @@ components:
         name: { type: string, nullable: true, description: "Короткое имя/название груза (что везём), отображается в списках" }
         weight: { type: number, description: "Вес груза в тоннах (обязательно > 0)" }
         volume: { type: number, description: "Объём груза в кубических метрах (м³)" }
+        capacity_required: { type: number, nullable: true, description: "Требуемая грузоподъёмность ТС (тонны), из POST /api/cargo" }
+        packaging: { type: string, nullable: true, description: "Упаковка груза" }
+        dimensions: { type: string, nullable: true, description: "Габариты груза" }
+        photos: { type: array, items: { type: string }, nullable: true, description: "Ссылки на фото груза (как при создании)" }
         ready_enabled: { type: boolean, description: "Указана ли дата готовности груза к перевозке" }
         ready_at: { type: string, format: date-time, nullable: true, description: "Дата и время, когда груз будет готов к погрузке (обязательно при ready_enabled=true)" }
         load_comment: { type: string, nullable: true, description: "Комментарий к погрузке (особенности, условия)" }
@@ -571,13 +575,14 @@ components:
         documents: { type: object, nullable: true, description: "Требуемые документы: TIR, T1, CMR, Medbook, GLONASS, Seal, Permit (булевы флаги)" }
         contact_name: { type: string, nullable: true, description: "Имя контактного лица (грузоотправитель/получатель)" }
         contact_phone: { type: string, nullable: true, description: "Телефон контактного лица в формате +998XXXXXXXXX" }
-        status: { type: string, enum: [CREATED, PENDING_MODERATION, SEARCHING, REJECTED, ASSIGNED, IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED], description: "Статус груза (UPPERCASE). Основной поток: PENDING_MODERATION → SEARCHING → ASSIGNED → IN_PROGRESS → COMPLETED; также возможны REJECTED и CANCELLED." }
+        status: { type: string, enum: [CREATED, PENDING_MODERATION, SEARCHING_ALL, SEARCHING_COMPANY, REJECTED, ASSIGNED, IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED], description: "Статус груза (UPPERCASE). Основной поток: PENDING_MODERATION → SEARCHING_ALL/SEARCHING_COMPANY → ASSIGNED → IN_PROGRESS → COMPLETED; также возможны REJECTED и CANCELLED." }
         created_at: { type: string, format: date-time, description: "Дата и время создания записи" }
         updated_at: { type: string, format: date-time, description: "Дата и время последнего обновления" }
         created_by_type: { type: string, enum: [ADMIN, DISPATCHER, COMPANY], nullable: true, description: "Кто создал груз: ADMIN, DISPATCHER или COMPANY (подставляется автоматически по JWT или company_id)" }
         created_by_id: { type: string, format: uuid, nullable: true, description: "UUID создателя (админ, диспетчер или компания)" }
         company_id: { type: string, format: uuid, nullable: true, description: "UUID компании (должна существовать в таблице companies). Если передано — груз привязывается к компании." }
         cargo_type_id: { type: string, format: uuid, nullable: true, description: "UUID типа груза (должен существовать в cargo_types; подбор через GET /v1/reference/cargo-types/hint)" }
+        moderation_rejection_reason: { type: string, nullable: true, description: "Причина отклонения модерации (если статус REJECTED)" }
     RoutePoint:
       type: object
       description: |
@@ -591,10 +596,13 @@ components:
         cargo_id: { type: string, format: uuid, description: "UUID груза, к которому относится точка" }
         type: { type: string, enum: [LOAD, UNLOAD, CUSTOMS, TRANSIT], description: "Тип точки (UPPERCASE): LOAD, UNLOAD, CUSTOMS, TRANSIT" }
         city_code: { type: string, description: "Код города из справочника GET /v1/reference/cities (TAS, SAM, DXB и т.д.)" }
+        region_code: { type: string, description: "Код региона/области (пустая строка если не задан)" }
         address: { type: string, description: "Полный адрес: улица, дом, склад, промзона" }
         orientir: { type: string, description: "Ориентир для водителя: как найти место (въезд, КПП, рядом с чем)" }
         lat: { type: number, description: "Широта в градусах (для карты и навигации)" }
         lng: { type: number, description: "Долгота в градусах (для карты и навигации)" }
+        place_id: { type: string, nullable: true, description: "Идентификатор места из карт" }
+        date: { type: string, format: date-time, nullable: true, description: "Плановая дата/время по точке в UTC (RFC3339, например 2026-03-23T10:45:30Z). Может отсутствовать для грузов, созданных до введения этого поля." }
         comment: { type: string, nullable: true, description: "Произвольный комментарий к точке" }
         point_order: { type: integer, description: "Порядок точки в маршруте (1, 2, 3…)" }
         is_main_load: { type: boolean, description: "Является ли эта точка основной погрузкой" }
@@ -649,7 +657,7 @@ components:
       description: |
         **Тело запроса POST /api/cargo** — создание груза с точками маршрута и условиями оплаты.
 
-        **Обязательные поля:** weight (вес в тоннах, > 0), volume (объём в м³, > 0), truck_type (тип кузова из справочника GET /v1/reference/cargo, UPPERCASE: TENT, REFRIGERATOR…), **capacity_required** (требуемая грузоподъёмность ТС, > 0), route_points — массив точек маршрута. В route_points обязательно минимум одна точка с type=LOAD (погрузка) и одна с type=UNLOAD (выгрузка). У каждой точки обязательны: type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code, address, lat, lng, point_order.
+        **Обязательные поля:** weight (вес в тоннах, > 0), volume (объём в м³, > 0), truck_type (тип кузова из справочника GET /v1/reference/cargo, UPPERCASE: TENT, REFRIGERATOR…), **capacity_required** (требуемая грузоподъёмность ТС, > 0), route_points — массив точек маршрута. В route_points обязательно минимум одна точка с type=LOAD (погрузка) и одна с type=UNLOAD (выгрузка). У каждой точки обязательны: type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code, address, lat, lng, point_order, **date** (RFC3339 UTC, например `2026-03-23T10:45:30Z`).
 
         **Справочники:** города — GET /v1/reference/cities (коды TAS, SAM, DXB…); типы кузова — GET /v1/reference/cargo → truck_type.
 
@@ -751,12 +759,13 @@ components:
       description: |
         **Одна точка маршрута** при создании или редактировании груза (POST /api/cargo, PUT /api/cargo/:id).
 
-        **Обязательно:** type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code (код города из GET /v1/reference/cities), address (улица, дом, склад), lat, lng (координаты), point_order (порядок 1, 2, 3…).
+        **Обязательно:** type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code (код города из GET /v1/reference/cities), address (улица, дом, склад), lat, lng (координаты), point_order (порядок 1, 2, 3…), **date** (RFC3339 в UTC, например `2026-03-23T10:45:30Z`).
 
-        **Опционально:** orientir — подсказка для водителя, как найти место; comment; is_main_load / is_main_unload — отметить основную погрузку/выгрузку.
+        **Опционально:** orientir — подсказка для водителя, как найти место; place_id; comment; is_main_load / is_main_unload — отметить основную погрузку/выгрузку.
       properties:
         type: { type: string, enum: [LOAD, UNLOAD, CUSTOMS, TRANSIT], description: "Тип точки: LOAD — погрузка, UNLOAD — выгрузка, CUSTOMS — таможня, TRANSIT — транзит" }
         city_code: { type: string, description: "Код города из справочника GET /v1/reference/cities (TAS — Ташкент, SAM — Самарканд, DXB — Дубай и т.д.)", example: "TAS" }
+        region_code: { type: string, nullable: true, description: "Код региона/области (опционально)" }
         address: { type: string, description: "Полный адрес: улица, дом, номер склада, промзона" }
         orientir: { type: string, description: "Ориентир для водителя: с какой стороны въезд, рядом с чем, КПП", example: "склад №5, въезд с ул. Мира" }
         lat: { type: number, description: "Широта в градусах (для карты)" }
@@ -769,7 +778,12 @@ components:
         point_order: { type: integer, description: "Порядок точки в маршруте (1 — первая, 2 — вторая и т.д.)" }
         is_main_load: { type: boolean, default: false, description: "Отметить как основную точку погрузки" }
         is_main_unload: { type: boolean, default: false, description: "Отметить как основную точку выгрузки" }
-      required: [type, city_code, address, lat, lng, point_order]
+        date:
+          type: string
+          format: date-time
+          description: "Плановая дата/время точки в UTC (RFC3339), сохраняется и отдаётся в UTC"
+          example: "2026-03-23T10:45:30Z"
+      required: [type, city_code, address, lat, lng, point_order, date]
     PaymentInput:
       type: object
       description: |
@@ -832,7 +846,7 @@ paths:
         **Фриланс-диспетчер:** передайте X-User-Token (JWT после входа) — в груз запишется created_by_type=DISPATCHER.
         **Назначение:** Создание нового груза с точками маршрута и блоком оплаты.
 
-        **Логика:** В одной транзакции создаются запись в `cargo`, записи в `route_points` (все переданные точки), одна запись в `payments` (если передан блок payment). Валидация: weight > 0; минимум одна точка с type=LOAD и одна с type=UNLOAD; у каждой точки обязательны city_code (код города из справочника городов), address, lat, lng, point_order; опционально orientir. Все enum-поля (type, truck_type и т.д.) — в UPPERCASE. Справочник городов: GET /v1/reference/cities (все города мира, коды TAS/SAM/DXB и т.д.). Если указаны temp_min/temp_max — truck_type должен быть REFRIGERATOR; если adr_enabled=true — обязателен adr_class; если ready_enabled=true — обязателен ready_at.
+        **Логика:** В одной транзакции создаются запись в `cargo`, записи в `route_points` (все переданные точки), одна запись в `payments` (если передан блок payment). Валидация: weight > 0; минимум одна точка с type=LOAD и одна с type=UNLOAD; у каждой точки обязательны city_code (код города из справочника городов), address, lat, lng, point_order, **date** (RFC3339 в UTC, например `2026-03-23T10:45:30Z`); опционально orientir, place_id. Все enum-поля (type, truck_type и т.д.) — в UPPERCASE. Справочник городов: GET /v1/reference/cities (все города мира, коды TAS/SAM/DXB и т.д.). Если указаны temp_min/temp_max — truck_type должен быть REFRIGERATOR; если adr_enabled=true — обязателен adr_class; если ready_enabled=true — обязателен ready_at.
 
         **Создатель (автоматически):** Если передан заголовок **X-User-Token** (JWT) с ролью admin или dispatcher — в груз записываются created_by_type и created_by_id. Если JWT не передан, но в теле есть company_id — создателем считается компания (created_by_type=company). Опционально в теле можно передать company_id для привязки груза к компании.
 
@@ -895,6 +909,7 @@ paths:
                       point_order: 1
                       is_main_load: true
                       is_main_unload: false
+                      date: "2026-03-23T08:00:00Z"
                     - type: "UNLOAD"
                       city_code: "SAM"
                       address: "промзона Южная, терминал А"
@@ -906,6 +921,7 @@ paths:
                       point_order: 2
                       is_main_load: false
                       is_main_unload: true
+                      date: "2026-03-24T14:00:00Z"
                   payment:
                     is_negotiable: false
                     price_request: false
@@ -937,12 +953,14 @@ paths:
                       lat: 41.311081
                       lng: 69.240562
                       point_order: 1
+                      date: "2026-03-23T08:00:00Z"
                     - type: "UNLOAD"
                       city_code: "SAM"
                       address: "промзона Южная, терминал А"
                       lat: 39.654167
                       lng: 66.959722
                       point_order: 2
+                      date: "2026-03-24T14:00:00Z"
       responses:
         "201":
           description: "Груз создан. В data — полный объект груза (id, route_points, payment и все поля)."
@@ -1127,7 +1145,7 @@ paths:
           application/json:
             schema: { $ref: "#/components/schemas/CargoStatusRequest" }
             example:
-              status: "SEARCHING"
+              status: "SEARCHING_ALL"
       responses:
         "200":
           description: "Статус обновлён"
@@ -1226,8 +1244,9 @@ paths:
                         properties:
                           cargo_id: { type: string, format: uuid }
                           offer_id: { type: string, format: uuid }
-                          trip_id: { type: string, format: uuid, description: "Созданный рейс (PENDING_DRIVER)" }
-                          status: { type: string, example: "ACCEPTED" }
+                          trip_id: { type: string, format: uuid, nullable: true, description: "Созданный рейс (PENDING_DRIVER); присутствует если рейс создан" }
+                          driver_id: { type: string, format: uuid, nullable: true, description: "UUID водителя-перевозчика; присутствует если рейс создан" }
+                          status: { type: string, example: "accepted" }
         "400":
           description: "Оффер не найден или уже не PENDING"
 
@@ -3083,7 +3102,7 @@ paths:
               properties:
                 reason: { type: string }
       responses:
-        "200": { description: data.status = REJECTED }
+        "200": { description: "data.status = rejected" }
         "403": { description: not your cargo }
         "404": { description: offer not found }
   /v1/dispatchers/cargo/{id}/recommend:
@@ -3686,7 +3705,7 @@ paths:
     get:
       tags: ["Admin / Cargo moderation"]
       summary: "Список грузов на модерации"
-      description: "Грузы со статусом PENDING_MODERATION. Админ принимает (accept → SEARCHING) или отклоняет (reject → REJECTED с обязательной причиной). Ответы на 5 языках."
+      description: "Грузы со статусом PENDING_MODERATION. Админ принимает (accept → SEARCHING_ALL или SEARCHING_COMPANY) или отклоняет (reject → REJECTED с обязательной причиной). Ответы на 5 языках."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: limit
