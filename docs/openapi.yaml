@@ -647,9 +647,9 @@ components:
         created_at: { type: string, format: date-time, description: "Дата и время создания оффера" }
     CargoListResponse:
       type: object
-      description: Ответ GET /api/cargo — список грузов и общее количество для пагинации.
+      description: Ответ GET /api/cargo — список грузов с полными данными (route_points, payment) и общее количество для пагинации.
       properties:
-        items: { type: array, items: { $ref: "#/components/schemas/Cargo" }, description: Массив грузов на текущей странице }
+        items: { type: array, items: { $ref: "#/components/schemas/CargoDetailResponse" }, description: "Массив грузов на текущей странице (каждый элемент = полный объект с route_points и payment)" }
         total: { type: integer, description: Общее число записей (без лимита страницы) }
       required: [items, total]
     CargoCreateRequest:

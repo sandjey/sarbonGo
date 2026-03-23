@@ -440,8 +440,14 @@ func (h *CargoHandler) List(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
+	items := make([]gin.H, 0, len(result.Items))
+	for i := range result.Items {
+		points, _ := h.repo.GetRoutePoints(c.Request.Context(), result.Items[i].ID)
+		pay, _ := h.repo.GetPayment(c.Request.Context(), result.Items[i].ID)
+		items = append(items, toCargoDetail(&result.Items[i], points, pay))
+	}
 	resp.OKLang(c, "ok", gin.H{
-		"items": toCargoListItems(result.Items),
+		"items": items,
 		"total": result.Total,
 	})
 }
