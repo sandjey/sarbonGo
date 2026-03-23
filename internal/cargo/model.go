@@ -157,6 +157,15 @@ type CargoPhoto struct {
 	CreatedAt time.Time
 }
 
+// CargoPendingPhoto is a photo uploaded before cargo exists (cargo_pending_photos).
+type CargoPendingPhoto struct {
+	ID        uuid.UUID
+	Mime      string
+	SizeBytes int64
+	Path      string
+	CreatedAt time.Time
+}
+
 // DocumentsToJSON returns JSON bytes for DB insert/update.
 func DocumentsToJSON(d *Documents) ([]byte, error) {
 	if d == nil {

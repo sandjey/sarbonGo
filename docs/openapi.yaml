@@ -559,7 +559,7 @@ components:
         capacity_required: { type: number, nullable: true, example: 20, description: "Требуемая грузоподъёмность ТС (тонны)" }
         packaging: { type: string, nullable: true, example: "Мешки по 50 кг на паллетах", description: "Упаковка груза" }
         dimensions: { type: string, nullable: true, example: "13.6x2.45x2.7", description: "Габариты груза (ДхШхВ в метрах)" }
-        photos: { type: array, items: { type: string }, nullable: true, example: ["https://cdn.example.com/cargo/photo1.jpg", "https://cdn.example.com/cargo/photo2.jpg"], description: "Ссылки на фото груза" }
+        photos: { type: array, items: { type: string }, nullable: true, example: ["https://cdn.example.com/cargo/photo1.jpg", "/api/cargo/photos/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"], description: "Ссылки на фото: CDN URL и/или pending с POST /api/cargo/photos" }
         ready_enabled: { type: boolean, example: true, description: "Указана ли дата готовности груза к перевозке" }
         ready_at: { type: string, format: date-time, nullable: true, example: "2026-03-25T08:00:00Z", description: "Дата и время, когда груз будет готов к погрузке (обязательно при ready_enabled=true)" }
         load_comment: { type: string, nullable: true, example: "Погрузка сверху, склад сухой. Груз пшеница, мешки 50 кг.", description: "Комментарий к погрузке (особенности, условия)" }
@@ -698,7 +698,7 @@ components:
           type: array
           items: { type: string }
           nullable: true
-          description: "Фото груза (1–5 файлов, каждый до 10MB; ссылки или ID файлов)"
+          description: "До 5 элементов: внешние URL ИЛИ ссылки/UUID с POST /api/cargo/photos (`/api/cargo/photos/{uuid}` или сам uuid). После создания груза pending-фото переносятся в cargo_photos; в ответе — URL `/api/cargo/{cargo_id}/photos/{id}`. Один pending UUID не повторять."
         ready_enabled: { type: boolean, default: false, description: "Указана ли дата готовности груза к погрузке" }
         ready_at: { type: string, format: date-time, nullable: true, description: "Дата и время готовности; обязательна, если ready_enabled=true" }
         load_comment: { type: string, nullable: true, description: "Комментарий к погрузке (условия, особенности)" }
@@ -868,6 +868,12 @@ paths:
         **Что передаём:** Схема CargoCreateRequest — все поля груза (обязательные: weight, volume, truck_type, capacity_required, route_points) + опционально payment, contact_name, contact_phone, ready_enabled, ready_at, load_comment, temp_min/temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count, documents, cargo_type_id.
         **Важно:** Для фриланс‑диспетчера поле **company_id обычно не передаётся**. Если передать `company_id` — оно должно существовать в `companies`, иначе вернётся 400.
         В ответе возвращается **полный объект груза** (как в GET /api/cargo/:id): data содержит созданный груз с id, route_points, payment и всеми полями.
+
+        **Фото до появления cargo_id (без отдельного шага «создать → потом загрузить»):**
+        - **Вариант A — JSON:** поле `photos` — массив **URL** уже выложенных картинок (CDN и т.д.).
+        - **Вариант B — multipart/form-data:** `Content-Type: multipart/form-data`, обязательное текстовое поле **`data`** — строка JSON **того же состава**, что и CargoCreateRequest (как в application/json). Файлы — поле **`photos`** (можно несколько раз) или одно поле **`photo`**; макс. **5** файлов, каждый до **10 MB**, типы image/jpeg, image/png, image/webp. Сумма `len(photos в JSON) + число файлов` не больше 5. Сначала создаётся груз, затем файлы сохраняются в `cargo_photos` (как POST /api/cargo/{id}/photos).
+        - **Вариант C:** сначала `POST application/json` без файлов → в ответе `data.id`, затем `POST /api/cargo/{id}/photos` для каждого файла.
+        - **Вариант D (без cargo_id):** `POST /api/cargo/photos` (multipart, поле `photo`) → в ответе `data.url` вида `/api/cargo/photos/{uuid}` (и `data.id`). Просмотр: `GET /api/cargo/photos/{uuid}`. В `POST /api/cargo` в массиве `photos` передайте эту ссылку **или** сам UUID — после создания груза файл переносится в `cargo_photos`, в `data.photos` будут уже URL вида `/api/cargo/{cargo_id}/photos/{photo_id}`. Один и тот же pending UUID в `photos` дважды недопустим.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       requestBody:
         required: true
@@ -976,6 +982,29 @@ paths:
                       lng: 66.959722
                       point_order: 2
                       date: "2026-03-24T14:00:00Z"
+          multipart/form-data:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: string
+                  description: |
+                    JSON-строка с телом создания груза (тот же объект, что CargoCreateRequest в application/json).
+                    Пример минимального значения: скопируйте JSON из примера freelance_dispatcher выше в одну строку или многострочно в форме.
+                photos:
+                  type: array
+                  description: "Файлы изображений (повторяйте поле photos для каждого файла). Макс. 5. Альтернатива — одно поле photo."
+                  items:
+                    type: string
+                    format: binary
+                photo:
+                  type: string
+                  format: binary
+                  description: "Один файл (если не используете массив photos)"
+            encoding:
+              data:
+                contentType: text/plain
       responses:
         "201":
           description: "Груз создан. В data — полный объект груза (id, route_points, payment и все поля)."
@@ -989,6 +1018,11 @@ paths:
                       data: { $ref: "#/components/schemas/CargoDetailResponse", description: "Полный объект созданного груза (как в GET /api/cargo/:id) — id, weight, volume, route_points, payment и все остальные поля" }
         "400":
           description: "Ошибка валидации (неверные поля, нет load/unload точек и т.д.)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "500":
+          description: "Груз создан, но ошибка при сохранении вложенного фото; в data.cargo_id — id для дозагрузки через POST /api/cargo/{id}/photos"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
@@ -1264,6 +1298,63 @@ paths:
                           status: { type: string, example: "accepted" }
         "400":
           description: "Оффер не найден или уже не PENDING"
+
+  /api/cargo/photos:
+    post:
+      tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Cargo — Freelance dispatcher"]
+      summary: "Загрузить фото без cargo_id (временное)"
+      description: |
+        Загрузка фото **до** создания груза. `multipart/form-data`, поле **photo**. Макс. 10 MB; image/jpeg, image/png, image/webp.
+        В ответе `data.id` и `data.url` (`/api/cargo/photos/{id}`) — передайте одно из них в массиве `photos` при `POST /api/cargo`.
+        Просмотр файла: `GET /api/cargo/photos/{photoId}`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: "Изображение JPEG/PNG/WebP, макс. 10 MB"
+      responses:
+        "200":
+          description: "Фото сохранено как pending"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: string, format: uuid }
+                          url: { type: string, example: "/api/cargo/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+        "400":
+          description: "Нет файла, тип или размер"
+
+  /api/cargo/photos/{photoId}:
+    get:
+      tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Cargo — Freelance dispatcher"]
+      summary: "Скачать временное фото (до привязки к грузу)"
+      description: |
+        Бинарное содержимое pending-фото, загруженного через `POST /api/cargo/photos`. После успешного `POST /api/cargo` с этим id в `photos` запись удаляется — используйте URL груза.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
+      parameters:
+        - name: photoId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "Бинарное изображение"
+        "404":
+          description: "Нет такого pending-фото"
 
   /api/cargo/{id}/photos:
     get:

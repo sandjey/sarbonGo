@@ -1,9 +1,12 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,12 +30,21 @@ import (
 )
 
 const maxCargoPhotoSize = 10 * 1024 * 1024 // 10MB
+// maxCargoPhotosOnCreate — макс. число файлов за один POST /api/cargo (multipart).
+const maxCargoPhotosOnCreate = 5
 
 var allowedCargoPhotoTypes = map[string]bool{
 	"image/jpeg": true,
 	"image/png":  true,
 	"image/webp": true,
 }
+
+var (
+	errCargoPhotoTooLarge = errors.New("file too large")
+	errCargoPhotoBadType  = errors.New("disallowed image type")
+	// errDuplicatePendingCargoPhoto — одна и та же pending-фото дважды в photos[].
+	errDuplicatePendingCargoPhoto = errors.New("duplicate pending cargo photo reference")
+)
 
 type CargoHandler struct {
 	logger    *zap.Logger
@@ -54,7 +66,7 @@ type CreateCargoReq struct {
 	Volume           float64        `json:"volume" binding:"required,gt=0"` // объём груза (м³)
 	Packaging        *string        `json:"packaging"`
 	Dimensions       *string        `json:"dimensions"`
-	Photos           []string       `json:"photos"` // 1–5 ссылок/ID файлов
+	Photos           []string       `json:"photos"` // до 5: внешние URL и/или pending с POST /api/cargo/photos (url или UUID)
 	ReadyEnabled     bool           `json:"ready_enabled"`
 	ReadyAt          *string        `json:"ready_at"`
 	LoadComment      *string        `json:"load_comment"`
@@ -111,12 +123,59 @@ type PaymentReq struct {
 
 func (h *CargoHandler) Create(c *gin.Context) {
 	var req CreateCargoReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.logger.Info("cargo create validation failed (bind)", zap.Error(err))
-		resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
-			"fields": gin.H{"_": "invalid_json_or_types"},
-		})
-		return
+	var multipartPhotoFiles []*multipart.FileHeader
+
+	ct := strings.ToLower(c.ContentType())
+	if strings.Contains(ct, "multipart/form-data") {
+		// До 5 файлов × 10 MB + JSON — запас по памяти для парсера.
+		if err := c.Request.ParseMultipartForm(64 << 20); err != nil {
+			h.logger.Info("cargo create multipart parse failed", zap.Error(err))
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+				"fields": gin.H{"_": "invalid_multipart"},
+			})
+			return
+		}
+		jsonPayload := strings.TrimSpace(c.PostForm("data"))
+		if jsonPayload == "" {
+			jsonPayload = strings.TrimSpace(c.PostForm("payload"))
+		}
+		if jsonPayload == "" {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
+				"fields": gin.H{"data": "multipart_requires_json_string_field_data_or_payload"},
+			})
+			return
+		}
+		if err := json.Unmarshal([]byte(jsonPayload), &req); err != nil {
+			h.logger.Info("cargo create multipart: invalid JSON in data", zap.Error(err))
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+				"fields": gin.H{"_": "invalid_json_or_types"},
+			})
+			return
+		}
+		multipartPhotoFiles = c.Request.MultipartForm.File["photos"]
+		if len(multipartPhotoFiles) == 0 {
+			multipartPhotoFiles = c.Request.MultipartForm.File["photo"]
+		}
+		if len(multipartPhotoFiles) > maxCargoPhotosOnCreate {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
+				"fields": gin.H{"photos": fmt.Sprintf("max_%d_files_per_request", maxCargoPhotosOnCreate)},
+			})
+			return
+		}
+		if len(req.Photos)+len(multipartPhotoFiles) > maxCargoPhotosOnCreate {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
+				"fields": gin.H{"photos": fmt.Sprintf("photos_urls_plus_files_max_%d", maxCargoPhotosOnCreate)},
+			})
+			return
+		}
+	} else {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			h.logger.Info("cargo create validation failed (bind)", zap.Error(err))
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+				"fields": gin.H{"_": "invalid_json_or_types"},
+			})
+			return
+		}
 	}
 	if err := validateCargoCreate(req); err != nil {
 		h.logger.Info("cargo create validation failed", zap.Error(err))
@@ -163,7 +222,25 @@ func (h *CargoHandler) Create(c *gin.Context) {
 			return
 		}
 	}
+	externalPhotos, pendingPhotoOrder, err := h.prepareCargoCreatePhotos(c.Request.Context(), req.Photos)
+	if err != nil {
+		switch {
+		case errors.Is(err, cargo.ErrPendingCargoPhotoNotFound):
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "pending_photo_not_found", gin.H{
+				"fields": gin.H{"photos": "pending_photo_not_found"},
+			})
+		case errors.Is(err, errDuplicatePendingCargoPhoto):
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
+				"fields": gin.H{"photos": "duplicate_pending_photo_ref"},
+			})
+		default:
+			h.logger.Error("cargo create: pending photos check failed", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		}
+		return
+	}
 	params := toCreateParams(req)
+	params.Photos = externalPhotos
 	params.RoutePoints = routeInputs
 	params.CompanyID = req.CompanyID
 	// Автоматически записываем, кто создал груз: admin, dispatcher или company
@@ -202,6 +279,13 @@ func (h *CargoHandler) Create(c *gin.Context) {
 		params.CreatedByID = req.CompanyID
 		params.CompanyID = req.CompanyID
 	}
+	var uploaderID *uuid.UUID
+	if raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken)); raw != "" && h.jwtm != nil {
+		if userID, _, err := h.jwtm.ParseAccess(raw); err == nil && userID != uuid.Nil {
+			uploaderID = &userID
+		}
+	}
+
 	id, err := h.repo.Create(c.Request.Context(), params)
 	if err != nil {
 		// Turn FK violations into 400 with a clear field name.
@@ -220,6 +304,44 @@ func (h *CargoHandler) Create(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_cargo")
 		return
 	}
+	claimedPending := make(map[uuid.UUID]uuid.UUID, len(pendingPhotoOrder))
+	for _, pid := range pendingPhotoOrder {
+		newPhotoID, err := h.repo.ClaimPendingCargoPhoto(c.Request.Context(), pid, id, uploaderID)
+		if err != nil {
+			data := gin.H{"cargo_id": id.String()}
+			h.logger.Error("cargo create: claim pending photo", zap.Error(err), zap.String("cargo_id", id.String()))
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "cargo_created_pending_photo_claim_failed", data)
+			return
+		}
+		claimedPending[pid] = newPhotoID
+	}
+
+	multipartPhotoIDs := make([]uuid.UUID, 0, len(multipartPhotoFiles))
+	for _, fh := range multipartPhotoFiles {
+		photoID, err := h.saveCargoPhotoFromFileHeader(c.Request.Context(), c, id, fh)
+		if err != nil {
+			data := gin.H{"cargo_id": id.String()}
+			switch {
+			case errors.Is(err, errCargoPhotoTooLarge):
+				resp.ErrorWithDataLang(c, http.StatusBadRequest, "file_too_large", data)
+			case errors.Is(err, errCargoPhotoBadType):
+				resp.ErrorWithDataLang(c, http.StatusBadRequest, "allowed_image_types", data)
+			default:
+				h.logger.Error("cargo create: attached photo failed", zap.Error(err), zap.String("cargo_id", id.String()))
+				resp.ErrorWithDataLang(c, http.StatusInternalServerError, "cargo_created_photo_upload_failed", data)
+			}
+			return
+		}
+		multipartPhotoIDs = append(multipartPhotoIDs, photoID)
+	}
+	finalPhotoURLs := h.buildCargoPhotoURLsAfterCreate(req.Photos, id, claimedPending, multipartPhotoIDs)
+	if len(finalPhotoURLs) > 0 {
+		if err := h.repo.SetCargoPhotoURLs(c.Request.Context(), id, finalPhotoURLs); err != nil {
+			h.logger.Error("cargo create: set photo_urls", zap.Error(err), zap.String("cargo_id", id.String()))
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "cargo_created_photo_upload_failed", gin.H{"cargo_id": id.String()})
+			return
+		}
+	}
 	// Возвращаем полный объект груза (как GET /api/cargo/:id), чтобы клиент видел все сохранённые данные
 	obj, err := h.repo.GetByID(c.Request.Context(), id, false)
 	if err != nil || obj == nil {
@@ -229,6 +351,186 @@ func (h *CargoHandler) Create(c *gin.Context) {
 	points, _ := h.repo.GetRoutePoints(c.Request.Context(), id)
 	pay, _ := h.repo.GetPayment(c.Request.Context(), id)
 	resp.SuccessLang(c, http.StatusCreated, "created", toCargoDetail(obj, points, pay))
+}
+
+func (h *CargoHandler) prepareCargoCreatePhotos(ctx context.Context, photos []string) (external []string, pendingOrdered []uuid.UUID, err error) {
+	seen := make(map[uuid.UUID]struct{})
+	for _, p := range photos {
+		if pid, ok := cargo.ParsePendingCargoPhotoRef(p); ok {
+			if _, dup := seen[pid]; dup {
+				return nil, nil, errDuplicatePendingCargoPhoto
+			}
+			seen[pid] = struct{}{}
+			exists, err := h.repo.PendingCargoPhotoExists(ctx, pid)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !exists {
+				return nil, nil, cargo.ErrPendingCargoPhotoNotFound
+			}
+			pendingOrdered = append(pendingOrdered, pid)
+		} else {
+			external = append(external, p)
+		}
+	}
+	return external, pendingOrdered, nil
+}
+
+func (h *CargoHandler) buildCargoPhotoURLsAfterCreate(photos []string, cargoID uuid.UUID, claimed map[uuid.UUID]uuid.UUID, multipartIDs []uuid.UUID) []string {
+	out := make([]string, 0, len(photos)+len(multipartIDs))
+	cargoPrefix := "/api/cargo/" + cargoID.String() + "/photos/"
+	for _, p := range photos {
+		if pid, ok := cargo.ParsePendingCargoPhotoRef(p); ok {
+			if nid, ok := claimed[pid]; ok {
+				out = append(out, cargoPrefix+nid.String())
+			}
+		} else {
+			out = append(out, p)
+		}
+	}
+	for _, mid := range multipartIDs {
+		out = append(out, cargoPrefix+mid.String())
+	}
+	return out
+}
+
+func (h *CargoHandler) saveCargoPhotoFromFileHeader(ctx context.Context, c *gin.Context, cargoID uuid.UUID, file *multipart.FileHeader) (uuid.UUID, error) {
+	if file.Size > maxCargoPhotoSize {
+		return uuid.Nil, errCargoPhotoTooLarge
+	}
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+	if !allowedCargoPhotoTypes[contentType] {
+		return uuid.Nil, errCargoPhotoBadType
+	}
+	f, err := file.Open()
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	ext := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[contentType]
+	storageRoot := strings.TrimSpace(os.Getenv("CARGO_STORAGE_DIR"))
+	if storageRoot == "" {
+		storageRoot = "storage"
+	}
+	dir := filepath.Join(storageRoot, "cargo", cargoID.String(), "photos")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return uuid.Nil, err
+	}
+	photoUUID := uuid.New()
+	path := filepath.Join(dir, photoUUID.String()+ext)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return uuid.Nil, err
+	}
+	var uploaderID *uuid.UUID
+	if raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken)); raw != "" && h.jwtm != nil {
+		if userID, _, err := h.jwtm.ParseAccess(raw); err == nil && userID != uuid.Nil {
+			uploaderID = &userID
+		}
+	}
+	return h.repo.CreateCargoPhoto(ctx, cargoID, uploaderID, contentType, int64(len(data)), path)
+}
+
+func (h *CargoHandler) savePendingCargoPhotoFromFileHeader(ctx context.Context, c *gin.Context, file *multipart.FileHeader) (uuid.UUID, error) {
+	if file.Size > maxCargoPhotoSize {
+		return uuid.Nil, errCargoPhotoTooLarge
+	}
+	contentType := file.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+	if !allowedCargoPhotoTypes[contentType] {
+		return uuid.Nil, errCargoPhotoBadType
+	}
+	f, err := file.Open()
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	ext := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[contentType]
+	storageRoot := strings.TrimSpace(os.Getenv("CARGO_STORAGE_DIR"))
+	if storageRoot == "" {
+		storageRoot = "storage"
+	}
+	photoID := uuid.New()
+	dir := filepath.Join(storageRoot, "cargo", "pending")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return uuid.Nil, err
+	}
+	path := filepath.Join(dir, photoID.String()+ext)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return uuid.Nil, err
+	}
+	var uploaderID *uuid.UUID
+	if raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken)); raw != "" && h.jwtm != nil {
+		if userID, _, err := h.jwtm.ParseAccess(raw); err == nil && userID != uuid.Nil {
+			uploaderID = &userID
+		}
+	}
+	if err := h.repo.InsertPendingCargoPhoto(ctx, photoID, uploaderID, contentType, int64(len(data)), path); err != nil {
+		_ = os.Remove(path)
+		return uuid.Nil, err
+	}
+	return photoID, nil
+}
+
+// UploadPendingCargoPhoto загружает фото до создания груза (без cargo_id).
+// POST /api/cargo/photos multipart field "photo".
+func (h *CargoHandler) UploadPendingCargoPhoto(c *gin.Context) {
+	file, err := c.FormFile("photo")
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "photo_file_required")
+		return
+	}
+	photoID, err := h.savePendingCargoPhotoFromFileHeader(c.Request.Context(), c, file)
+	if err != nil {
+		if errors.Is(err, errCargoPhotoTooLarge) {
+			resp.ErrorLang(c, http.StatusBadRequest, "file_too_large")
+			return
+		}
+		if errors.Is(err, errCargoPhotoBadType) {
+			resp.ErrorLang(c, http.StatusBadRequest, "allowed_image_types")
+			return
+		}
+		h.logger.Error("pending cargo photo upload", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	resp.OKLang(c, "photo_uploaded", gin.H{
+		"id":  photoID.String(),
+		"url": "/api/cargo/photos/" + photoID.String(),
+	})
+}
+
+// GetPendingCargoPhoto отдаёт бинарник временного фото до привязки к грузу.
+// GET /api/cargo/photos/:photoId
+func (h *CargoHandler) GetPendingCargoPhoto(c *gin.Context) {
+	photoID, err := uuid.Parse(c.Param("photoId"))
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+		return
+	}
+	p, err := h.repo.GetPendingCargoPhotoByID(c.Request.Context(), photoID)
+	if err != nil || p == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
+		return
+	}
+	data, err := os.ReadFile(p.Path)
+	if err != nil {
+		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
+		return
+	}
+	c.Data(http.StatusOK, p.Mime, data)
 }
 
 // UploadPhoto uploads one cargo photo and returns photo id + url.
@@ -251,62 +553,23 @@ func (h *CargoHandler) UploadPhoto(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "photo_file_required")
 		return
 	}
-	if file.Size > maxCargoPhotoSize {
-		resp.ErrorLang(c, http.StatusBadRequest, "file_too_large")
-		return
-	}
-	contentType := file.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "image/jpeg"
-	}
-	if !allowedCargoPhotoTypes[contentType] {
-		resp.ErrorLang(c, http.StatusBadRequest, "allowed_image_types")
-		return
-	}
-	f, err := file.Open()
+	photoID, err := h.saveCargoPhotoFromFileHeader(c.Request.Context(), c, cargoID, file)
 	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "cannot_read_file")
-		return
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "cannot_read_file")
-		return
-	}
-
-	ext := map[string]string{"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[contentType]
-	storageRoot := strings.TrimSpace(os.Getenv("CARGO_STORAGE_DIR"))
-	if storageRoot == "" {
-		storageRoot = "storage"
-	}
-	dir := filepath.Join(storageRoot, "cargo", cargoID.String(), "photos")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
-		return
-	}
-	photoUUID := uuid.New()
-	path := filepath.Join(dir, photoUUID.String()+ext)
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
-		return
-	}
-
-	var uploaderID *uuid.UUID
-	if raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken)); raw != "" && h.jwtm != nil {
-		if userID, _, err := h.jwtm.ParseAccess(raw); err == nil && userID != uuid.Nil {
-			uploaderID = &userID
+		if errors.Is(err, errCargoPhotoTooLarge) {
+			resp.ErrorLang(c, http.StatusBadRequest, "file_too_large")
+			return
 		}
-	}
-	id, err := h.repo.CreateCargoPhoto(c.Request.Context(), cargoID, uploaderID, contentType, int64(len(data)), path)
-	if err != nil {
+		if errors.Is(err, errCargoPhotoBadType) {
+			resp.ErrorLang(c, http.StatusBadRequest, "allowed_image_types")
+			return
+		}
+		h.logger.Error("cargo photo upload", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-
 	resp.OKLang(c, "photo_uploaded", gin.H{
-		"id":  id.String(),
-		"url": "/api/cargo/" + cargoID.String() + "/photos/" + id.String(),
+		"id":  photoID.String(),
+		"url": "/api/cargo/" + cargoID.String() + "/photos/" + photoID.String(),
 	})
 }
 

@@ -856,6 +856,27 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Kargo oluşturulamadı",
 		"zh": "创建货物失败",
 	},
+	"cargo_created_photo_upload_failed": {
+		"en": "Cargo was created but saving a photo failed. Use POST /api/cargo/{cargo_id}/photos or delete the cargo.",
+		"ru": "Груз создан, но сохранение фото не удалось. Загрузите фото через POST /api/cargo/{id}/photos или удалите груз.",
+		"uz": "Yuk yaratildi, lekin fotoni saqlab bo'lmadi. POST /api/cargo/{id}/photos orqali yuklang yoki yukni o'chiring.",
+		"tr": "Kargo oluşturuldu ancak fotoğraf kaydedilemedi. POST /api/cargo/{id}/photos ile yükleyin veya kargoyu silin.",
+		"zh": "货物已创建但照片保存失败。请使用 POST /api/cargo/{id}/photos 上传或删除该货物。",
+	},
+	"pending_photo_not_found": {
+		"en": "Pending photo not found or already attached. Upload again via POST /api/cargo/photos.",
+		"ru": "Временное фото не найдено или уже привязано. Загрузите снова через POST /api/cargo/photos.",
+		"uz": "Kutilayotgan foto topilmadi yoki allaqachon biriktirilgan. POST /api/cargo/photos orqali qayta yuklang.",
+		"tr": "Bekleyen fotoğraf bulunamadı veya zaten bağlandı. POST /api/cargo/photos ile yeniden yükleyin.",
+		"zh": "未找到待关联的照片或已使用。请通过 POST /api/cargo/photos 重新上传。",
+	},
+	"cargo_created_pending_photo_claim_failed": {
+		"en": "Cargo was created but attaching a pre-uploaded photo failed. Check data.cargo_id or delete the cargo.",
+		"ru": "Груз создан, но привязка заранее загруженного фото не удалась. См. data.cargo_id или удалите груз.",
+		"uz": "Yuk yaratildi, lekin oldindan yuklangan fotoni biriktirish muvaffaqiyatsiz. data.cargo_id ni tekshiring yoki yukni o'chiring.",
+		"tr": "Kargo oluşturuldu ancak önceden yüklenen fotoğraf eklenemedi. data.cargo_id veya kargoyu silin.",
+		"zh": "货物已创建但关联预上传照片失败。请查看 data.cargo_id 或删除该货物。",
+	},
 	"failed_to_check_cargo_limit": {
 		"en": "Failed to check cargo limit",
 		"ru": "Ошибка проверки лимита грузов",

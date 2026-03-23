@@ -237,6 +237,9 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	// API /api/cargo (same base headers as v1)
 	api := r.Group("/api")
 	api.Use(mw.RequireBaseHeaders(cfg))
+	// До /cargo/:id — иначе Gin воспринимает "photos" как :id
+	api.POST("/cargo/photos", cargoH.UploadPendingCargoPhoto)
+	api.GET("/cargo/photos/:photoId", cargoH.GetPendingCargoPhoto)
 	api.POST("/cargo", cargoH.Create)
 	api.GET("/cargo", cargoH.List)
 	api.GET("/cargo/:id", cargoH.GetByID)
