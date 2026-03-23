@@ -879,9 +879,10 @@ paths:
               **Важно:** Перед созданием получите `cargo_type_id` через `GET /v1/reference/cargo-types/hint?q=пшеница` → `items[0].id` и вставьте в тело запроса.
             examples:
               freelance_dispatcher:
-                summary: "Freelance dispatcher (замените cargo_type_id на реальный UUID из GET /v1/reference/cargo-types/hint)"
+                summary: "Freelance dispatcher с типом груза Пшеница"
                 value:
                   name: "Пшеница, Ташкент → Самарканд, тент 20т/82м³"
+                  cargo_type_id: "e607fa35-3cb2-4e19-a80b-7056247ca2cd"
                   packaging: "Мешки по 50 кг на паллетах"
                   dimensions: "13.6x2.45x2.7"
                   photos:
@@ -949,9 +950,10 @@ paths:
                     remaining_currency: "USD"
                     remaining_type: "ON_DELIVERY"
               company:
-                summary: "Company cargo: с company_id"
+                summary: "Company cargo: с company_id и cargo_type_id"
                 value:
                   name: "Пшеница, Ташкент → Самарканд, тент 20т/82м³"
+                  cargo_type_id: "e607fa35-3cb2-4e19-a80b-7056247ca2cd"
                   weight: 20
                   volume: 82
                   truck_type: "TENT"

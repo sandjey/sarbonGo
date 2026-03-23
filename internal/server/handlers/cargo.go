@@ -899,7 +899,8 @@ func toCreateParams(req CreateCargoReq) cargo.CreateParams {
 		Documents:        req.Documents,
 		ContactName:      req.ContactName,
 		ContactPhone:     req.ContactPhone,
-		Status:           cargo.StatusPendingModeration, // фрилансер создаёт → модерация; админ принимает (searching) или отклоняет (rejected)
+		CargoTypeID:      req.CargoTypeID,
+		Status:           cargo.StatusPendingModeration,
 	}
 	if req.Payment != nil {
 		p.Payment = &cargo.PaymentInput{
