@@ -1270,17 +1270,18 @@ paths:
       tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Cargo — Freelance dispatcher"]
       summary: "10. Список фото груза"
       description: |
-        Возвращает список фото груза (метаданные + URL).
-        Используйте для отображения галереи фото в карточке груза.
+        Возвращает список всех фото груза (метаданные + URL для скачивания).
+        Каждое фото содержит id, mime-тип, размер, дату загрузки и URL для получения бинарного файла.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       parameters:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
+          description: "UUID груза"
       responses:
         "200":
-          description: "data.items — массив фото: id, mime, size_bytes, created_at, url"
+          description: "Список фото груза"
           content:
             application/json:
               schema:
@@ -1296,24 +1297,33 @@ paths:
                             items:
                               type: object
                               properties:
-                                id: { type: string, format: uuid }
+                                id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
                                 mime: { type: string, example: "image/jpeg" }
-                                size_bytes: { type: integer, format: int64 }
-                                created_at: { type: string, format: date-time }
-                                url: { type: string, description: "GET /api/cargo/{id}/photos/{photoId}" }
-        "404": { description: cargo not found }
+                                size_bytes: { type: integer, format: int64, example: 245760 }
+                                created_at: { type: string, format: date-time, example: "2026-03-23T16:00:00Z" }
+                                url: { type: string, example: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "OK", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Успешно", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Muvaffaqiyatli", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Başarılı", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "成功", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
+        "404": { description: "Груз не найден" }
     post:
       tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Cargo — Freelance dispatcher"]
       summary: "11. Загрузить фото груза"
       description: |
-        Загружает одно фото груза (макс 10MB, типы: jpeg/png/webp).
-        Возвращает `id` и `url` для скачивания.
+        Загружает одно фото груза. Файл отправляется через multipart/form-data, поле **photo**.
+        Макс. размер 10 MB. Допустимые типы: image/jpeg, image/png, image/webp.
+        Фото сохраняется на диск, в БД записываются метаданные.
+        Возвращает id фото и url для скачивания.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       parameters:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
+          description: "UUID груза"
       requestBody:
         required: true
         content:
@@ -1322,48 +1332,106 @@ paths:
               type: object
               required: [photo]
               properties:
-                photo: { type: string, format: binary }
+                photo:
+                  type: string
+                  format: binary
+                  description: "Файл изображения (JPEG, PNG или WebP, макс. 10 MB)"
       responses:
         "200":
-          description: "data = { id, url }"
-        "400": { description: invalid file/type/size }
-        "404": { description: cargo not found }
+          description: "Фото загружено"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+                          url: { type: string, example: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Photo uploaded", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Фото загружено", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Foto yuklandi", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Fotoğraf yüklendi", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "照片已上传", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+        "400":
+          description: "Нет файла, неверный тип или размер > 10MB"
+          content:
+            application/json:
+              examples:
+                no_file: { summary: "Нет файла", value: { status: "error", code: 400, description: "Missing or invalid file: use form field 'photo'", data: null } }
+                too_large: { summary: "Файл слишком большой", value: { status: "error", code: 400, description: "File too large (max 5 MB)", data: null } }
+                wrong_type: { summary: "Неверный тип", value: { status: "error", code: 400, description: "Allowed types: image/jpeg, image/png", data: null } }
+        "404": { description: "Груз не найден" }
 
   /api/cargo/{id}/photos/{photoId}:
     get:
       tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Cargo — Freelance dispatcher"]
-      summary: "12. Скачать фото груза"
-      description: "Возвращает бинарное содержимое фото по photoId."
+      summary: "12. Скачать фото груза (бинарный файл)"
+      description: |
+        Возвращает бинарное содержимое фото по photoId с заголовком Content-Type (image/jpeg, image/png или image/webp).
+        Используется для отображения фото в UI.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       parameters:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
+          description: "UUID груза"
         - name: photoId
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+          description: "UUID фото"
       responses:
-        "200": { description: "Binary image stream" }
-        "404": { description: photo not found }
+        "200":
+          description: "Бинарное содержимое изображения"
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        "404": { description: "Фото не найдено" }
     delete:
       tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Cargo — Freelance dispatcher"]
       summary: "13. Удалить фото груза"
-      description: "Удаляет фото (файл + запись в БД)."
+      description: |
+        Удаляет фото груза — файл с диска и запись из БД.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       parameters:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
+          description: "UUID груза"
         - name: photoId
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+          description: "UUID фото"
       responses:
-        "200": { description: "data.deleted = true" }
-        "404": { description: photo not found }
+        "200":
+          description: "Фото удалено"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          deleted: { type: boolean, example: true }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Photo deleted", data: { deleted: true } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Фото удалено", data: { deleted: true } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Foto o'chirildi", data: { deleted: true } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Fotoğraf silindi", data: { deleted: true } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "照片已删除", data: { deleted: true } } }
+        "404": { description: "Фото не найдено" }
 
   /api/trips:
     get:
