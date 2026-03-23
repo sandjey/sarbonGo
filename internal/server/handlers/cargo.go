@@ -997,6 +997,17 @@ func toCargoItem(c *cargo.Cargo) gin.H {
 	}
 	if c.CargoTypeID != nil {
 		out["cargo_type_id"] = c.CargoTypeID.String()
+		if c.CargoTypeCode != nil {
+			out["cargo_type"] = gin.H{
+				"id":      c.CargoTypeID.String(),
+				"code":    *c.CargoTypeCode,
+				"name_ru": derefStr(c.CargoTypeNameRU),
+				"name_uz": derefStr(c.CargoTypeNameUZ),
+				"name_en": derefStr(c.CargoTypeNameEN),
+				"name_tr": derefStr(c.CargoTypeNameTR),
+				"name_zh": derefStr(c.CargoTypeNameZH),
+			}
+		}
 	}
 	if c.ModerationRejectionReason != nil {
 		out["moderation_rejection_reason"] = *c.ModerationRejectionReason
@@ -1065,3 +1076,10 @@ func getIntQuery(c *gin.Context, key string, defaultVal int) int {
 }
 
 func strPtr(s string) *string { return &s }
+
+func derefStr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

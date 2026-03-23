@@ -86,6 +86,13 @@ type Cargo struct {
 	// От какой компании груз (опционально; при created_by_type=company совпадает с created_by_id)
 	CompanyID     *uuid.UUID
 	CargoTypeID   *uuid.UUID
+	// Denormalised from cargo_types (LEFT JOIN); nil when cargo_type_id is NULL.
+	CargoTypeCode   *string
+	CargoTypeNameRU *string
+	CargoTypeNameUZ *string
+	CargoTypeNameEN *string
+	CargoTypeNameTR *string
+	CargoTypeNameZH *string
 }
 
 // RoutePoint model (table route_points).

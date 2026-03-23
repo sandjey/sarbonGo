@@ -204,12 +204,17 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 
 // GetByID returns cargo by id (excluding soft-deleted if needAll=false).
 func (r *Repo) GetByID(ctx context.Context, id uuid.UUID, includeDeleted bool) (*Cargo, error) {
-	q := `SELECT id, name, weight, volume, capacity_required, packaging, dimensions, COALESCE(photo_urls, ARRAY[]::text[]), ready_enabled, ready_at, load_comment, truck_type,
-  temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
-  documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, moderation_rejection_reason, created_by_type, created_by_id, company_id, cargo_type_id
-FROM cargo WHERE id = $1`
+	q := `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
+  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
+  c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
+  c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
+  ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
+FROM cargo c
+LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
+WHERE c.id = $1`
 	if !includeDeleted {
-		q += ` AND deleted_at IS NULL`
+		q += ` AND c.deleted_at IS NULL`
 	}
 	return scanCargo(r.pg.QueryRow(ctx, q, id))
 }
@@ -315,11 +320,13 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 	var loadingTypes, requirements []string
 	var cap sql.NullFloat64
 	var packaging, dimensions sql.NullString
+	var ctCode, ctRU, ctUZ, ctEN, ctTR, ctZH sql.NullString
 	err := row.Scan(
 		&c.ID, &c.Name, &c.Weight, &c.Volume, &cap, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType,
 		&c.TempMin, &c.TempMax, &c.ADREnabled, &c.ADRClass, &loadingTypes, &requirements, &c.ShipmentType, &c.BeltsCount,
 		&docBytes, &c.ContactName, &c.ContactPhone, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.DeletedAt,
 		&c.ModerationRejectionReason, &c.CreatedByType, &c.CreatedByID, &c.CompanyID, &c.CargoTypeID,
+		&ctCode, &ctRU, &ctUZ, &ctEN, &ctTR, &ctZH,
 	)
 	if err != nil {
 		return nil, err
@@ -338,6 +345,14 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 		s := dimensions.String
 		c.Dimensions = &s
 	}
+	if ctCode.Valid {
+		c.CargoTypeCode = &ctCode.String
+		c.CargoTypeNameRU = &ctRU.String
+		c.CargoTypeNameUZ = &ctUZ.String
+		c.CargoTypeNameEN = &ctEN.String
+		c.CargoTypeNameTR = &ctTR.String
+		c.CargoTypeNameZH = &ctZH.String
+	}
 	if len(docBytes) > 0 {
 		c.Documents, _ = DocumentsFromJSON(docBytes)
 	}
@@ -349,57 +364,57 @@ func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	var args []any
 	var conds []string
 	argNum := 1
-	conds = append(conds, "deleted_at IS NULL")
+	conds = append(conds, "c.deleted_at IS NULL")
 
 	// When driver lists "searching" cargo, show SEARCHING_ALL + SEARCHING_COMPANY (only his company)
 	if f.ForDriverCompanyID != nil && len(f.Status) > 0 && statusListContainsSearching(f.Status) {
-		conds = append(conds, "(status = 'SEARCHING_ALL' OR (status = 'SEARCHING_COMPANY' AND company_id = $"+strconv.Itoa(argNum)+"))")
+		conds = append(conds, "(c.status = 'SEARCHING_ALL' OR (c.status = 'SEARCHING_COMPANY' AND c.company_id = $"+strconv.Itoa(argNum)+"))")
 		args = append(args, *f.ForDriverCompanyID)
 		argNum++
 	} else if len(f.Status) > 0 {
-		conds = append(conds, "status = ANY($"+strconv.Itoa(argNum)+")")
+		conds = append(conds, "c.status = ANY($"+strconv.Itoa(argNum)+")")
 		args = append(args, f.Status)
 		argNum++
 	}
 	if f.WeightMin != nil {
-		conds = append(conds, "weight >= $"+strconv.Itoa(argNum))
+		conds = append(conds, "c.weight >= $"+strconv.Itoa(argNum))
 		args = append(args, *f.WeightMin)
 		argNum++
 	}
 	if f.WeightMax != nil {
-		conds = append(conds, "weight <= $"+strconv.Itoa(argNum))
+		conds = append(conds, "c.weight <= $"+strconv.Itoa(argNum))
 		args = append(args, *f.WeightMax)
 		argNum++
 	}
 	if f.TruckType != "" {
-		conds = append(conds, "truck_type = $"+strconv.Itoa(argNum))
+		conds = append(conds, "c.truck_type = $"+strconv.Itoa(argNum))
 		args = append(args, f.TruckType)
 		argNum++
 	}
 	if f.CreatedFrom != "" {
-		conds = append(conds, "created_at::date >= $"+strconv.Itoa(argNum))
+		conds = append(conds, "c.created_at::date >= $"+strconv.Itoa(argNum))
 		args = append(args, f.CreatedFrom)
 		argNum++
 	}
 	if f.CreatedTo != "" {
-		conds = append(conds, "created_at::date <= $"+strconv.Itoa(argNum))
+		conds = append(conds, "c.created_at::date <= $"+strconv.Itoa(argNum))
 		args = append(args, f.CreatedTo)
 		argNum++
 	}
 	if f.WithOffers != nil && *f.WithOffers {
-		conds = append(conds, "EXISTS (SELECT 1 FROM offers o WHERE o.cargo_id = cargo.id)")
+		conds = append(conds, "EXISTS (SELECT 1 FROM offers o WHERE o.cargo_id = c.id)")
 	}
 
 	where := strings.Join(conds, " AND ")
 
 	// total
 	var total int
-	err := r.pg.QueryRow(ctx, "SELECT COUNT(*) FROM cargo WHERE "+where, args...).Scan(&total)
+	err := r.pg.QueryRow(ctx, "SELECT COUNT(*) FROM cargo c WHERE "+where, args...).Scan(&total)
 	if err != nil {
 		return ListResult{}, err
 	}
 
-	order := "created_at DESC"
+	order := "c.created_at DESC"
 	if f.Sort != "" {
 		parts := strings.SplitN(f.Sort, ":", 2)
 		if len(parts) == 2 {
@@ -407,7 +422,7 @@ func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
 			dir := strings.ToUpper(strings.TrimSpace(parts[1]))
 			if col == "created_at" || col == "weight" || col == "status" {
 				if dir == "ASC" || dir == "DESC" {
-					order = col + " " + dir
+					order = "c." + col + " " + dir
 				}
 			}
 		}
@@ -425,10 +440,15 @@ func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
 		offset = 0
 	}
 	args = append(args, limit, offset)
-	q := `SELECT id, name, weight, volume, capacity_required, packaging, dimensions, COALESCE(photo_urls, ARRAY[]::text[]), ready_enabled, ready_at, load_comment, truck_type,
-  temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
-  documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, moderation_rejection_reason, created_by_type, created_by_id, company_id, cargo_type_id
-FROM cargo WHERE ` + where + ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(argNum) + ` OFFSET $` + strconv.Itoa(argNum+1)
+	q := `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
+  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
+  c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
+  c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
+  ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
+FROM cargo c
+LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
+WHERE ` + where + ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(argNum) + ` OFFSET $` + strconv.Itoa(argNum+1)
 
 	rows, err := r.pg.Query(ctx, q, args...)
 	if err != nil {
@@ -920,7 +940,21 @@ func (r *Repo) ListNearby(ctx context.Context, f NearbyFilter) (NearbyResult, er
 		offset = 0
 	}
 
-	statusCond := "c.status = 'SEARCHING_ALL'"
+	// COUNT query uses its own args (no lat/lng needed).
+	countStatusCond := "c.status = 'SEARCHING_ALL'"
+	var countArgs []any
+	if f.ForDriverCompanyID != nil {
+		countStatusCond = "(c.status = 'SEARCHING_ALL' OR (c.status = 'SEARCHING_COMPANY' AND c.company_id = $1))"
+		countArgs = append(countArgs, *f.ForDriverCompanyID)
+	}
+	countWhere := "c.deleted_at IS NULL AND " + countStatusCond
+	countQ := `SELECT COUNT(*) FROM cargo c JOIN route_points rp ON rp.cargo_id = c.id AND rp.is_main_load = true WHERE ` + countWhere
+	var total int
+	if err := r.pg.QueryRow(ctx, countQ, countArgs...).Scan(&total); err != nil {
+		return NearbyResult{}, err
+	}
+
+	// Main query: lat/lng first, then optional company_id, then limit/offset.
 	var args []any
 	argN := 1
 
@@ -931,31 +965,30 @@ func (r *Repo) ListNearby(ctx context.Context, f NearbyFilter) (NearbyResult, er
 	lngArg := "$" + strconv.Itoa(argN)
 	argN++
 
+	statusCond := "c.status = 'SEARCHING_ALL'"
 	if f.ForDriverCompanyID != nil {
 		statusCond = "(c.status = 'SEARCHING_ALL' OR (c.status = 'SEARCHING_COMPANY' AND c.company_id = $" + strconv.Itoa(argN) + "))"
 		args = append(args, *f.ForDriverCompanyID)
 		argN++
 	}
 
-	distExpr := `(6371 * acos(LEAST(1.0, cos(radians(` + latArg + `)) * cos(radians(rp.lat)) * cos(radians(rp.lng) - radians(` + lngArg + `)) + sin(radians(` + latArg + `)) * sin(radians(rp.lat)))))`
+	distExpr := `(6371 * acos(GREATEST(-1.0, LEAST(1.0, cos(radians(` + latArg + `)) * cos(radians(rp.lat)) * cos(radians(rp.lng) - radians(` + lngArg + `)) + sin(radians(` + latArg + `)) * sin(radians(rp.lat))))))`
 
 	where := "c.deleted_at IS NULL AND " + statusCond
 
-	countQ := `SELECT COUNT(*) FROM cargo c JOIN route_points rp ON rp.cargo_id = c.id AND rp.is_main_load = true WHERE ` + where
-	var total int
-	if err := r.pg.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
-		return NearbyResult{}, err
-	}
-
 	args = append(args, limit, offset)
-	q := `SELECT c.id, c.name, c.weight, c.volume, c.ready_enabled, c.ready_at, c.load_comment,
+	q := `SELECT c.id, c.name, c.weight, c.volume,
+  c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.ready_enabled, c.ready_at, c.load_comment,
   c.truck_type, c.temp_min, c.temp_max, c.adr_enabled, c.adr_class,
   c.loading_types, c.requirements, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status,
   c.created_at, c.updated_at, c.deleted_at,
   c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
+  ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh,
   rp.lat, rp.lng, ` + distExpr + ` AS distance_km
 FROM cargo c
+LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
 JOIN route_points rp ON rp.cargo_id = c.id AND rp.is_main_load = true
 WHERE ` + where + `
 ORDER BY distance_km ASC
@@ -972,19 +1005,45 @@ LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 		var item NearbyItem
 		var docBytes []byte
 		var loadingTypes, requirements []string
+		var capN sql.NullFloat64
+		var packaging, dimensions sql.NullString
+		var ctCode, ctRU, ctUZ, ctEN, ctTR, ctZH sql.NullString
 		if err := rows.Scan(
-			&item.ID, &item.Name, &item.Weight, &item.Volume, &item.ReadyEnabled, &item.ReadyAt, &item.LoadComment,
+			&item.ID, &item.Name, &item.Weight, &item.Volume,
+			&capN, &packaging, &dimensions, &item.PhotoURLs,
+			&item.ReadyEnabled, &item.ReadyAt, &item.LoadComment,
 			&item.TruckType, &item.TempMin, &item.TempMax, &item.ADREnabled, &item.ADRClass,
 			&loadingTypes, &requirements, &item.ShipmentType, &item.BeltsCount,
 			&docBytes, &item.ContactName, &item.ContactPhone, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.DeletedAt,
 			&item.ModerationRejectionReason, &item.CreatedByType, &item.CreatedByID, &item.CompanyID, &item.CargoTypeID,
+			&ctCode, &ctRU, &ctUZ, &ctEN, &ctTR, &ctZH,
 			&item.OriginLat, &item.OriginLng, &item.DistanceKM,
 		); err != nil {
 			return NearbyResult{}, err
 		}
 		item.LoadingTypes = loadingTypes
 		item.Requirements = requirements
+		if capN.Valid {
+			v := capN.Float64
+			item.CapacityRequired = &v
+		}
+		if packaging.Valid {
+			s := packaging.String
+			item.Packaging = &s
+		}
+		if dimensions.Valid {
+			s := dimensions.String
+			item.Dimensions = &s
+		}
+		if ctCode.Valid {
+			item.CargoTypeCode = &ctCode.String
+			item.CargoTypeNameRU = &ctRU.String
+			item.CargoTypeNameUZ = &ctUZ.String
+			item.CargoTypeNameEN = &ctEN.String
+			item.CargoTypeNameTR = &ctTR.String
+			item.CargoTypeNameZH = &ctZH.String
+		}
 		if len(docBytes) > 0 {
 			item.Documents, _ = DocumentsFromJSON(docBytes)
 		}
@@ -1031,35 +1090,39 @@ func (r *Repo) ListMatching(ctx context.Context, f MatchingFilter) (ListResult, 
 	var args []any
 	argN := 1
 	var conds []string
-	conds = append(conds, "deleted_at IS NULL")
+	conds = append(conds, "c.deleted_at IS NULL")
 
 	if len(f.TruckTypes) > 0 {
-		conds = append(conds, "truck_type = ANY($"+strconv.Itoa(argN)+")")
+		conds = append(conds, "c.truck_type = ANY($"+strconv.Itoa(argN)+")")
 		args = append(args, f.TruckTypes)
 		argN++
 	}
 
 	if f.ForDriverCompanyID != nil {
-		conds = append(conds, "(status = 'SEARCHING_ALL' OR (status = 'SEARCHING_COMPANY' AND company_id = $"+strconv.Itoa(argN)+"))")
+		conds = append(conds, "(c.status = 'SEARCHING_ALL' OR (c.status = 'SEARCHING_COMPANY' AND c.company_id = $"+strconv.Itoa(argN)+"))")
 		args = append(args, *f.ForDriverCompanyID)
 		argN++
 	} else {
-		conds = append(conds, "status = 'SEARCHING_ALL'")
+		conds = append(conds, "c.status = 'SEARCHING_ALL'")
 	}
 
 	where := strings.Join(conds, " AND ")
 
 	var total int
-	if err := r.pg.QueryRow(ctx, "SELECT COUNT(*) FROM cargo WHERE "+where, args...).Scan(&total); err != nil {
+	if err := r.pg.QueryRow(ctx, "SELECT COUNT(*) FROM cargo c WHERE "+where, args...).Scan(&total); err != nil {
 		return ListResult{}, err
 	}
 
 	args = append(args, limit, offset)
-	q := `SELECT id, name, weight, volume, capacity_required, packaging, dimensions, COALESCE(photo_urls, ARRAY[]::text[]), ready_enabled, ready_at, load_comment, truck_type,
-  temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
-  documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at,
-  moderation_rejection_reason, created_by_type, created_by_id, company_id, cargo_type_id
-FROM cargo WHERE ` + where + ` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
+	q := `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
+  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
+  c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
+  c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
+  ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
+FROM cargo c
+LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
+WHERE ` + where + ` ORDER BY c.created_at DESC LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 
 	rows, err := r.pg.Query(ctx, q, args...)
 	if err != nil {
