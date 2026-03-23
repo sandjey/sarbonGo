@@ -988,29 +988,36 @@ func toCargoItem(c *cargo.Cargo) gin.H {
 	}
 	if c.CreatedByType != nil {
 		out["created_by_type"] = *c.CreatedByType
+	} else {
+		out["created_by_type"] = nil
 	}
 	if c.CreatedByID != nil {
 		out["created_by_id"] = c.CreatedByID.String()
+	} else {
+		out["created_by_id"] = nil
 	}
 	if c.CompanyID != nil {
 		out["company_id"] = c.CompanyID.String()
+	} else {
+		out["company_id"] = nil
 	}
-	if c.CargoTypeID != nil {
-		out["cargo_type_id"] = c.CargoTypeID.String()
-		if c.CargoTypeCode != nil {
-			out["cargo_type"] = gin.H{
-				"id":      c.CargoTypeID.String(),
-				"code":    *c.CargoTypeCode,
-				"name_ru": derefStr(c.CargoTypeNameRU),
-				"name_uz": derefStr(c.CargoTypeNameUZ),
-				"name_en": derefStr(c.CargoTypeNameEN),
-				"name_tr": derefStr(c.CargoTypeNameTR),
-				"name_zh": derefStr(c.CargoTypeNameZH),
-			}
+	if c.CargoTypeCode != nil {
+		out["cargo_type"] = gin.H{
+			"id":      c.CargoTypeID.String(),
+			"code":    *c.CargoTypeCode,
+			"name_ru": derefStr(c.CargoTypeNameRU),
+			"name_uz": derefStr(c.CargoTypeNameUZ),
+			"name_en": derefStr(c.CargoTypeNameEN),
+			"name_tr": derefStr(c.CargoTypeNameTR),
+			"name_zh": derefStr(c.CargoTypeNameZH),
 		}
+	} else {
+		out["cargo_type"] = nil
 	}
 	if c.ModerationRejectionReason != nil {
 		out["moderation_rejection_reason"] = *c.ModerationRejectionReason
+	} else {
+		out["moderation_rejection_reason"] = nil
 	}
 	return out
 }
@@ -1033,6 +1040,8 @@ func toRoutePointsResp(p []cargo.RoutePoint) []gin.H {
 		}
 		if rp.PointAt != nil {
 			item["date"] = rp.PointAt.UTC().Format(time.RFC3339)
+		} else {
+			item["date"] = nil
 		}
 		out = append(out, item)
 	}

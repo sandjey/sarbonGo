@@ -552,37 +552,52 @@ components:
 
         **Кто создал:** created_by_type (ADMIN / DISPATCHER / COMPANY) и created_by_id заполняются автоматически при создании по JWT или company_id.
       properties:
-        id: { type: string, format: uuid, description: "Уникальный идентификатор груза (UUID)" }
-        name: { type: string, nullable: true, description: "Короткое имя/название груза (что везём), отображается в списках" }
-        weight: { type: number, description: "Вес груза в тоннах (обязательно > 0)" }
-        volume: { type: number, description: "Объём груза в кубических метрах (м³)" }
-        capacity_required: { type: number, nullable: true, description: "Требуемая грузоподъёмность ТС (тонны), из POST /api/cargo" }
-        packaging: { type: string, nullable: true, description: "Упаковка груза" }
-        dimensions: { type: string, nullable: true, description: "Габариты груза" }
-        photos: { type: array, items: { type: string }, nullable: true, description: "Ссылки на фото груза (как при создании)" }
-        ready_enabled: { type: boolean, description: "Указана ли дата готовности груза к перевозке" }
-        ready_at: { type: string, format: date-time, nullable: true, description: "Дата и время, когда груз будет готов к погрузке (обязательно при ready_enabled=true)" }
-        load_comment: { type: string, nullable: true, description: "Комментарий к погрузке (особенности, условия)" }
-        truck_type: { type: string, description: "Тип кузова: TENT, REFRIGERATOR, FLATBED, TANKER, OTHER. Справочник: GET /v1/reference/cargo → truck_type" }
-        temp_min: { type: number, nullable: true, description: "Минимальная температура (°C) для рефрижератора; допустимо только при truck_type=REFRIGERATOR" }
-        temp_max: { type: number, nullable: true, description: "Максимальная температура (°C) для рефрижератора; допустимо только при truck_type=REFRIGERATOR" }
-        adr_enabled: { type: boolean, description: "Является ли груз опасным (ADR); при true обязательно указать adr_class" }
-        adr_class: { type: string, nullable: true, description: "Класс опасного груза (ADR); обязателен при adr_enabled=true" }
-        loading_types: { type: array, items: { type: string }, description: "Способы погрузки (например верхняя, боковая)" }
-        requirements: { type: array, items: { type: string }, description: "Дополнительные требования к перевозке" }
-        shipment_type: { type: string, nullable: true, description: "Тип отправки: FTL (полная загрузка), LTL (частичная) и т.д." }
-        belts_count: { type: integer, nullable: true, description: "Количество ремней крепления" }
-        documents: { type: object, nullable: true, description: "Требуемые документы: TIR, T1, CMR, Medbook, GLONASS, Seal, Permit (булевы флаги)" }
-        contact_name: { type: string, nullable: true, description: "Имя контактного лица (грузоотправитель/получатель)" }
-        contact_phone: { type: string, nullable: true, description: "Телефон контактного лица в формате +998XXXXXXXXX" }
-        status: { type: string, enum: [CREATED, PENDING_MODERATION, SEARCHING_ALL, SEARCHING_COMPANY, REJECTED, ASSIGNED, IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED], description: "Статус груза (UPPERCASE). Основной поток: PENDING_MODERATION → SEARCHING_ALL/SEARCHING_COMPANY → ASSIGNED → IN_PROGRESS → COMPLETED; также возможны REJECTED и CANCELLED." }
-        created_at: { type: string, format: date-time, description: "Дата и время создания записи" }
-        updated_at: { type: string, format: date-time, description: "Дата и время последнего обновления" }
-        created_by_type: { type: string, enum: [ADMIN, DISPATCHER, COMPANY], nullable: true, description: "Кто создал груз: ADMIN, DISPATCHER или COMPANY (подставляется автоматически по JWT или company_id)" }
-        created_by_id: { type: string, format: uuid, nullable: true, description: "UUID создателя (админ, диспетчер или компания)" }
-        company_id: { type: string, format: uuid, nullable: true, description: "UUID компании (должна существовать в таблице companies). Если передано — груз привязывается к компании." }
-        cargo_type_id: { type: string, format: uuid, nullable: true, description: "UUID типа груза (должен существовать в cargo_types; подбор через GET /v1/reference/cargo-types/hint)" }
-        moderation_rejection_reason: { type: string, nullable: true, description: "Причина отклонения модерации (если статус REJECTED)" }
+        id: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120", description: "Уникальный идентификатор груза (UUID)" }
+        name: { type: string, nullable: true, example: "Пшеница, Ташкент → Самарканд, тент 20т/82м³", description: "Короткое имя/название груза (что везём), отображается в списках" }
+        weight: { type: number, example: 20, description: "Вес груза в тоннах (обязательно > 0)" }
+        volume: { type: number, example: 82, description: "Объём груза в кубических метрах (м³)" }
+        capacity_required: { type: number, nullable: true, example: 20, description: "Требуемая грузоподъёмность ТС (тонны)" }
+        packaging: { type: string, nullable: true, example: "Мешки по 50 кг на паллетах", description: "Упаковка груза" }
+        dimensions: { type: string, nullable: true, example: "13.6x2.45x2.7", description: "Габариты груза (ДхШхВ в метрах)" }
+        photos: { type: array, items: { type: string }, nullable: true, example: ["https://cdn.example.com/cargo/photo1.jpg", "https://cdn.example.com/cargo/photo2.jpg"], description: "Ссылки на фото груза" }
+        ready_enabled: { type: boolean, example: true, description: "Указана ли дата готовности груза к перевозке" }
+        ready_at: { type: string, format: date-time, nullable: true, example: "2026-03-25T08:00:00Z", description: "Дата и время, когда груз будет готов к погрузке (обязательно при ready_enabled=true)" }
+        load_comment: { type: string, nullable: true, example: "Погрузка сверху, склад сухой. Груз пшеница, мешки 50 кг.", description: "Комментарий к погрузке (особенности, условия)" }
+        truck_type: { type: string, example: "TENT", description: "Тип кузова: TENT, REFRIGERATOR, FLATBED, TANKER, OTHER" }
+        temp_min: { type: number, nullable: true, example: null, description: "Минимальная температура (°C) для рефрижератора; допустимо только при truck_type=REFRIGERATOR" }
+        temp_max: { type: number, nullable: true, example: null, description: "Максимальная температура (°C) для рефрижератора; допустимо только при truck_type=REFRIGERATOR" }
+        adr_enabled: { type: boolean, example: false, description: "Является ли груз опасным (ADR); при true обязательно указать adr_class" }
+        adr_class: { type: string, nullable: true, example: null, description: "Класс опасного груза (ADR); обязателен при adr_enabled=true" }
+        loading_types: { type: array, items: { type: string }, example: ["TOP", "SIDE"], description: "Способы погрузки (например верхняя, боковая)" }
+        requirements: { type: array, items: { type: string }, example: ["Тент в хорошем состоянии", "Крепление ремнями"], description: "Дополнительные требования к перевозке" }
+        shipment_type: { type: string, nullable: true, example: "FTL", description: "Тип отправки: FTL (полная загрузка), LTL (частичная) и т.д." }
+        belts_count: { type: integer, nullable: true, example: 6, description: "Количество ремней крепления" }
+        documents:
+          type: object
+          nullable: true
+          description: "Требуемые документы: TIR, T1, CMR, Medbook, GLONASS, Seal, Permit (булевы флаги)"
+          example: { "TIR": true, "T1": false, "CMR": true, "Medbook": false, "GLONASS": false, "Seal": true, "Permit": false }
+        contact_name: { type: string, nullable: true, example: "Иван Петров", description: "Имя контактного лица" }
+        contact_phone: { type: string, nullable: true, example: "+998901234567", description: "Телефон контактного лица" }
+        status: { type: string, enum: [CREATED, PENDING_MODERATION, SEARCHING_ALL, SEARCHING_COMPANY, REJECTED, ASSIGNED, IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED], example: "SEARCHING_ALL", description: "Статус груза (UPPERCASE). Основной поток: PENDING_MODERATION → SEARCHING_ALL/SEARCHING_COMPANY → ASSIGNED → IN_PROGRESS → COMPLETED; также возможны REJECTED и CANCELLED." }
+        created_at: { type: string, format: date-time, example: "2026-03-23T15:51:33Z", description: "Дата и время создания записи" }
+        updated_at: { type: string, format: date-time, example: "2026-03-23T15:51:33Z", description: "Дата и время последнего обновления" }
+        created_by_type: { type: string, enum: [ADMIN, DISPATCHER, COMPANY], nullable: true, example: "DISPATCHER", description: "Кто создал груз: ADMIN, DISPATCHER или COMPANY (подставляется автоматически по JWT или company_id)" }
+        created_by_id: { type: string, format: uuid, nullable: true, example: "774e18eb-e4ef-488a-ba3a-e01cb1b41192", description: "UUID создателя (админ, диспетчер или компания)" }
+        company_id: { type: string, format: uuid, nullable: true, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", description: "UUID компании. Если передано — груз привязывается к компании." }
+        cargo_type:
+          type: object
+          nullable: true
+          description: "Объект типа груза (из таблицы cargo_types). null если при создании cargo_type_id не был указан."
+          properties:
+            id: { type: string, format: uuid, example: "d4e5f6a7-b8c9-0123-4567-890abcdef012", description: "UUID типа груза" }
+            code: { type: string, example: "PSHENITSA", description: "Код типа груза (PSHENITSA, TSEMENT, TEKSTIL и т.д.)" }
+            name_ru: { type: string, example: "Пшеница", description: "Название на русском" }
+            name_uz: { type: string, example: "Пшеница", description: "Название на узбекском" }
+            name_en: { type: string, example: "PSHENITSA", description: "Название на английском" }
+            name_tr: { type: string, example: "PSHENITSA", description: "Название на турецком" }
+            name_zh: { type: string, example: "PSHENITSA", description: "Название на китайском" }
+        moderation_rejection_reason: { type: string, nullable: true, example: null, description: "Причина отклонения модерации (если статус REJECTED)" }
     RoutePoint:
       type: object
       description: |
@@ -592,21 +607,21 @@ components:
 
         **Город:** city_code берётся из GET /v1/reference/cities (например TAS — Ташкент, SAM — Самарканд, DXB — Дубай).
       properties:
-        id: { type: string, format: uuid, description: "Уникальный идентификатор точки маршрута" }
-        cargo_id: { type: string, format: uuid, description: "UUID груза, к которому относится точка" }
-        type: { type: string, enum: [LOAD, UNLOAD, CUSTOMS, TRANSIT], description: "Тип точки (UPPERCASE): LOAD, UNLOAD, CUSTOMS, TRANSIT" }
-        city_code: { type: string, description: "Код города из справочника GET /v1/reference/cities (TAS, SAM, DXB и т.д.)" }
-        region_code: { type: string, description: "Код региона/области (пустая строка если не задан)" }
-        address: { type: string, description: "Полный адрес: улица, дом, склад, промзона" }
-        orientir: { type: string, description: "Ориентир для водителя: как найти место (въезд, КПП, рядом с чем)" }
-        lat: { type: number, description: "Широта в градусах (для карты и навигации)" }
-        lng: { type: number, description: "Долгота в градусах (для карты и навигации)" }
-        place_id: { type: string, nullable: true, description: "Идентификатор места из карт" }
-        date: { type: string, format: date-time, nullable: true, description: "Плановая дата/время по точке в UTC (RFC3339, например 2026-03-23T10:45:30Z). Может отсутствовать для грузов, созданных до введения этого поля." }
-        comment: { type: string, nullable: true, description: "Произвольный комментарий к точке" }
-        point_order: { type: integer, description: "Порядок точки в маршруте (1, 2, 3…)" }
-        is_main_load: { type: boolean, description: "Является ли эта точка основной погрузкой" }
-        is_main_unload: { type: boolean, description: "Является ли эта точка основной выгрузкой" }
+        id: { type: string, format: uuid, example: "af8be3f7-a8a4-4485-96ad-b6a96f58d015", description: "Уникальный идентификатор точки маршрута" }
+        cargo_id: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120", description: "UUID груза, к которому относится точка" }
+        type: { type: string, enum: [LOAD, UNLOAD, CUSTOMS, TRANSIT], example: "LOAD", description: "Тип точки (UPPERCASE): LOAD, UNLOAD, CUSTOMS, TRANSIT" }
+        city_code: { type: string, example: "TAS", description: "Код города из справочника GET /v1/reference/cities (TAS, SAM, DXB и т.д.)" }
+        region_code: { type: string, example: "", description: "Код региона/области (пустая строка если не задан)" }
+        address: { type: string, example: "ул. Амира Темура 1, склад №5", description: "Полный адрес: улица, дом, склад, промзона" }
+        orientir: { type: string, example: "Въезд со стороны метро Хамза, ворота А", description: "Ориентир для водителя: как найти место (въезд, КПП, рядом с чем)" }
+        lat: { type: number, example: 41.311081, description: "Широта в градусах" }
+        lng: { type: number, example: 69.240562, description: "Долгота в градусах" }
+        place_id: { type: string, nullable: true, example: "maps-tas-warehouse-5", description: "Идентификатор места из карт" }
+        date: { type: string, format: date-time, nullable: true, example: "2026-03-23T08:00:00Z", description: "Плановая дата/время по точке в UTC (RFC3339). null для старых грузов." }
+        comment: { type: string, nullable: true, example: "Склад зерна, погрузка с 08:00 до 18:00", description: "Произвольный комментарий к точке" }
+        point_order: { type: integer, example: 1, description: "Порядок точки в маршруте (1, 2, 3…)" }
+        is_main_load: { type: boolean, example: true, description: "Является ли эта точка основной погрузкой" }
+        is_main_unload: { type: boolean, example: false, description: "Является ли эта точка основной выгрузкой" }
     Payment:
       type: object
       description: |
@@ -616,20 +631,20 @@ components:
 
         **Предоплата:** with_prepayment, prepayment_amount, prepayment_currency; остаток — remaining_amount, remaining_currency.
       properties:
-        id: { type: string, format: uuid, description: "UUID записи об оплате" }
-        cargo_id: { type: string, format: uuid, description: "UUID груза" }
-        is_negotiable: { type: boolean, description: "Цена договорная (обсуждается с перевозчиком)" }
-        price_request: { type: boolean, description: "Запрос цены: true — без фиксированной суммы, перевозчик предлагает сам" }
-        total_amount: { type: number, nullable: true, description: "Общая сумма оплаты за перевозку" }
-        total_currency: { type: string, nullable: true, description: "Валюта суммы: USD, UZS и т.д." }
-        with_prepayment: { type: boolean, description: "Есть ли предоплата" }
-        without_prepayment: { type: boolean, description: "Оплата без предоплаты (полный расчёт по факту)" }
-        prepayment_amount: { type: number, nullable: true, description: "Сумма предоплаты" }
-        prepayment_currency: { type: string, nullable: true, description: "Валюта предоплаты" }
-        prepayment_type: { type: string, nullable: true, description: "Тип предоплаты (по договорённости)" }
-        remaining_amount: { type: number, nullable: true, description: "Сумма остатка к оплате" }
-        remaining_currency: { type: string, nullable: true, description: "Валюта остатка" }
-        remaining_type: { type: string, nullable: true, description: "Условия оплаты остатка" }
+        id: { type: string, format: uuid, example: "697fbbb1-1b34-41ff-9180-41f3698985e0", description: "UUID записи об оплате" }
+        cargo_id: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120", description: "UUID груза" }
+        is_negotiable: { type: boolean, example: false, description: "Цена договорная (обсуждается с перевозчиком)" }
+        price_request: { type: boolean, example: false, description: "Запрос цены: true — без фиксированной суммы, перевозчик предлагает сам" }
+        total_amount: { type: number, nullable: true, example: 1500, description: "Общая сумма оплаты за перевозку" }
+        total_currency: { type: string, nullable: true, example: "USD", description: "Валюта суммы: USD, UZS и т.д." }
+        with_prepayment: { type: boolean, example: true, description: "Есть ли предоплата" }
+        without_prepayment: { type: boolean, example: false, description: "Оплата без предоплаты (полный расчёт по факту)" }
+        prepayment_amount: { type: number, nullable: true, example: 500, description: "Сумма предоплаты" }
+        prepayment_currency: { type: string, nullable: true, example: "USD", description: "Валюта предоплаты" }
+        prepayment_type: { type: string, nullable: true, example: "BANK_TRANSFER", description: "Тип предоплаты (BANK_TRANSFER, CASH и т.д.)" }
+        remaining_amount: { type: number, nullable: true, example: 1000, description: "Сумма остатка к оплате" }
+        remaining_currency: { type: string, nullable: true, example: "USD", description: "Валюта остатка" }
+        remaining_type: { type: string, nullable: true, example: "ON_DELIVERY", description: "Условия оплаты остатка (ON_DELIVERY, AFTER_UNLOAD и т.д.)" }
     Offer:
       type: object
       description: |
@@ -637,14 +652,14 @@ components:
 
         **Статусы:** PENDING — на рассмотрении; ACCEPTED — принят (груз переходит в ASSIGNED, создаётся рейс); REJECTED — отклонён. carrier_id — ID водителя из таблицы drivers.
       properties:
-        id: { type: string, format: uuid, description: "UUID оффера" }
-        cargo_id: { type: string, format: uuid, description: "UUID груза" }
-        carrier_id: { type: string, format: uuid, description: "ID перевозчика (водителя из drivers)" }
-        price: { type: number, description: "Предложенная цена" }
-        currency: { type: string, description: "Валюта (USD, UZS и т.д.)" }
-        comment: { type: string, nullable: true, description: "Комментарий перевозчика" }
-        status: { type: string, enum: [PENDING, ACCEPTED, REJECTED], description: "Статус оффера (UPPERCASE): PENDING, ACCEPTED, REJECTED" }
-        created_at: { type: string, format: date-time, description: "Дата и время создания оффера" }
+        id: { type: string, format: uuid, example: "f1a2b3c4-d5e6-7890-abcd-ef1234567890", description: "UUID оффера" }
+        cargo_id: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120", description: "UUID груза" }
+        carrier_id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", description: "ID перевозчика (водителя из drivers)" }
+        price: { type: number, example: 1500, description: "Предложенная цена" }
+        currency: { type: string, example: "USD", description: "Валюта (USD, UZS и т.д.)" }
+        comment: { type: string, nullable: true, example: "Готов выехать завтра, своя тентовая фура", description: "Комментарий перевозчика" }
+        status: { type: string, enum: [PENDING, ACCEPTED, REJECTED], example: "PENDING", description: "Статус оффера: PENDING, ACCEPTED, REJECTED" }
+        created_at: { type: string, format: date-time, example: "2026-03-23T16:00:00Z", description: "Дата и время создания оффера" }
     CargoListResponse:
       type: object
       description: Ответ GET /api/cargo — список грузов с полными данными (route_points, payment) и общее количество для пагинации.
@@ -708,7 +723,7 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: "UUID типа груза (подбор через GET /v1/reference/cargo-types/hint)"
+          description: "UUID типа груза. Получите реальный UUID через GET /v1/reference/cargo-types/hint?q=пшеница → items[0].id"
         company_id: { type: string, format: uuid, nullable: true, description: "UUID компании, от имени которой создаётся груз (опционально)" }
         route_points:
           type: array
@@ -861,12 +876,10 @@ paths:
             schema: { $ref: "#/components/schemas/CargoCreateRequest" }
             description: |
               Примеры:
-              1) **Freelance dispatcher** (X-User-Token=dispatcher) — **без company_id** и **без cargo_type_id** (чтобы работало сразу).
-              2) **Company cargo** — с company_id (должна существовать).
-              3) Если хотите указать `cargo_type_id` — сначала получите реальный UUID через `GET /v1/reference/cargo-types/hint` и подставьте `items[].id`.
+              **Важно:** Перед созданием получите `cargo_type_id` через `GET /v1/reference/cargo-types/hint?q=пшеница` → `items[0].id` и вставьте в тело запроса.
             examples:
               freelance_dispatcher:
-                summary: "Freelance dispatcher: без company_id и cargo_type_id"
+                summary: "Freelance dispatcher (замените cargo_type_id на реальный UUID из GET /v1/reference/cargo-types/hint)"
                 value:
                   name: "Пшеница, Ташкент → Самарканд, тент 20т/82м³"
                   packaging: "Мешки по 50 кг на паллетах"
