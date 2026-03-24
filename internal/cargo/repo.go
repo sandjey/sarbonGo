@@ -45,10 +45,17 @@ func (r *Repo) CargoTypeExists(ctx context.Context, cargoTypeID uuid.UUID) (bool
 	return true, nil
 }
 
+// MaxCargoExportRows — максимум строк в одном Excel-экспорте диспетчера (без пагинации).
+const MaxCargoExportRows = 20000
+
+// ErrCargoExportTooManyRows возвращается, если отфильтрованных грузов больше MaxCargoExportRows.
+var ErrCargoExportTooManyRows = errors.New("cargo export: too many rows")
+
 // ListFilter for GET /api/cargo.
 type ListFilter struct {
 	Status             []string   // status=SEARCHING_ALL,SEARCHING_COMPANY
 	ForDriverCompanyID *uuid.UUID // when set, "searching" filter shows SEARCHING_ALL + SEARCHING_COMPANY for this company only
+	CreatedByDispatcherID *uuid.UUID // only cargo created by this dispatcher (export / «мои грузы»)
 	WeightMin          *float64
 	WeightMax          *float64
 	TruckType          string
@@ -359,12 +366,29 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 	return &c, nil
 }
 
-// List returns paginated cargo list with filters.
-func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
-	var args []any
+func cargoListSelectFrom() string {
+	return `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
+  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
+  c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
+  c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
+  ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
+FROM cargo c
+LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
+WHERE `
+}
+
+// buildCargoListWhereAndOrder строит WHERE (без префикса), аргументы и ORDER BY для списка грузов.
+func buildCargoListWhereAndOrder(f ListFilter) (where string, args []any, order string) {
 	var conds []string
 	argNum := 1
 	conds = append(conds, "c.deleted_at IS NULL")
+
+	if f.CreatedByDispatcherID != nil {
+		conds = append(conds, "UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $"+strconv.Itoa(argNum))
+		args = append(args, *f.CreatedByDispatcherID)
+		argNum++
+	}
 
 	// When driver lists "searching" cargo, show SEARCHING_ALL + SEARCHING_COMPANY (only his company)
 	if f.ForDriverCompanyID != nil && len(f.Status) > 0 && statusListContainsSearching(f.Status) {
@@ -405,16 +429,7 @@ func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
 		conds = append(conds, "EXISTS (SELECT 1 FROM offers o WHERE o.cargo_id = c.id)")
 	}
 
-	where := strings.Join(conds, " AND ")
-
-	// total
-	var total int
-	err := r.pg.QueryRow(ctx, "SELECT COUNT(*) FROM cargo c WHERE "+where, args...).Scan(&total)
-	if err != nil {
-		return ListResult{}, err
-	}
-
-	order := "c.created_at DESC"
+	order = "c.created_at DESC"
 	if f.Sort != "" {
 		parts := strings.SplitN(f.Sort, ":", 2)
 		if len(parts) == 2 {
@@ -428,6 +443,108 @@ func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
 		}
 	}
 
+	return strings.Join(conds, " AND "), args, order
+}
+
+// ListDispatcherCargoForExport — все грузы диспетчера по тем же фильтрам, что GET /api/cargo, без пагинации (до MaxCargoExportRows).
+func (r *Repo) ListDispatcherCargoForExport(ctx context.Context, dispatcherID uuid.UUID, f ListFilter) ([]Cargo, int, error) {
+	f2 := f
+	f2.CreatedByDispatcherID = &dispatcherID
+	f2.ForDriverCompanyID = nil
+
+	where, args, order := buildCargoListWhereAndOrder(f2)
+	var total int
+	if err := r.pg.QueryRow(ctx, "SELECT COUNT(*) FROM cargo c WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if total > MaxCargoExportRows {
+		return nil, total, ErrCargoExportTooManyRows
+	}
+	if total == 0 {
+		return []Cargo{}, 0, nil
+	}
+
+	limitArg := len(args) + 1
+	args2 := append(append([]any(nil), args...), total)
+	q := cargoListSelectFrom() + where + ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(limitArg)
+
+	rows, err := r.pg.Query(ctx, q, args2...)
+	if err != nil {
+		return nil, total, err
+	}
+	defer rows.Close()
+	var items []Cargo
+	for rows.Next() {
+		c, err := scanCargo(rows)
+		if err != nil {
+			return nil, total, err
+		}
+		items = append(items, *c)
+	}
+	return items, total, rows.Err()
+}
+
+// GetRoutePointsForCargoIDs загружает точки маршрута для набора грузов (для экспорта).
+func (r *Repo) GetRoutePointsForCargoIDs(ctx context.Context, cargoIDs []uuid.UUID) (map[uuid.UUID][]RoutePoint, error) {
+	out := make(map[uuid.UUID][]RoutePoint)
+	if len(cargoIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pg.Query(ctx, `
+SELECT id, cargo_id, type, COALESCE(city_code,''), COALESCE(region_code,''), address, COALESCE(orientir,''), lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at
+FROM route_points WHERE cargo_id = ANY($1::uuid[]) ORDER BY cargo_id, point_order`, cargoIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var rp RoutePoint
+		if err := rows.Scan(&rp.ID, &rp.CargoID, &rp.Type, &rp.CityCode, &rp.RegionCode, &rp.Address, &rp.Orientir, &rp.Lat, &rp.Lng, &rp.PlaceID, &rp.Comment, &rp.PointOrder, &rp.IsMainLoad, &rp.IsMainUnload, &rp.PointAt); err != nil {
+			return nil, err
+		}
+		out[rp.CargoID] = append(out[rp.CargoID], rp)
+	}
+	return out, rows.Err()
+}
+
+// GetPaymentsForCargoIDs загружает оплату для набора грузов.
+func (r *Repo) GetPaymentsForCargoIDs(ctx context.Context, cargoIDs []uuid.UUID) (map[uuid.UUID]*Payment, error) {
+	out := make(map[uuid.UUID]*Payment)
+	if len(cargoIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pg.Query(ctx, `
+SELECT id, cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment, without_prepayment,
+  prepayment_amount, prepayment_currency, prepayment_type, remaining_amount, remaining_currency, remaining_type
+FROM payments WHERE cargo_id = ANY($1::uuid[])`, cargoIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var pay Payment
+		if err := rows.Scan(
+			&pay.ID, &pay.CargoID, &pay.IsNegotiable, &pay.PriceRequest, &pay.TotalAmount, &pay.TotalCurrency,
+			&pay.WithPrepayment, &pay.WithoutPrepayment, &pay.PrepaymentAmount, &pay.PrepaymentCurrency,
+			&pay.PrepaymentType, &pay.RemainingAmount, &pay.RemainingCurrency, &pay.RemainingType); err != nil {
+			return nil, err
+		}
+		p := pay
+		out[pay.CargoID] = &p
+	}
+	return out, rows.Err()
+}
+
+// List returns paginated cargo list with filters.
+func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
+	where, args, order := buildCargoListWhereAndOrder(f)
+
+	var total int
+	err := r.pg.QueryRow(ctx, "SELECT COUNT(*) FROM cargo c WHERE "+where, args...).Scan(&total)
+	if err != nil {
+		return ListResult{}, err
+	}
+
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 20
@@ -439,16 +556,9 @@ func (r *Repo) List(ctx context.Context, f ListFilter) (ListResult, error) {
 	if offset < 0 {
 		offset = 0
 	}
+	argNum := len(args) + 1
 	args = append(args, limit, offset)
-	q := `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
-  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
-  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
-  c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
-  c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
-  ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
-FROM cargo c
-LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
-WHERE ` + where + ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(argNum) + ` OFFSET $` + strconv.Itoa(argNum+1)
+	q := cargoListSelectFrom() + where + ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(argNum) + ` OFFSET $` + strconv.Itoa(argNum+1)
 
 	rows, err := r.pg.Query(ctx, q, args...)
 	if err != nil {

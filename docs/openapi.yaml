@@ -104,7 +104,7 @@ tags:
   - name: "Freelance Dispatchers / Добавление груза"
     description: |
       **Фриланс-диспетчер универсален:** может добавить груз и искать ему водителя, либо добавить водителей и подбирать им грузы.
-      **Сценарий «сначала груз»:** POST /api/cargo — создать груз (X-User-Token диспетчера → created_by_type=DISPATCHER). После модерации груз в поиске. Водители присылают офферы (POST /api/cargo/:id/offers) или диспетчер отправляет рекомендацию (POST /v1/dispatchers/cargo/:id/recommend). Принять оффер: POST /api/offers/:id/accept (создаётся рейс). GET /api/cargo, GET /api/cargo/:id, PUT, PATCH status, GET /api/cargo/:id/offers. GET /api/trips?cargo_id=, GET /api/trips/:id.
+      **Сценарий «сначала груз»:** POST /api/cargo — создать груз (X-User-Token диспетчера → created_by_type=DISPATCHER). После модерации груз в поиске. Водители присылают офферы (POST /api/cargo/:id/offers) или диспетчер отправляет рекомендацию (POST /v1/dispatchers/cargo/:id/recommend). Принять оффер: POST /api/offers/:id/accept (создаётся рейс). GET /api/cargo, GET /api/cargo/:id, PUT, PATCH status, GET /api/cargo/:id/offers. **Экспорт «моих» грузов в Excel:** GET /v1/dispatchers/cargo/export.xlsx (те же query-фильтры, что у списка грузов; без пагинации; макс. строк см. описание эндпоинта). GET /api/trips?cargo_id=, GET /api/trips/:id.
   - name: "Freelance Dispatchers / Приглашения водителей"
     description: |
       **Добавить на себя водителя и подбирать ему грузы.** Диспетчер приглашает водителя: GET /v1/dispatchers/drivers/find?phone=... — поиск; POST /v1/dispatchers/driver-invitations (body: driver_id или phone) → token. Водитель: GET /v1/driver/driver-invitations, POST .../accept (token) или .../decline. После принятия водитель в списке GET /v1/dispatchers/drivers; диспетчер может отправлять ему рекомендации по грузам (POST /v1/dispatchers/cargo/:id/recommend).
@@ -3319,6 +3319,86 @@ paths:
         "200": { description: "data.status = rejected" }
         "403": { description: not your cargo }
         "404": { description: offer not found }
+
+  /v1/dispatchers/cargo/export.xlsx:
+    get:
+      tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Freelance Dispatchers / My drivers"]
+      summary: "Экспорт моих грузов в Excel (.xlsx)"
+      description: |
+        **Назначение:** скачать все грузы, созданные текущим диспетчером (`created_by_type=DISPATCHER`, `created_by_id` = JWT), в одном файле Microsoft Excel.
+
+        **Фильтры (query)** — те же, что у `GET /api/cargo`: `status` (через запятую), `weight_min`, `weight_max`, `truck_type`, `created_from`, `created_to` (YYYY-MM-DD), `with_offers` (true/1), `sort` (например `created_at:desc`). Без фильтров выгружаются **все** грузы диспетчера.
+
+        **Пагинация не используется:** в файл попадают все записи, подходящие под фильтры, до лимита сервера (см. ошибку 400 и поля `data.max`, `data.total`).
+
+        **Заголовки:** обязательны как у остальных методов диспетчера (`X-Device-Type`, `X-Language`, `X-Client-Token`, `X-User-Token`). Заголовки таблицы в Excel зависят от `X-Language`: **ru**, **uz**, **en**, **tr**, **zh**.
+
+        **Успешный ответ (200):** бинарный файл `.xlsx`, `Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `Content-Disposition: attachment`. Дополнительно `X-Export-Total` — число выгруженных строк.
+
+        **Описание успеха (текст для клиентов):**
+        - **en:** Excel file with all your cargo matching the filters; formatted table with header row.
+        - **ru:** Файл Excel со всеми вашими грузами по выбранным фильтрам; аккуратная таблица с шапкой.
+        - **uz:** Filtrlarga mos barcha yuklaringiz bilan Excel fayli; sarlavhali jadval.
+        - **tr:** Filtrelere uyan tüm kargolarınızı içeren Excel dosyası; başlıklı tablo.
+        - **zh:** 包含符合筛选条件的全部货物的 Excel 文件；带表头格式。
+
+        **Ошибки (JSON envelope, 5 языков):** 400 — слишком много строк (`cargo_export_too_many_rows`, `data.max`, `data.total`); 401 — нет/неверный JWT; 500 — `cargo_export_failed`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, example: "PENDING_MODERATION,SEARCHING_ALL" }
+          description: "Как у GET /api/cargo — статусы через запятую"
+        - name: weight_min
+          in: query
+          schema: { type: number }
+        - name: weight_max
+          in: query
+          schema: { type: number }
+        - name: truck_type
+          in: query
+          schema: { type: string, example: "TENT" }
+        - name: created_from
+          in: query
+          schema: { type: string, format: date }
+        - name: created_to
+          in: query
+          schema: { type: string, format: date }
+        - name: with_offers
+          in: query
+          schema: { type: boolean }
+        - name: sort
+          in: query
+          schema: { type: string, example: "created_at:desc" }
+      responses:
+        "200":
+          description: |
+            Бинарный .xlsx (не JSON). Заголовки таблицы на языке X-Language.
+            X-Export-Total — количество строк данных.
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: "Слишком много строк для экспорта (см. description key cargo_export_too_many_rows, data.max, data.total)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: English, value: { status: error, code: 400, description: "Too many cargo rows for one export. Narrow filters or increase limit. See data.max and data.total.", data: { max: 20000, total: 25000 } } }
+                ru: { summary: Русский, value: { status: error, code: 400, description: "Слишком много грузов для одной выгрузки. Сузьте фильтры. См. data.max и data.total.", data: { max: 20000, total: 25000 } } }
+                uz: { summary: "O'zbek", value: { status: error, code: 400, description: "Bitta eksport uchun juda ko'p yuk. Filtrlarni toraytiring. data.max va data.total ga qarang.", data: { max: 20000, total: 25000 } } }
+                tr: { summary: Türkçe, value: { status: error, code: 400, description: "Tek dışa aktarma için çok fazla kargo. Filtreleri daraltın. data.max ve data.total bakın.", data: { max: 20000, total: 25000 } } }
+                zh: { summary: 中文, value: { status: error, code: 400, description: "单次导出货物过多。请缩小筛选范围。见 data.max 与 data.total。", data: { max: 20000, total: 25000 } } }
+        "401":
+          description: Нет или неверный X-User-Token
+        "500":
+          description: cargo_export_failed (5 языков в теле ответа)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+
   /v1/dispatchers/cargo/{id}/recommend:
     post:
       tags: ["Freelance Dispatchers / Добавление груза", "Freelance Dispatchers / My drivers"]

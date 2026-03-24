@@ -877,6 +877,20 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Kargo oluşturuldu ancak önceden yüklenen fotoğraf eklenemedi. data.cargo_id veya kargoyu silin.",
 		"zh": "货物已创建但关联预上传照片失败。请查看 data.cargo_id 或删除该货物。",
 	},
+	"cargo_export_failed": {
+		"en": "Failed to export cargo to Excel",
+		"ru": "Не удалось выгрузить грузы в Excel",
+		"uz": "Yuklarni Excelga eksport qilib bo'lmadi",
+		"tr": "Kargolar Excel'e aktarılamadı",
+		"zh": "导出货物到 Excel 失败",
+	},
+	"cargo_export_too_many_rows": {
+		"en": "Too many cargo rows for one export. Narrow filters or increase limit. See data.max and data.total.",
+		"ru": "Слишком много грузов для одной выгрузки. Сузьте фильтры. См. data.max и data.total.",
+		"uz": "Bitta eksport uchun juda ko'p yuk. Filtrlarni toraytiring. data.max va data.total ga qarang.",
+		"tr": "Tek dışa aktarma için çok fazla kargo. Filtreleri daraltın. data.max ve data.total bakın.",
+		"zh": "单次导出货物过多。请缩小筛选范围。见 data.max 与 data.total。",
+	},
 	"failed_to_check_cargo_limit": {
 		"en": "Failed to check cargo limit",
 		"ru": "Ошибка проверки лимита грузов",

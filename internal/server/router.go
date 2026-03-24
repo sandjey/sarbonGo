@@ -145,6 +145,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	adminAuthH := handlers.NewAdminAuthHandler(logger, adminsRepo, jwtm, refreshStore)
 	adminCompaniesH := handlers.NewAdminCompaniesHandler(logger, companiesRepo, appusersRepo)
 	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, driversRepo, jwtm, cfg)
+	dispCargoExportH := handlers.NewDispatcherCargoExportHandler(logger, cargoRepo)
 	adminCargoModH := handlers.NewAdminCargoModerationHandler(logger, cargoRepo)
 	dispCompaniesH := handlers.NewDispatcherCompaniesHandler(logger, companiesRepo, dcrRepo, jwtm)
 	dispInvH := handlers.NewDispatcherInvitationsHandler(logger, dispInvRepo, dcrRepo, dispatchersRepo)
@@ -348,6 +349,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.PUT("/drivers/:driverId/trailer", driverInvH.SetDriverTrailer)
 	dispAuthed.PATCH("/trips/:id/assign-driver", tripsH.AssignDriver)
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
+	dispAuthed.GET("/cargo/export.xlsx", dispCargoExportH.ExportMyCargoExcel)
 	dispAuthed.POST("/cargo/:id/recommend", cargoRecH.Recommend)
 
 	// Company users (company_users): OTP auth, companies, invitations
