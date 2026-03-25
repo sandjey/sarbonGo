@@ -1221,6 +1221,55 @@ var apiMessages = map[string]map[string]string{
 		"tr": "isim gerekli",
 		"zh": "需要name",
 	},
+	"favorite_added": {
+		"en": "Added to favorites",
+		"ru": "Добавлено в избранное",
+		"uz": "Sevimlilarga qo'shildi",
+		"tr": "Favorilere eklendi",
+		"zh": "已添加到收藏",
+	},
+	"favorite_deleted": {
+		"en": "Removed from favorites",
+		"ru": "Удалено из избранного",
+		"uz": "Sevimlilardan olib tashlandi",
+		"tr": "Favorilerden kaldırıldı",
+		"zh": "已从收藏中移除",
+	},
+	"favorite_already_exists": {
+		"en": "Already in favorites",
+		"ru": "Уже в избранном",
+		"uz": "Allaqachon sevimlilarda",
+		"tr": "Zaten favorilerde",
+		"zh": "已在收藏中",
+	},
+	"favorite_not_found": {
+		"en": "Favorite not found",
+		"ru": "Избранное не найдено",
+		"uz": "Sevimli topilmadi",
+		"tr": "Favori bulunamadı",
+		"zh": "未找到收藏",
+	},
+	"failed_to_create_favorite": {
+		"en": "Failed to add to favorites",
+		"ru": "Ошибка добавления в избранное",
+		"uz": "Sevimlilarga qo'shishda xato",
+		"tr": "Favorilere eklenemedi",
+		"zh": "添加到收藏失败",
+	},
+	"failed_to_delete_favorite": {
+		"en": "Failed to remove from favorites",
+		"ru": "Ошибка удаления из избранного",
+		"uz": "Sevimlilardan olib tashlashda xato",
+		"tr": "Favorilerden kaldırılamadı",
+		"zh": "从收藏中移除失败",
+	},
+	"failed_to_list_favorites": {
+		"en": "Failed to list favorites",
+		"ru": "Ошибка при получении избранного",
+		"uz": "Sevimlilarni olishda xato",
+		"tr": "Favoriler listelenemedi",
+		"zh": "获取收藏失败",
+	},
 }
 
 // Msg returns localized API description for key. Fallback: en -> ru -> key.

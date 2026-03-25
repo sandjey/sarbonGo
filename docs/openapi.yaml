@@ -3425,6 +3425,421 @@ paths:
         "403": { description: not your cargo }
         "404": { description: cargo not found }
 
+  /v1/driver/favorite-cargo:
+    get:
+      tags: ["Drivers / Trips", "Cargo — Водитель"]
+      summary: "Избранные грузы"
+      description: |
+        Список грузов, добавленных текущим водителем в избранное.
+        Ответы на 5 языках (X-Language: ru, uz, en, tr, zh).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30 }
+          description: "Макс. количество элементов"
+      responses:
+        "200":
+          description: "data.items — массив избранных грузов (cargo_id, created_at, cargo)"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                cargo_id: { type: string, format: uuid }
+                                created_at: { type: string, format: date-time }
+                                cargo:
+                                  type: object
+                                  properties:
+                                    id: { type: string, format: uuid }
+                                    weight: { type: number }
+                                    volume: { type: number }
+                                    truck_type: { type: string }
+                                    status: { type: string }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "OK", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Успешно", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Muvaffaqiyatli", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Başarılı", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "成功", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+        "500":
+          description: "failed_to_list_favorites (5 языков)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "error", code: 500, description: "Failed to list favorites", data: null } }
+                ru: { summary: "Русский", value: { status: "error", code: 500, description: "Ошибка при получении избранного", data: null } }
+                uz: { summary: "O'zbek", value: { status: "error", code: 500, description: "Sevimlilarni olishda xato", data: null } }
+                tr: { summary: "Türkçe", value: { status: "error", code: 500, description: "Favoriler listelenemedi", data: null } }
+                zh: { summary: "中文", value: { status: "error", code: 500, description: "获取收藏失败", data: null } }
+    post:
+      tags: ["Drivers / Trips", "Cargo — Водитель"]
+      summary: "Добавить груз в избранное"
+      description: |
+        Добавляет `cargo_id` в избранное текущего водителя.
+        Ответы на 5 языках (X-Language).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cargo_id: { type: string, format: uuid }
+              required: [cargo_id]
+      responses:
+        "201":
+          description: "favorite_added"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 201, description: "Added to favorites", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 201, description: "Добавлено в избранное", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 201, description: "Sevimlilarga qo'shildi", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 201, description: "Favorilere eklendi", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                zh: { summary: "中文", value: { status: "success", code: 201, description: "已添加到收藏", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+        "200":
+          description: "favorite_already_exists (idempotent)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Already in favorites", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Уже в избранном", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Allaqachon sevimlilarda", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Zaten favorilerde", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "已在收藏中", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+        "400":
+          description: "invalid_payload_detail"
+        "404":
+          description: "cargo_not_found"
+        "500":
+          description: "failed_to_create_favorite (5 языков)"
+
+  /v1/driver/favorite-cargo/{cargoId}:
+    delete:
+      tags: ["Drivers / Trips", "Cargo — Водитель"]
+      summary: "Удалить груз из избранного"
+      description: |
+        Удаляет `cargoId` из избранного текущего водителя.
+        Ответы на 5 языках.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: cargoId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "favorite_deleted"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Removed from favorites", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Удалено из избранного", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Sevimlilardan olib tashlandi", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Favorilerden kaldırıldı", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "已从收藏中移除", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+        "404":
+          description: "favorite_not_found"
+        "500":
+          description: "failed_to_delete_favorite (5 языков)"
+
+  /v1/dispatchers/favorite-cargo:
+    get:
+      tags: ["Freelance Dispatchers / Добавление груза", "Freelance Dispatchers / My drivers"]
+      summary: "Избранные грузы"
+      description: |
+        Список грузов, добавленных текущим фриланс-диспетчером в избранное.
+        Ответы на 5 языках (X-Language).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30 }
+          description: "Макс. количество элементов"
+      responses:
+        "200":
+          description: "data.items — массив избранных грузов (cargo_id, created_at, cargo)"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                cargo_id: { type: string, format: uuid }
+                                created_at: { type: string, format: date-time }
+                                cargo:
+                                  type: object
+                                  properties:
+                                    id: { type: string, format: uuid }
+                                    weight: { type: number }
+                                    volume: { type: number }
+                                    truck_type: { type: string }
+                                    status: { type: string }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "OK", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Успешно", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Muvaffaqiyatli", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Başarılı", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "成功", data: { items: [{ cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", created_at: "2026-03-23T16:00:00Z", cargo: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", weight: 20, volume: 82, truck_type: "TENT", status: "SEARCHING_ALL" } }] } } }
+        "400":
+          description: "invalid driver_id/status"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "error", code: 400, description: "Invalid request body", data: null } }
+                ru: { summary: "Русский", value: { status: "error", code: 400, description: "Некорректные данные запроса", data: null } }
+                uz: { summary: "O'zbek", value: { status: "error", code: 400, description: "So'rov formati noto'g'ri", data: null } }
+                tr: { summary: "Türkçe", value: { status: "error", code: 400, description: "Geçersiz istek gövdesi", data: null } }
+                zh: { summary: "中文", value: { status: "error", code: 400, description: "请求体无效", data: null } }
+        "500":
+          description: "failed_to_list_favorites (5 языков)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "error", code: 500, description: "Failed to list favorites", data: null } }
+                ru: { summary: "Русский", value: { status: "error", code: 500, description: "Ошибка при получении избранного", data: null } }
+                uz: { summary: "O'zbek", value: { status: "error", code: 500, description: "Sevimlilarni olishda xato", data: null } }
+                tr: { summary: "Türkçe", value: { status: "error", code: 500, description: "Favoriler listelenemedi", data: null } }
+                zh: { summary: "中文", value: { status: "error", code: 500, description: "获取收藏失败", data: null } }
+
+    post:
+      tags: ["Freelance Dispatchers / Добавление груза", "Freelance Dispatchers / My drivers"]
+      summary: "Добавить груз в избранное"
+      description: |
+        Добавляет `cargo_id` в избранное текущего фриланс-диспетчера.
+        Ответы на 5 языках (X-Language).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cargo_id: { type: string, format: uuid }
+              required: [cargo_id]
+      responses:
+        "201":
+          description: "favorite_added"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 201, description: "Added to favorites", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 201, description: "Добавлено в избранное", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 201, description: "Sevimlilarga qo'shildi", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 201, description: "Favorilere eklendi", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                zh: { summary: "中文", value: { status: "success", code: 201, description: "已添加到收藏", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+        "200":
+          description: "favorite_already_exists (idempotent)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Already in favorites", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Уже в избранном", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Allaqachon sevimlilarda", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Zaten favorilerde", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "已在收藏中", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+        "400":
+          description: "invalid_payload_detail"
+        "404":
+          description: "cargo_not_found"
+        "500":
+          description: "failed_to_create_favorite (5 языков)"
+
+  /v1/dispatchers/favorite-cargo/{cargoId}:
+    delete:
+      tags: ["Freelance Dispatchers / Добавление груза", "Freelance Dispatchers / My drivers"]
+      summary: "Удалить груз из избранного"
+      description: |
+        Удаляет `cargoId` из избранного текущего фриланс-диспетчера.
+        Ответы на 5 языках.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: cargoId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "favorite_deleted"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Removed from favorites", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Удалено из избранного", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Sevimlilardan olib tashlandi", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Favorilerden kaldırıldı", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "已从收藏中移除", data: { cargo_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
+        "404":
+          description: "favorite_not_found"
+        "500":
+          description: "failed_to_delete_favorite (5 языков)"
+
+  /v1/dispatchers/favorite-drivers:
+    get:
+      tags: ["Freelance Dispatchers / My drivers"]
+      summary: "Избранные водители"
+      description: |
+        Список водителей, добавленных текущим фриланс-диспетчером в избранное.
+        Ответы на 5 языках.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30 }
+          description: "Макс. количество элементов"
+      responses:
+        "200":
+          description: "data.items — массив избранных водителей (driver_id, created_at, driver)"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                driver_id: { type: string, format: uuid }
+                                created_at: { type: string, format: date-time }
+                                driver:
+                                  type: object
+                                  properties:
+                                    id: { type: string, format: uuid }
+                                    phone: { type: string }
+                                    name: { type: string }
+                                    work_status: { type: string }
+                                    driver_type: { type: string }
+                                    rating: { type: number }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "OK", data: { items: [{ driver_id: "11111111-2222-3333-4444-555555555555", created_at: "2026-03-23T16:00:00Z", driver: { id: "11111111-2222-3333-4444-555555555555", phone: "+998901234567", name: "John", work_status: "available", driver_type: "FREELANCER", rating: 4.8 } }] } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Успешно", data: { items: [{ driver_id: "11111111-2222-3333-4444-555555555555", created_at: "2026-03-23T16:00:00Z", driver: { id: "11111111-2222-3333-4444-555555555555", phone: "+998901234567", name: "John", work_status: "available", driver_type: "FREELANCER", rating: 4.8 } }] } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Muvaffaqiyatli", data: { items: [{ driver_id: "11111111-2222-3333-4444-555555555555", created_at: "2026-03-23T16:00:00Z", driver: { id: "11111111-2222-3333-4444-555555555555", phone: "+998901234567", name: "John", work_status: "available", driver_type: "FREELANCER", rating: 4.8 } }] } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Başarılı", data: { items: [{ driver_id: "11111111-2222-3333-4444-555555555555", created_at: "2026-03-23T16:00:00Z", driver: { id: "11111111-2222-3333-4444-555555555555", phone: "+998901234567", name: "John", work_status: "available", driver_type: "FREELANCER", rating: 4.8 } }] } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "成功", data: { items: [{ driver_id: "11111111-2222-3333-4444-555555555555", created_at: "2026-03-23T16:00:00Z", driver: { id: "11111111-2222-3333-4444-555555555555", phone: "+998901234567", name: "John", work_status: "available", driver_type: "FREELANCER", rating: 4.8 } }] } } }
+        "500":
+          description: "failed_to_list_favorites (5 языков)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "error", code: 500, description: "Failed to list favorites", data: null } }
+                ru: { summary: "Русский", value: { status: "error", code: 500, description: "Ошибка при получении избранного", data: null } }
+                uz: { summary: "O'zbek", value: { status: "error", code: 500, description: "Sevimlilarni olishda xato", data: null } }
+                tr: { summary: "Türkçe", value: { status: "error", code: 500, description: "Favoriler listelenemedi", data: null } }
+                zh: { summary: "中文", value: { status: "error", code: 500, description: "获取收藏失败", data: null } }
+    post:
+      tags: ["Freelance Dispatchers / My drivers"]
+      summary: "Добавить водителя в избранное"
+      description: |
+        Добавляет `driver_id` в избранное текущего фриланс-диспетчера.
+        Ответы на 5 языках.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver_id: { type: string, format: uuid }
+              required: [driver_id]
+      responses:
+        "201":
+          description: "favorite_added"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 201, description: "Added to favorites", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 201, description: "Добавлено в избранное", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 201, description: "Sevimlilarga qo'shildi", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 201, description: "Favorilere eklendi", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                zh: { summary: "中文", value: { status: "success", code: 201, description: "已添加到收藏", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+        "200":
+          description: "favorite_already_exists (idempotent)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Already in favorites", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Уже в избранном", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Allaqachon sevimlilarda", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Zaten favorilerde", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "已在收藏中", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+        "400":
+          description: "invalid_payload_detail"
+        "404":
+          description: "driver_not_found"
+        "500":
+          description: "failed_to_create_favorite (5 языков)"
+
+  /v1/dispatchers/favorite-drivers/{driverId}:
+    delete:
+      tags: ["Freelance Dispatchers / My drivers"]
+      summary: "Удалить водителя из избранного"
+      description: |
+        Удаляет `driverId` из избранного текущего фриланс-диспетчера.
+        Ответы на 5 языках.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: driverId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: "favorite_deleted"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+              examples:
+                en: { summary: "English", value: { status: "success", code: 200, description: "Removed from favorites", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Удалено из избранного", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Sevimlilardan olib tashlandi", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Favorilerden kaldırıldı", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+                zh: { summary: "中文", value: { status: "success", code: 200, description: "已从收藏中移除", data: { driver_id: "11111111-2222-3333-4444-555555555555" } } }
+        "404":
+          description: "favorite_not_found"
+        "500":
+          description: "failed_to_delete_favorite (5 языков)"
+
   /v1/driver/recommended-cargo:
     get:
       tags: ["Drivers / Trips", "Cargo — Водитель"]

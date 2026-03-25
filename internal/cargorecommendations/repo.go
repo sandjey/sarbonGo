@@ -3,6 +3,8 @@ package cargorecommendations
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,6 +77,57 @@ FROM cargo_driver_recommendations WHERE driver_id = $1 AND status = $2 ORDER BY 
 		return nil, err
 	}
 	defer rows.Close()
+	var list []Recommendation
+	for rows.Next() {
+		var rec Recommendation
+		if err := rows.Scan(&rec.ID, &rec.CargoID, &rec.DriverID, &rec.InvitedByDispatcherID, &rec.Status, &rec.CreatedAt); err != nil {
+			return nil, err
+		}
+		list = append(list, rec)
+	}
+	return list, rows.Err()
+}
+
+// ListByDispatcher lists recommendations sent by a freelance dispatcher.
+// Filters:
+// - dispatcherID (invited_by_dispatcher_id)
+// - optional driverID (only recommendations for that driver)
+// - status (PENDING/ACCEPTED/DECLINED)
+func (r *Repo) ListByDispatcher(ctx context.Context, dispatcherID uuid.UUID, driverID *uuid.UUID, status string, limit int) ([]Recommendation, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var q strings.Builder
+	q.WriteString(`
+SELECT id, cargo_id, driver_id, invited_by_dispatcher_id, status, created_at
+FROM cargo_driver_recommendations
+WHERE invited_by_dispatcher_id = $1
+`)
+	args := []any{dispatcherID}
+	n := 2
+
+	if driverID != nil {
+		q.WriteString(` AND driver_id = $` + strconv.Itoa(n))
+		args = append(args, *driverID)
+		n++
+	}
+
+	if status != "" {
+		q.WriteString(` AND status = $` + strconv.Itoa(n))
+		args = append(args, status)
+		n++
+	}
+
+	q.WriteString(` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(n))
+	args = append(args, limit)
+
+	rows, err := r.pg.Query(ctx, q.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
 	var list []Recommendation
 	for rows.Next() {
 		var rec Recommendation

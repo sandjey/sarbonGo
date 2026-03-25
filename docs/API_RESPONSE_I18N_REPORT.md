@@ -32,6 +32,7 @@
 | **Cargo** (cargo.go) | List, Get, Create, Update, Delete, PatchStatus, ListOffers, AcceptOffer | ✅ OKLang, ErrorLang |
 | **Trips** (trips.go) | Get, List, AssignDriver, DriverConfirm, DriverReject, PatchStatus | ✅ OKLang, ErrorLang |
 | **Company TZ** (company_tz.go) | CreateCompany, ListCompanies, SwitchCompany, CreateInvitation, AcceptInvitation, ListUsers, UpdateRole, RemoveUser | ✅ OKLang, ErrorLang, SuccessLang |
+| **Favorites** (favorites.go) | Driver: POST/GET/DELETE `/v1/driver/favorite-cargo`; Dispatcher: POST/GET/DELETE `/v1/dispatchers/favorite-cargo`; Dispatcher: POST/GET/DELETE `/v1/dispatchers/favorite-drivers` | ✅ OKLang, ErrorLang, SuccessLang |
 
 ### 4. Дополнительно переведённые API (все ответы по X-Language)
 
@@ -52,6 +53,8 @@
 | swaggerui/swaggerui.go | 404 openapi.yaml | ✅ ErrorLang (openapi_not_found) |
 
 **Итог:** во всех API ответы используют единую структуру; **status** всегда на английском (`success` | `error`), **description** — по заголовку **X-Language** (ru, uz, en, tr, zh).
+
+Добавленные ключи локализации для favorites: `favorite_added`, `favorite_deleted`, `favorite_already_exists`, `favorite_not_found`, `failed_to_create_favorite`, `failed_to_delete_favorite`, `failed_to_list_favorites`.
 
 ### 5. Использование
 

@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -90,6 +91,83 @@ func (h *CargoRecommendationsHandler) ListRecommendedForDriver(c *gin.Context) {
 		}
 		if cargoObj != nil {
 			item["cargo"] = gin.H{"id": cargoObj.ID, "weight": cargoObj.Weight, "volume": cargoObj.Volume, "truck_type": cargoObj.TruckType, "status": cargoObj.Status}
+		}
+		items = append(items, item)
+	}
+	resp.OKLang(c, "ok", gin.H{"items": items})
+}
+
+// ListFavoriteCargoForDriver is an alias to ListRecommendedForDriver.
+// Product semantics: "избранные" для водителя = груз, на который ему отправили таклиф/рекомендацию.
+func (h *CargoRecommendationsHandler) ListFavoriteCargoForDriver(c *gin.Context) {
+	h.ListRecommendedForDriver(c)
+}
+
+// ListFavoriteCargoForDispatcher lists cargo recommendations sent by the current freelance dispatcher.
+// By default returns only pending recommendations (status=PENDING), because these are the "active selections".
+// Optional filters:
+// - driver_id: only recommendations for that driver
+// - status: PENDING/ACCEPTED/DECLINED (default PENDING)
+func (h *CargoRecommendationsHandler) ListFavoriteCargoForDispatcher(c *gin.Context) {
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+
+	limit := 30
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	var driverID *uuid.UUID
+	if s := strings.TrimSpace(c.Query("driver_id")); s != "" {
+		id, err := uuid.Parse(s)
+		if err != nil || id == uuid.Nil {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+				"fields": gin.H{"driver_id": "invalid"},
+			})
+			return
+		}
+		driverID = &id
+	}
+
+	status := strings.ToUpper(strings.TrimSpace(c.Query("status")))
+	if status == "" {
+		status = "PENDING"
+	}
+	switch status {
+	case "PENDING", "ACCEPTED", "DECLINED":
+	default:
+		resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+			"fields": gin.H{"status": "invalid"},
+		})
+		return
+	}
+
+	list, err := h.recRepo.ListByDispatcher(c.Request.Context(), dispatcherID, driverID, status, limit)
+	if err != nil {
+		h.logger.Error("favorite cargo list for dispatcher", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+
+	items := make([]gin.H, 0, len(list))
+	for i := range list {
+		rec := &list[i]
+		cargoObj, _ := h.cargoRepo.GetByID(c.Request.Context(), rec.CargoID, false)
+		item := gin.H{
+			"cargo_id": rec.CargoID.String(),
+			"driver_id": rec.DriverID.String(),
+			"status": rec.Status,
+			"created_at": rec.CreatedAt,
+		}
+		if cargoObj != nil {
+			item["cargo"] = gin.H{
+				"id": cargoObj.ID,
+				"weight": cargoObj.Weight,
+				"volume": cargoObj.Volume,
+				"truck_type": cargoObj.TruckType,
+				"status": cargoObj.Status,
+			}
 		}
 		items = append(items, item)
 	}

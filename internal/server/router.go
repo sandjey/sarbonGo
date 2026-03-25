@@ -19,6 +19,7 @@ import (
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/cargorecommendations"
 	"sarbonNew/internal/chat"
+	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/companies"
 	"sarbonNew/internal/companytz"
 	"sarbonNew/internal/config"
@@ -156,6 +157,9 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo)
 	cargoRecRepo := cargorecommendations.NewRepo(deps.PG)
 	cargoRecH := handlers.NewCargoRecommendationsHandler(logger, cargoRecRepo, cargoRepo, tripsRepo)
+
+	favRepo := favorites.NewRepo(deps.PG)
+	favH := handlers.NewFavoritesHandler(logger, favRepo, cargoRepo, driversRepo)
 
 	driverCargoSearchH := handlers.NewDriverCargoSearchHandler(logger, cargoRepo, driversRepo)
 
@@ -309,6 +313,9 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.GET("/dispatcher-invitations", d2dInvH.ListSentByDriver)
 	driverAuthed.POST("/dispatcher-invitations", d2dInvH.CreateFromDriver)
 	driverAuthed.DELETE("/dispatcher-invitations/:token", d2dInvH.CancelByDriver)
+	driverAuthed.POST("/favorite-cargo", favH.AddDriverFavoriteCargo)
+	driverAuthed.DELETE("/favorite-cargo/:cargoId", favH.DeleteDriverFavoriteCargo)
+	driverAuthed.GET("/favorite-cargo", favH.ListDriverFavoriteCargo)
 	driverAuthed.GET("/recommended-cargo", cargoRecH.ListRecommendedForDriver)
 	driverAuthed.POST("/recommended-cargo/:cargoId/accept", cargoRecH.AcceptRecommendation)
 	driverAuthed.POST("/recommended-cargo/:cargoId/decline", cargoRecH.DeclineRecommendation)
@@ -351,6 +358,12 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
 	dispAuthed.GET("/cargo/export.xlsx", dispCargoExportH.ExportMyCargoExcel)
 	dispAuthed.POST("/cargo/:id/recommend", cargoRecH.Recommend)
+	dispAuthed.POST("/favorite-cargo", favH.AddDispatcherFavoriteCargo)
+	dispAuthed.DELETE("/favorite-cargo/:cargoId", favH.DeleteDispatcherFavoriteCargo)
+	dispAuthed.GET("/favorite-cargo", favH.ListDispatcherFavoriteCargo)
+	dispAuthed.POST("/favorite-drivers", favH.AddDispatcherFavoriteDriver)
+	dispAuthed.DELETE("/favorite-drivers/:driverId", favH.DeleteDispatcherFavoriteDriver)
+	dispAuthed.GET("/favorite-drivers", favH.ListDispatcherFavoriteDrivers)
 
 	// Company users (company_users): OTP auth, companies, invitations
 	appUserAuthed := v1.Group("")
