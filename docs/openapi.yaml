@@ -556,6 +556,7 @@ components:
         name: { type: string, nullable: true, example: "Пшеница, Ташкент → Самарканд, тент 20т/82м³", description: "Короткое имя/название груза (что везём), отображается в списках" }
         weight: { type: number, example: 20, description: "Вес груза в тоннах (обязательно > 0)" }
         volume: { type: number, example: 82, description: "Объём груза в кубических метрах (м³)" }
+        vehicles_amount: { type: integer, example: 1, description: "Количество машин (водителей), требуемых для этого груза" }
         capacity_required: { type: number, nullable: true, example: 20, description: "Требуемая грузоподъёмность ТС (тонны)" }
         packaging: { type: string, nullable: true, example: "Мешки по 50 кг на паллетах", description: "Упаковка груза" }
         dimensions: { type: string, nullable: true, example: "13.6x2.45x2.7", description: "Габариты груза (ДхШхВ в метрах)" }
@@ -564,6 +565,8 @@ components:
         ready_at: { type: string, format: date-time, nullable: true, example: "2026-03-25T08:00:00Z", description: "Дата и время, когда груз будет готов к погрузке (обязательно при ready_enabled=true)" }
         load_comment: { type: string, nullable: true, example: "Погрузка сверху, склад сухой. Груз пшеница, мешки 50 кг.", description: "Комментарий к погрузке (особенности, условия)" }
         truck_type: { type: string, example: "TENT", description: "Тип кузова: TENT, REFRIGERATOR, FLATBED, TANKER, OTHER" }
+        power_plate_type: { type: string, example: "TRUCK", description: "Тип основной машины: TRUCK или TRACTOR (из GET /v1/driver/transport-options → power_plate_types)" }
+        trailer_plate_type: { type: string, example: "TENTED", description: "Тип прицепа/полуприцепа (из GET /v1/driver/transport-options → trailer_plate_types_by_power[power_plate_type])" }
         temp_min: { type: number, nullable: true, example: null, description: "Минимальная температура (°C) для рефрижератора; допустимо только при truck_type=REFRIGERATOR" }
         temp_max: { type: number, nullable: true, example: null, description: "Максимальная температура (°C) для рефрижератора; допустимо только при truck_type=REFRIGERATOR" }
         adr_enabled: { type: boolean, example: false, description: "Является ли груз опасным (ADR); при true обязательно указать adr_class" }
@@ -672,9 +675,9 @@ components:
       description: |
         **Тело запроса POST /api/cargo** — создание груза с точками маршрута и условиями оплаты.
 
-        **Обязательные поля:** weight (вес в тоннах, > 0), volume (объём в м³, > 0), truck_type (тип кузова из справочника GET /v1/reference/cargo, UPPERCASE: TENT, REFRIGERATOR…), **capacity_required** (требуемая грузоподъёмность ТС, > 0), route_points — массив точек маршрута. В route_points обязательно минимум одна точка с type=LOAD (погрузка) и одна с type=UNLOAD (выгрузка). У каждой точки обязательны: type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code, address, lat, lng, point_order, **date** (RFC3339 UTC, например `2026-03-23T10:45:30Z`).
+        **Обязательные поля:** weight (вес в тоннах, > 0), volume (объём в м³, > 0), **vehicles_amount** (количество машин, 1..100), **capacity_required** (требуемая грузоподъёмность ТС, > 0), **power_plate_type** и **trailer_plate_type** (из справочника GET /v1/driver/transport-options), route_points — массив точек маршрута. В route_points обязательно минимум одна точка с type=LOAD (погрузка) и одна с type=UNLOAD (выгрузка). У каждой точки обязательны: type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code, address, lat, lng, point_order, **date** (RFC3339 UTC, например `2026-03-23T10:45:30Z`).
 
-        **Справочники:** города — GET /v1/reference/cities (коды TAS, SAM, DXB…); типы кузова — GET /v1/reference/cargo → truck_type.
+        **Справочники:** города — GET /v1/reference/cities (коды TAS, SAM, DXB…); транспорт — GET /v1/driver/transport-options (power_plate_type, trailer_plate_type).
 
         **Создатель:** при заголовке X-User-Token (JWT админа или диспетчера) создатель подставляется автоматически; при отсутствии JWT можно передать company_id — тогда создателем будет компания.
 
@@ -686,6 +689,7 @@ components:
           description: "Короткое название груза (например: Пшеница, Бытовая техника)"
         weight: { type: number, minimum: 0, exclusiveMinimum: true, description: "Вес груза в тоннах; обязательно, число больше 0" }
         volume: { type: number, minimum: 0, exclusiveMinimum: true, description: "Объём груза в кубических метрах (м³); обязательно, число больше 0" }
+        vehicles_amount: { type: integer, minimum: 1, maximum: 100, description: "Количество машин (водителей), требуемых для этого груза; обязательное поле, 1..100", example: 1 }
         packaging:
           type: string
           nullable: true
@@ -702,7 +706,8 @@ components:
         ready_enabled: { type: boolean, default: false, description: "Указана ли дата готовности груза к погрузке" }
         ready_at: { type: string, format: date-time, nullable: true, description: "Дата и время готовности; обязательна, если ready_enabled=true" }
         load_comment: { type: string, nullable: true, description: "Комментарий к погрузке (условия, особенности)" }
-        truck_type: { type: string, description: "Тип кузова: TENT, REFRIGERATOR, FLATBED, TANKER, OTHER (значения из GET /v1/reference/cargo → truck_type, в UPPERCASE)" }
+        power_plate_type: { type: string, description: "Тип основной машины: TRUCK или TRACTOR (из GET /v1/driver/transport-options → power_plate_types)", example: "TRUCK" }
+        trailer_plate_type: { type: string, description: "Тип прицепа/полуприцепа (из GET /v1/driver/transport-options → trailer_plate_types_by_power[power_plate_type])", example: "TENTED" }
         capacity_required:
           type: number
           minimum: 0
@@ -731,7 +736,7 @@ components:
           items: { $ref: "#/components/schemas/RoutePointInput" }
           description: "Точки маршрута: минимум две точки и минимум одна погрузка (LOAD) и одна выгрузка (UNLOAD); порядок задаётся point_order"
         payment: { $ref: "#/components/schemas/PaymentInput", nullable: true, description: "Условия оплаты (опционально); при указании либо total_amount, либо price_request=true" }
-      required: [weight, volume, truck_type, capacity_required, route_points]
+      required: [weight, volume, vehicles_amount, power_plate_type, trailer_plate_type, capacity_required, route_points]
     CargoUpdateRequest:
       type: object
       description: |
@@ -865,7 +870,7 @@ paths:
 
         **Создатель (автоматически):** Если передан заголовок **X-User-Token** (JWT) с ролью admin или dispatcher — в груз записываются created_by_type и created_by_id. Если JWT не передан, но в теле есть company_id — создателем считается компания (created_by_type=company). Опционально в теле можно передать company_id для привязки груза к компании.
 
-        **Что передаём:** Схема CargoCreateRequest — все поля груза (обязательные: weight, volume, truck_type, capacity_required, route_points) + опционально payment, contact_name, contact_phone, ready_enabled, ready_at, load_comment, temp_min/temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count, documents, cargo_type_id.
+        **Что передаём:** Схема CargoCreateRequest — все поля груза (обязательные: weight, volume, vehicles_amount, truck_type, power_plate_type, trailer_plate_type, capacity_required, route_points) + опционально payment, contact_name, contact_phone, ready_enabled, ready_at, load_comment, temp_min/temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count, documents, cargo_type_id.
         **Важно:** Для фриланс‑диспетчера поле **company_id обычно не передаётся**. Если передать `company_id` — оно должно существовать в `companies`, иначе вернётся 400.
         В ответе возвращается **полный объект груза** (как в GET /api/cargo/:id): data содержит созданный груз с id, route_points, payment и всеми полями.
 
@@ -896,7 +901,9 @@ paths:
                     - "https://cdn.example.com/cargo/123-photo2.jpg"
                   weight: 20
                   volume: 82
-                  truck_type: "TENT"
+                  vehicles_amount: 1
+                  power_plate_type: "TRUCK"
+                  trailer_plate_type: "TENTED"
                   capacity_required: 20
                   ready_enabled: true
                   ready_at: "2026-03-15T08:00:00Z"
@@ -962,7 +969,9 @@ paths:
                   cargo_type_id: "e607fa35-3cb2-4e19-a80b-7056247ca2cd"
                   weight: 20
                   volume: 82
-                  truck_type: "TENT"
+                  vehicles_amount: 1
+                  power_plate_type: "TRUCK"
+                  trailer_plate_type: "TENTED"
                   capacity_required: 20
                   contact_name: "Иван Петров"
                   contact_phone: "+998901234567"

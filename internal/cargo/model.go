@@ -54,6 +54,8 @@ type Cargo struct {
 	Name         *string
 	Weight       float64
 	Volume       float64
+	// VehiclesAmount — сколько машин требуется для этого груза.
+	VehiclesAmount int
 	// CapacityRequired — требуемая грузоподъёмность ТС (тонны), из POST /api/cargo.
 	CapacityRequired *float64
 	Packaging        *string
@@ -63,6 +65,8 @@ type Cargo struct {
 	ReadyAt      *time.Time
 	LoadComment  *string
 	TruckType    string
+	PowerPlateType   string
+	TrailerPlateType string
 	TempMin      *float64
 	TempMax      *float64
 	ADREnabled   bool

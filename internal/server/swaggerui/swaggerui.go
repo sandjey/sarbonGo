@@ -63,8 +63,43 @@ const swaggerHTML = `<!doctype html>
     <style>
       .topbar { display: none; }
 
-      /* Always white background */
-      html, body { background: #fff; }
+      /* Theme tokens */
+      :root {
+        --bg: #ffffff;
+        --fg: #111827;
+        --muted: #64748b;
+        --card: #ffffff;
+        --border: rgba(0,0,0,.12);
+        --menu-bg: rgba(255,255,255,.92);
+        --menu-border: rgba(0,0,0,.08);
+        --btn-bg: #ffffff;
+        --btn-fg: #111827;
+        --btn-hover: #f9fafb;
+        --btn-active-bg: #111827;
+        --btn-active-fg: #ffffff;
+        --hint-bg: #f0f9ff;
+        --hint-border: #bae6fd;
+        --hint-fg: #0c4a6e;
+      }
+      html[data-theme="dark"] {
+        --bg: #0b1220;
+        --fg: #e5e7eb;
+        --muted: #94a3b8;
+        --card: #0f172a;
+        --border: rgba(255,255,255,.14);
+        --menu-bg: rgba(15,23,42,.82);
+        --menu-border: rgba(255,255,255,.10);
+        --btn-bg: rgba(255,255,255,.06);
+        --btn-fg: #e5e7eb;
+        --btn-hover: rgba(255,255,255,.10);
+        --btn-active-bg: #e5e7eb;
+        --btn-active-fg: #0b1220;
+        --hint-bg: rgba(59,130,246,.12);
+        --hint-border: rgba(59,130,246,.22);
+        --hint-fg: #bfdbfe;
+      }
+
+      html, body { background: var(--bg); color: var(--fg); }
 
       /* Top menu */
       body { padding-top: 58px; }
@@ -79,9 +114,9 @@ const swaggerHTML = `<!doctype html>
         justify-content: center;
         gap: 10px;
         padding: 0 14px;
-        background: rgba(255,255,255,.92);
+        background: var(--menu-bg);
         backdrop-filter: blur(10px);
-        border-bottom: 1px solid rgba(0,0,0,.08);
+        border-bottom: 1px solid var(--menu-border);
         z-index: 9999;
       }
       .sarbon-topmenu .brand {
@@ -89,13 +124,13 @@ const swaggerHTML = `<!doctype html>
         font-weight: 700;
         letter-spacing: .2px;
         margin-right: 8px;
-        color: #111827;
+        color: var(--fg);
       }
       .sarbon-topmenu .btn {
         appearance: none;
-        border: 1px solid rgba(0,0,0,.12);
-        background: #fff;
-        color: #111827;
+        border: 1px solid var(--border);
+        background: var(--btn-bg);
+        color: var(--btn-fg);
         border-radius: 999px;
         padding: 10px 14px;
         font-size: 14px;
@@ -103,13 +138,69 @@ const swaggerHTML = `<!doctype html>
         cursor: pointer;
         transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
       }
-      .sarbon-topmenu .btn:hover { background: #f9fafb; }
+      .sarbon-topmenu .btn:hover { background: var(--btn-hover); }
       .sarbon-topmenu .btn.active {
-        background: #111827;
-        color: #fff;
-        border-color: #111827;
-        box-shadow: 0 6px 18px rgba(17,24,39,.18);
+        background: var(--btn-active-bg);
+        color: var(--btn-active-fg);
+        border-color: var(--btn-active-bg);
+        box-shadow: 0 6px 18px rgba(0,0,0,.18);
       }
+
+      /* Theme toggle (distinct) */
+      .sarbon-theme-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--btn-bg);
+        color: var(--btn-fg);
+        cursor: pointer;
+        user-select: none;
+        transition: background .15s ease, border-color .15s ease, transform .08s ease;
+      }
+      .sarbon-theme-toggle:hover { background: var(--btn-hover); }
+      .sarbon-theme-toggle:active { transform: translateY(1px); }
+      .sarbon-theme-toggle .label {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: .2px;
+      }
+      .sarbon-theme-toggle .icons {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 14px;
+        opacity: .9;
+      }
+      .sarbon-theme-toggle .switch {
+        width: 38px;
+        height: 22px;
+        border-radius: 999px;
+        position: relative;
+        background: rgba(148,163,184,.25);
+        border: 1px solid rgba(148,163,184,.35);
+        flex: 0 0 auto;
+        box-shadow: inset 0 1px 2px rgba(0,0,0,.12);
+      }
+      html[data-theme="dark"] .sarbon-theme-toggle .switch {
+        background: rgba(59,130,246,.22);
+        border-color: rgba(59,130,246,.34);
+      }
+      .sarbon-theme-toggle .knob {
+        position: absolute;
+        top: 50%;
+        left: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 999px;
+        transform: translateY(-50%);
+        background: var(--card);
+        border: 1px solid var(--border);
+        transition: left .18s ease;
+      }
+      html[data-theme="dark"] .sarbon-theme-toggle .knob { left: 19px; }
 
       /* Keep content width comfortable */
       .swagger-ui .wrapper { max-width: 1240px; }
@@ -117,11 +208,118 @@ const swaggerHTML = `<!doctype html>
       .sarbon-docs-hint {
         padding: 10px 14px;
         margin: 0 0 12px 0;
-        background: #f0f9ff;
-        border: 1px solid #bae6fd;
+        background: var(--hint-bg);
+        border: 1px solid var(--hint-border);
         border-radius: 8px;
         font-size: 13px;
-        color: #0c4a6e;
+        color: var(--hint-fg);
+      }
+
+      /* Swagger UI dark overrides (readable + consistent) */
+      html[data-theme="dark"] .swagger-ui,
+      html[data-theme="dark"] .swagger-ui * {
+        color: var(--fg);
+      }
+      html[data-theme="dark"] .swagger-ui a { color: #93c5fd !important; }
+      html[data-theme="dark"] .swagger-ui a:hover { color: #bfdbfe !important; }
+
+      html[data-theme="dark"] .swagger-ui .info,
+      html[data-theme="dark"] .swagger-ui .scheme-container,
+      html[data-theme="dark"] .swagger-ui .wrapper,
+      html[data-theme="dark"] .swagger-ui .renderedMarkdown,
+      html[data-theme="dark"] .swagger-ui .markdown,
+      html[data-theme="dark"] .swagger-ui .markdown p,
+      html[data-theme="dark"] .swagger-ui .markdown li {
+        color: var(--fg) !important;
+      }
+
+      /* Cards/containers */
+      html[data-theme="dark"] .swagger-ui .scheme-container,
+      html[data-theme="dark"] .swagger-ui section.models,
+      html[data-theme="dark"] .swagger-ui .opblock-tag-section,
+      html[data-theme="dark"] .swagger-ui .opblock .opblock-section-header,
+      html[data-theme="dark"] .swagger-ui .opblock .opblock-body,
+      html[data-theme="dark"] .swagger-ui .responses-wrapper,
+      html[data-theme="dark"] .swagger-ui .responses-inner,
+      html[data-theme="dark"] .swagger-ui .model-box,
+      html[data-theme="dark"] .swagger-ui .model-container,
+      html[data-theme="dark"] .swagger-ui .tab,
+      html[data-theme="dark"] .swagger-ui .auth-container,
+      html[data-theme="dark"] .swagger-ui .dialog-ux .modal-ux,
+      html[data-theme="dark"] .swagger-ui .dialog-ux .modal-ux-content,
+      html[data-theme="dark"] .swagger-ui .dialog-ux .modal-ux-header {
+        background: var(--card) !important;
+      }
+      html[data-theme="dark"] .swagger-ui .scheme-container { border: 1px solid rgba(255,255,255,.10); box-shadow: none; }
+      html[data-theme="dark"] .swagger-ui section.models { border: 1px solid rgba(255,255,255,.10); }
+
+      /* Borders */
+      html[data-theme="dark"] .swagger-ui .opblock,
+      html[data-theme="dark"] .swagger-ui .opblock-tag,
+      html[data-theme="dark"] .swagger-ui .opblock .opblock-section-header,
+      html[data-theme="dark"] .swagger-ui section.models,
+      html[data-theme="dark"] .swagger-ui .model-container,
+      html[data-theme="dark"] .swagger-ui .tab li,
+      html[data-theme="dark"] .swagger-ui table,
+      html[data-theme="dark"] .swagger-ui thead tr th,
+      html[data-theme="dark"] .swagger-ui tbody tr td,
+      html[data-theme="dark"] .swagger-ui .responses-inner,
+      html[data-theme="dark"] .swagger-ui .authorization__btn,
+      html[data-theme="dark"] .swagger-ui .dialog-ux .modal-ux {
+        border-color: rgba(255,255,255,.12) !important;
+      }
+
+      /* Inputs */
+      html[data-theme="dark"] .swagger-ui input[type=text],
+      html[data-theme="dark"] .swagger-ui input[type=password],
+      html[data-theme="dark"] .swagger-ui input[type=search],
+      html[data-theme="dark"] .swagger-ui select,
+      html[data-theme="dark"] .swagger-ui textarea {
+        background: rgba(255,255,255,.06) !important;
+        color: var(--fg) !important;
+        border-color: rgba(255,255,255,.16) !important;
+      }
+      html[data-theme="dark"] .swagger-ui input::placeholder,
+      html[data-theme="dark"] .swagger-ui textarea::placeholder { color: rgba(229,231,235,.55) !important; }
+
+      /* Buttons */
+      html[data-theme="dark"] .swagger-ui .btn,
+      html[data-theme="dark"] .swagger-ui .btn.execute,
+      html[data-theme="dark"] .swagger-ui .btn.authorize,
+      html[data-theme="dark"] .swagger-ui .btn.try-out__btn,
+      html[data-theme="dark"] .swagger-ui .btn.cancel {
+        background: rgba(255,255,255,.07) !important;
+        color: var(--fg) !important;
+        border-color: rgba(255,255,255,.16) !important;
+      }
+      html[data-theme="dark"] .swagger-ui .btn:hover { background: rgba(255,255,255,.11) !important; }
+
+      /* Code blocks */
+      html[data-theme="dark"] .swagger-ui pre,
+      html[data-theme="dark"] .swagger-ui code,
+      html[data-theme="dark"] .swagger-ui .microlight {
+        background: rgba(255,255,255,.06) !important;
+        color: #e5e7eb !important;
+        border-color: rgba(255,255,255,.12) !important;
+      }
+
+      /* Opblock headers (keep method colors but readable text) */
+      html[data-theme="dark"] .swagger-ui .opblock-summary,
+      html[data-theme="dark"] .swagger-ui .opblock-summary-method,
+      html[data-theme="dark"] .swagger-ui .opblock-summary-path,
+      html[data-theme="dark"] .swagger-ui .opblock-summary-description {
+        color: var(--fg) !important;
+      }
+      html[data-theme="dark"] .swagger-ui .opblock-summary-path { color: #e2e8f0 !important; }
+      html[data-theme="dark"] .swagger-ui .opblock-summary-description { color: #cbd5e1 !important; }
+      html[data-theme="dark"] .swagger-ui .opblock-tag { background: transparent !important; }
+
+      /* Icons (many are inline SVG) */
+      html[data-theme="dark"] .swagger-ui svg,
+      html[data-theme="dark"] .swagger-ui svg path,
+      html[data-theme="dark"] .swagger-ui svg polygon,
+      html[data-theme="dark"] .swagger-ui svg circle {
+        fill: currentColor !important;
       }
     </style>
   </head>
@@ -140,6 +338,11 @@ const swaggerHTML = `<!doctype html>
       <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">&#128187; Terminal</a>
       <button class="btn" data-group="company">Company</button>
       <button class="btn" data-group="reference">Reference</button>
+      <button class="sarbon-theme-toggle" id="sarbon-theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">
+        <span class="icons" aria-hidden="true"><span class="sun">☀</span><span class="moon">🌙</span></span>
+        <span class="label" id="sarbon-theme-label">Light</span>
+        <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+      </button>
     </div>
     <div id="swagger-ui"></div>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
@@ -147,6 +350,7 @@ const swaggerHTML = `<!doctype html>
       window.onload = () => {
         const LS_PREFIX = 'sarbon_auth_';
         const DOCS_GROUP_KEY = LS_PREFIX + 'docs_group';
+        const THEME_KEY = LS_PREFIX + 'theme';
           const K = {
           DeviceTypeHeader: LS_PREFIX + 'DeviceTypeHeader',
           LanguageHeader: LS_PREFIX + 'LanguageHeader',
@@ -163,6 +367,26 @@ const swaggerHTML = `<!doctype html>
         function setLS(key, val) {
           try { localStorage.setItem(key, val); } catch(e) {}
         }
+
+        // Theme (persist to localStorage)
+        function applyTheme(theme) {
+          const t = (theme === 'dark') ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', t);
+          const label = document.getElementById('sarbon-theme-label');
+          if (label) label.textContent = (t === 'dark') ? 'Dark' : 'Light';
+          const btn = document.getElementById('sarbon-theme-toggle');
+          if (btn) btn.setAttribute('aria-pressed', t === 'dark' ? 'true' : 'false');
+        }
+        function getInitialTheme() {
+          const saved = getLS(THEME_KEY, '');
+          if (saved === 'dark' || saved === 'light') return saved;
+          try {
+            if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+          } catch(e) {}
+          return 'light';
+        }
+        const initialTheme = getInitialTheme();
+        applyTheme(initialTheme);
 
         const SarbonAuthPlugin = function() {
           return {
@@ -379,6 +603,15 @@ const swaggerHTML = `<!doctype html>
         document.querySelectorAll('.sarbon-topmenu .btn[data-group]').forEach((btn) => {
           btn.addEventListener('click', () => setGroup(btn.getAttribute('data-group')));
         });
+        const themeBtn = document.getElementById('sarbon-theme-toggle');
+        if (themeBtn) {
+          themeBtn.addEventListener('click', () => {
+            const cur = document.documentElement.getAttribute('data-theme') || 'light';
+            const next = (cur === 'dark') ? 'light' : 'dark';
+            setLS(THEME_KEY, next);
+            applyTheme(next);
+          });
+        }
 
         // Swagger UI renders async; re-apply filter when DOM changes.
         let filterTimer = null;

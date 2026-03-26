@@ -79,6 +79,7 @@ type CreateParams struct {
 	Name       *string
 	Weight     float64  `validate:"required,gt=0"`
 	Volume     float64
+	VehiclesAmount int `validate:"required,gt=0"` // Количество машин
 	Packaging  *string  // Упаковка
 	Dimensions *string  // Габариты
 	Photos     []string // Фото (max 5, каждая ≤10MB)
@@ -90,6 +91,8 @@ type CreateParams struct {
 
 	// Шаг 3 — Транспорт
 	TruckType        string        `validate:"required"`
+	PowerPlateType   string        `validate:"required"` // TRUCK|TRACTOR (GET /v1/driver/transport-options)
+	TrailerPlateType string        `validate:"required"` // depends on PowerPlateType
 	CapacityRequired float64       `validate:"required,gt=0"` // Грузоподъёмность
 	TempMin          *float64
 	TempMax          *float64
@@ -166,15 +169,17 @@ func (r *Repo) Create(ctx context.Context, p CreateParams) (uuid.UUID, error) {
 	docJSON, _ := DocumentsToJSON(p.Documents)
 	var id uuid.UUID
 	q := `
-INSERT INTO cargo (name, weight, volume, capacity_required, packaging, dimensions, photo_urls, ready_enabled, ready_at, load_comment, truck_type,
+INSERT INTO cargo (name, weight, volume, vehicles_amount, capacity_required, packaging, dimensions, photo_urls, ready_enabled, ready_at, load_comment, truck_type,
+  power_plate_type, trailer_plate_type,
   temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
   documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, created_by_type, created_by_id, company_id, cargo_type_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, COALESCE(NULLIF(TRIM($23),''), 'PENDING_MODERATION'), now(), now(), NULL, $24, $25, $26, $27)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, COALESCE(NULLIF(TRIM($25),''), 'PENDING_MODERATION'), now(), now(), NULL, $26, $27, $28, $29)
 RETURNING id`
 	err = tx.QueryRow(ctx, q,
 		p.Name,
-		p.Weight, p.Volume, p.CapacityRequired, p.Packaging, p.Dimensions, p.Photos,
+		p.Weight, p.Volume, p.VehiclesAmount, p.CapacityRequired, p.Packaging, p.Dimensions, p.Photos,
 		p.ReadyEnabled, p.ReadyAt, p.LoadComment, p.TruckType,
+		p.PowerPlateType, p.TrailerPlateType,
 		p.TempMin, p.TempMax, p.ADREnabled, p.ADRClass, p.LoadingTypes, p.Requirements, p.ShipmentType, p.BeltsCount,
 		docJSON, p.ContactName, p.ContactPhone, p.Status,
 		p.CreatedByType, p.CreatedByID, p.CompanyID, p.CargoTypeID,
@@ -211,8 +216,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 
 // GetByID returns cargo by id (excluding soft-deleted if needAll=false).
 func (r *Repo) GetByID(ctx context.Context, id uuid.UUID, includeDeleted bool) (*Cargo, error) {
-	q := `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
-  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
+	q := `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type, COALESCE(c.power_plate_type,''), COALESCE(c.trailer_plate_type,''),
   c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
   c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
@@ -329,7 +334,7 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 	var packaging, dimensions sql.NullString
 	var ctCode, ctRU, ctUZ, ctEN, ctTR, ctZH sql.NullString
 	err := row.Scan(
-		&c.ID, &c.Name, &c.Weight, &c.Volume, &cap, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType,
+		&c.ID, &c.Name, &c.Weight, &c.Volume, &c.VehiclesAmount, &cap, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType, &c.PowerPlateType, &c.TrailerPlateType,
 		&c.TempMin, &c.TempMax, &c.ADREnabled, &c.ADRClass, &loadingTypes, &requirements, &c.ShipmentType, &c.BeltsCount,
 		&docBytes, &c.ContactName, &c.ContactPhone, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.DeletedAt,
 		&c.ModerationRejectionReason, &c.CreatedByType, &c.CreatedByID, &c.CompanyID, &c.CargoTypeID,
@@ -367,8 +372,8 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 }
 
 func cargoListSelectFrom() string {
-	return `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
-  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
+	return `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type, COALESCE(c.power_plate_type,''), COALESCE(c.trailer_plate_type,''),
   c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
   c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,

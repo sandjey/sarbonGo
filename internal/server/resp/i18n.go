@@ -1270,6 +1270,27 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Favoriler listelenemedi",
 		"zh": "获取收藏失败",
 	},
+	"invalid_power_plate_type": {
+		"en": "Invalid power_plate_type (allowed: TRUCK, TRACTOR)",
+		"ru": "Некорректный power_plate_type (допустимо: TRUCK, TRACTOR)",
+		"uz": "Noto'g'ri power_plate_type (TRUCK, TRACTOR)",
+		"tr": "Geçersiz power_plate_type (TRUCK, TRACTOR)",
+		"zh": "power_plate_type无效（允许：TRUCK, TRACTOR）",
+	},
+	"invalid_trailer_plate_type": {
+		"en": "Invalid trailer_plate_type for selected power_plate_type",
+		"ru": "Некорректный trailer_plate_type для выбранного power_plate_type",
+		"uz": "Tanlangan power_plate_type uchun trailer_plate_type noto'g'ri",
+		"tr": "Seçilen power_plate_type için trailer_plate_type geçersiz",
+		"zh": "所选power_plate_type对应的trailer_plate_type无效",
+	},
+	"invalid_vehicles_amount": {
+		"en": "vehicles_amount must be between 1 and 100",
+		"ru": "vehicles_amount должно быть от 1 до 100",
+		"uz": "vehicles_amount 1 dan 100 gacha bo'lishi kerak",
+		"tr": "vehicles_amount 1 ile 100 arasında olmalı",
+		"zh": "vehicles_amount必须在1到100之间",
+	},
 }
 
 // Msg returns localized API description for key. Fallback: en -> ru -> key.

@@ -64,13 +64,15 @@ type CreateCargoReq struct {
 	Name             *string        `json:"name"`
 	Weight           float64        `json:"weight" binding:"required,gt=0"`
 	Volume           float64        `json:"volume" binding:"required,gt=0"` // объём груза (м³)
+	VehiclesAmount   int            `json:"vehicles_amount" binding:"required,gte=1,lte=100"`
 	Packaging        *string        `json:"packaging"`
 	Dimensions       *string        `json:"dimensions"`
 	Photos           []string       `json:"photos"` // до 5: внешние URL и/или pending с POST /api/cargo/photos (url или UUID)
 	ReadyEnabled     bool           `json:"ready_enabled"`
 	ReadyAt          *string        `json:"ready_at"`
 	LoadComment      *string        `json:"load_comment"`
-	TruckType        string         `json:"truck_type" binding:"required"`
+	PowerPlateType   string         `json:"power_plate_type" binding:"required"`
+	TrailerPlateType string         `json:"trailer_plate_type" binding:"required"`
 	CapacityRequired float64        `json:"capacity_required" binding:"required,gt=0"`
 	TempMin          *float64       `json:"temp_min"`
 	TempMax          *float64       `json:"temp_max"`
@@ -952,10 +954,46 @@ type UpdateCargoReq struct {
 	Payment          *PaymentReq      `json:"payment"`
 }
 
-func validateCargoCreate(req CreateCargoReq) error {
-	if !reference.IsAllowed(req.TruckType, reference.AllowedTruckTypes()) {
-		return errors.New("truck_type must be from reference: " + strings.Join(reference.AllowedTruckTypes(), ", "))
+// trailerPlateToTruckType maps transport trailer code to cargo.truck_type (Reference / Cargo).
+// This removes duplication: create cargo accepts only power_plate_type + trailer_plate_type.
+func trailerPlateToTruckType(trailerPlate string) string {
+	switch upperStr(trailerPlate) {
+	case "REEFER":
+		return "REFRIGERATOR"
+	case "FLATBED", "LOWBED":
+		return "FLATBED"
+	case "TANKER":
+		return "TANKER"
+	case "TENTED", "BOX", "CONTAINER":
+		return "TENT"
+	default:
+		return "OTHER"
 	}
+}
+
+func validateCargoCreate(req CreateCargoReq) error {
+	if req.VehiclesAmount < 1 || req.VehiclesAmount > 100 {
+		return errors.New("vehicles_amount must be between 1 and 100")
+	}
+	power := upperStr(req.PowerPlateType)
+	switch power {
+	case "TRUCK", "TRACTOR":
+	default:
+		return errors.New("power_plate_type must be from reference GET /v1/driver/transport-options → power_plate_types (TRUCK, TRACTOR)")
+	}
+	trailer := upperStr(req.TrailerPlateType)
+	allowedTrailer := map[string]map[string]bool{
+		"TRUCK": {
+			"FLATBED": true, "TENTED": true, "BOX": true, "REEFER": true, "TANKER": true, "TIPPER": true, "CAR_CARRIER": true,
+		},
+		"TRACTOR": {
+			"FLATBED": true, "TENTED": true, "BOX": true, "REEFER": true, "TANKER": true, "LOWBED": true, "CONTAINER": true,
+		},
+	}
+	if !allowedTrailer[power][trailer] {
+		return errors.New("trailer_plate_type must be from reference GET /v1/driver/transport-options → trailer_plate_types_by_power[" + power + "]")
+	}
+	derivedTruckType := trailerPlateToTruckType(trailer)
 	hasLoad, hasUnload := false, false
 	for _, rp := range req.RoutePoints {
 		if !reference.IsAllowed(rp.Type, reference.AllowedRoutePointTypes()) {
@@ -971,8 +1009,8 @@ func validateCargoCreate(req CreateCargoReq) error {
 	if !hasLoad || !hasUnload {
 		return errors.New("at least one load and one unload point required")
 	}
-	if (req.TempMin != nil || req.TempMax != nil) && strings.ToUpper(strings.TrimSpace(req.TruckType)) != "REFRIGERATOR" {
-		return errors.New("temp_min/temp_max require truck_type refrigerator")
+	if (req.TempMin != nil || req.TempMax != nil) && derivedTruckType != "REFRIGERATOR" {
+		return errors.New("temp_min/temp_max require refrigerator trailer_plate_type")
 	}
 	if req.ADREnabled && (req.ADRClass == nil || *req.ADRClass == "") {
 		return errors.New("adr_class required when adr_enabled is true")
@@ -1143,13 +1181,16 @@ func toCreateParams(req CreateCargoReq) cargo.CreateParams {
 		Name:             req.Name,
 		Weight:           req.Weight,
 		Volume:           req.Volume,
+		VehiclesAmount:   req.VehiclesAmount,
 		Packaging:        req.Packaging,
 		Dimensions:       req.Dimensions,
 		Photos:           req.Photos,
 		ReadyEnabled:     req.ReadyEnabled,
 		ReadyAt:          req.ReadyAt,
 		LoadComment:      req.LoadComment,
-		TruckType:        upperStr(req.TruckType),
+		TruckType:        trailerPlateToTruckType(req.TrailerPlateType),
+		PowerPlateType:   upperStr(req.PowerPlateType),
+		TrailerPlateType: upperStr(req.TrailerPlateType),
 		CapacityRequired: req.CapacityRequired,
 		TempMin:          req.TempMin,
 		TempMax:          req.TempMax,
@@ -1241,10 +1282,12 @@ func toCargoListItems(items []cargo.Cargo) []gin.H {
 func toCargoItem(c *cargo.Cargo) gin.H {
 	out := gin.H{
 		"id": c.ID.String(), "name": c.Name, "weight": c.Weight, "volume": c.Volume,
+		"vehicles_amount": c.VehiclesAmount,
 		"capacity_required": c.CapacityRequired,
 		"packaging": c.Packaging, "dimensions": c.Dimensions, "photos": c.PhotoURLs,
 		"ready_enabled": c.ReadyEnabled, "ready_at": c.ReadyAt, "load_comment": c.LoadComment,
 		"truck_type": c.TruckType, "temp_min": c.TempMin, "temp_max": c.TempMax,
+		"power_plate_type": c.PowerPlateType, "trailer_plate_type": c.TrailerPlateType,
 		"adr_enabled": c.ADREnabled, "adr_class": c.ADRClass, "loading_types": c.LoadingTypes, "requirements": c.Requirements,
 		"shipment_type": c.ShipmentType, "belts_count": c.BeltsCount, "documents": c.Documents,
 		"contact_name": c.ContactName, "contact_phone": c.ContactPhone, "status": c.Status,
