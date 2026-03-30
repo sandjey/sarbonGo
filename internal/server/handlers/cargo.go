@@ -673,14 +673,25 @@ func (h *CargoHandler) List(c *gin.Context) {
 			f.Status[i] = strings.TrimSpace(strings.ToUpper(f.Status[i]))
 		}
 	}
-	// When driver lists "searching" cargo, show only SEARCHING_ALL + SEARCHING_COMPANY (his company)
-	if h.jwtm != nil && h.drivers != nil {
+	// Optional JWT-based restrictions:
+	// - driver: when listing "searching" cargo, show only SEARCHING_ALL + SEARCHING_COMPANY (his company)
+	// - dispatcher (freelance): show only cargo created by this dispatcher (created_by_type=DISPATCHER, created_by_id=me)
+	if h.jwtm != nil {
 		if raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken)); raw != "" {
-			if userID, role, _, _, err := h.jwtm.ParseAccessWithSID(raw); err == nil && role == "driver" && userID != uuid.Nil {
-				if drv, _ := h.drivers.FindByID(c.Request.Context(), userID); drv != nil && drv.CompanyID != nil && *drv.CompanyID != "" {
-					if cid, err := uuid.Parse(*drv.CompanyID); err == nil {
-						f.ForDriverCompanyID = &cid
+			if userID, role, _, _, err := h.jwtm.ParseAccessWithSID(raw); err == nil && userID != uuid.Nil {
+				switch role {
+				case "driver":
+					if h.drivers != nil {
+						if drv, _ := h.drivers.FindByID(c.Request.Context(), userID); drv != nil && drv.CompanyID != nil && *drv.CompanyID != "" {
+							if cid, err := uuid.Parse(*drv.CompanyID); err == nil {
+								f.ForDriverCompanyID = &cid
+							}
+						}
 					}
+				case "dispatcher":
+					f2 := f
+					f2.CreatedByDispatcherID = &userID
+					f = f2
 				}
 			}
 		}
@@ -731,6 +742,17 @@ func (h *CargoHandler) GetByID(c *gin.Context) {
 	if obj == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 		return
+	}
+	// dispatcher (freelance): enforce "only my cargo" on GET /api/cargo/:id
+	if h.jwtm != nil {
+		if raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken)); raw != "" {
+			if userID, role, _, _, err := h.jwtm.ParseAccessWithSID(raw); err == nil && role == "dispatcher" && userID != uuid.Nil {
+				if obj.CreatedByType == nil || !strings.EqualFold(*obj.CreatedByType, "DISPATCHER") || obj.CreatedByID == nil || *obj.CreatedByID != userID {
+					resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
+					return
+				}
+			}
+		}
 	}
 	points, _ := h.repo.GetRoutePoints(c.Request.Context(), id)
 	pay, _ := h.repo.GetPayment(c.Request.Context(), id)

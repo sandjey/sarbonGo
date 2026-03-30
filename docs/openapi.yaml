@@ -880,7 +880,7 @@ paths:
         - **Вариант B — multipart/form-data:** `Content-Type: multipart/form-data`, обязательное текстовое поле **`data`** — строка JSON **того же состава**, что и CargoCreateRequest (как в application/json). Файлы — поле **`photos`** (можно несколько раз) или одно поле **`photo`**; макс. **5** файлов, каждый до **10 MB**, типы image/jpeg, image/png, image/webp. Сумма `len(photos в JSON) + число файлов` не больше 5. Сначала создаётся груз, затем файлы сохраняются в `cargo_photos` (как POST /api/cargo/{id}/photos).
         - **Вариант C:** сначала `POST application/json` без файлов → в ответе `data.id`, затем `POST /api/cargo/{id}/photos` для каждого файла.
         - **Вариант D (без cargo_id):** `POST /api/cargo/photos` (multipart, поле `photo`) → в ответе `data.url` вида `/api/cargo/photos/{uuid}` (и `data.id`). Просмотр: `GET /api/cargo/photos/{uuid}`. В `POST /api/cargo` в массиве `photos` передайте эту ссылку **или** сам UUID — после создания груза файл переносится в `cargo_photos`, в `data.photos` будут уже URL вида `/api/cargo/{cargo_id}/photos/{photo_id}`. Один и тот же pending UUID в `photos` дважды недопустим.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
         required: true
         content:
@@ -1051,7 +1051,7 @@ paths:
         - name: status
           in: query
           schema: { type: string, example: "SEARCHING_ALL,SEARCHING_COMPANY" }
-          description: "Статусы через запятую (SEARCHING_ALL, SEARCHING_COMPANY, ASSIGNED, ...). Для водителя с X-User-Token при фильтре по searching автоматически показываются грузы SEARCHING_ALL + SEARCHING_COMPANY (только своей компании)."
+          description: "Статусы через запятую (SEARCHING_ALL, SEARCHING_COMPANY, ASSIGNED, ...). Для водителя с X-User-Token при фильтре по searching автоматически показываются грузы SEARCHING_ALL + SEARCHING_COMPANY (только своей компании). Для фриланс-диспетчера с X-User-Token (role=dispatcher) дополнительно показываются только грузы, созданные этим диспетчером (created_by_type=DISPATCHER)."
         - name: weight_min
           in: query
           schema: { type: number, example: 10 }
