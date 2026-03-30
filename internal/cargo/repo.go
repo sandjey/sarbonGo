@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"sarbonNew/internal/cargodrivers"
 )
 
 type Repo struct {
@@ -169,11 +171,11 @@ func (r *Repo) Create(ctx context.Context, p CreateParams) (uuid.UUID, error) {
 	docJSON, _ := DocumentsToJSON(p.Documents)
 	var id uuid.UUID
 	q := `
-INSERT INTO cargo (name, weight, volume, vehicles_amount, capacity_required, packaging, dimensions, photo_urls, ready_enabled, ready_at, load_comment, truck_type,
+INSERT INTO cargo (name, weight, volume, vehicles_amount, vehicles_left, capacity_required, packaging, dimensions, photo_urls, ready_enabled, ready_at, load_comment, truck_type,
   power_plate_type, trailer_plate_type,
   temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
   documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, created_by_type, created_by_id, company_id, cargo_type_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, COALESCE(NULLIF(TRIM($25),''), 'PENDING_MODERATION'), now(), now(), NULL, $26, $27, $28, $29)
+VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, COALESCE(NULLIF(TRIM($25),''), 'PENDING_MODERATION'), now(), now(), NULL, $26, $27, $28, $29)
 RETURNING id`
 	err = tx.QueryRow(ctx, q,
 		p.Name,
@@ -216,7 +218,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 
 // GetByID returns cargo by id (excluding soft-deleted if needAll=false).
 func (r *Repo) GetByID(ctx context.Context, id uuid.UUID, includeDeleted bool) (*Cargo, error) {
-	q := `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+	q := `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
   c.ready_enabled, c.ready_at, c.load_comment, c.truck_type, COALESCE(c.power_plate_type,''), COALESCE(c.trailer_plate_type,''),
   c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
@@ -334,7 +336,7 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 	var packaging, dimensions sql.NullString
 	var ctCode, ctRU, ctUZ, ctEN, ctTR, ctZH sql.NullString
 	err := row.Scan(
-		&c.ID, &c.Name, &c.Weight, &c.Volume, &c.VehiclesAmount, &cap, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType, &c.PowerPlateType, &c.TrailerPlateType,
+		&c.ID, &c.Name, &c.Weight, &c.Volume, &c.VehiclesAmount, &c.VehiclesLeft, &cap, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType, &c.PowerPlateType, &c.TrailerPlateType,
 		&c.TempMin, &c.TempMax, &c.ADREnabled, &c.ADRClass, &loadingTypes, &requirements, &c.ShipmentType, &c.BeltsCount,
 		&docBytes, &c.ContactName, &c.ContactPhone, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.DeletedAt,
 		&c.ModerationRejectionReason, &c.CreatedByType, &c.CreatedByID, &c.CompanyID, &c.CargoTypeID,
@@ -372,7 +374,7 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 }
 
 func cargoListSelectFrom() string {
-	return `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+	return `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
   c.ready_enabled, c.ready_at, c.load_comment, c.truck_type, COALESCE(c.power_plate_type,''), COALESCE(c.trailer_plate_type,''),
   c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
@@ -382,6 +384,11 @@ FROM cargo c
 LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
 WHERE `
 }
+
+var ErrOfferNotFoundOrNotPending = errors.New("cargo: offer not found or not pending")
+var ErrCargoNotSearching = errors.New("cargo: cargo not searching")
+var ErrCargoSlotsFull = errors.New("cargo: cargo has no vehicles_left")
+var ErrDriverBusy = errors.New("cargo: driver already has active cargo")
 
 // buildCargoListWhereAndOrder строит WHERE (без префикса), аргументы и ORDER BY для списка грузов.
 func buildCargoListWhereAndOrder(f ListFilter) (where string, args []any, order string) {
@@ -867,6 +874,109 @@ FROM offers WHERE cargo_id = $1 ORDER BY created_at DESC`, cargoID)
 	return list, rows.Err()
 }
 
+// CountDriverCargoOffersByBucket returns count of offers by driver (carrier_id) for selected bucket.
+// bucket: sent|accepted|completed|rejected.
+func (r *Repo) CountDriverCargoOffersByBucket(ctx context.Context, driverID uuid.UUID, bucket string) (int, error) {
+	where, err := driverCargoOffersBucketWhere(bucket)
+	if err != nil {
+		return 0, err
+	}
+	var total int
+	err = r.pg.QueryRow(ctx, `
+SELECT COUNT(*)
+  FROM offers o
+ INNER JOIN cargo c ON c.id = o.cargo_id AND c.deleted_at IS NULL
+ WHERE o.carrier_id = $1 AND `+where, driverID).Scan(&total)
+	return total, err
+}
+
+// ListDriverCargoOffersByBucket lists driver offers with minimal cargo info.
+// bucket: sent|accepted|completed|rejected.
+func (r *Repo) ListDriverCargoOffersByBucket(ctx context.Context, driverID uuid.UUID, bucket string, limit, offset int) ([]DriverCargoOffer, error) {
+	where, err := driverCargoOffersBucketWhere(bucket)
+	if err != nil {
+		return nil, err
+	}
+	if limit < 1 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, err := r.pg.Query(ctx, `
+SELECT
+  o.id, o.cargo_id, o.carrier_id,
+  o.price, o.currency, o.comment, o.status,
+  COALESCE(o.rejection_reason, ''), o.created_at,
+  c.status, c.name, c.weight, c.volume, c.truck_type, COALESCE(c.vehicles_left, 0),
+  t.id, t.status
+FROM offers o
+INNER JOIN cargo c ON c.id = o.cargo_id AND c.deleted_at IS NULL
+LEFT JOIN trips t ON t.offer_id = o.id
+WHERE o.carrier_id = $1 AND `+where+`
+ORDER BY o.created_at DESC
+LIMIT $2 OFFSET $3`, driverID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []DriverCargoOffer
+	for rows.Next() {
+		var row DriverCargoOffer
+		var rejReason string
+		var cargoName sql.NullString
+		var tripID *uuid.UUID
+		var tripStatus sql.NullString
+		err := rows.Scan(
+			&row.ID, &row.CargoID, &row.CarrierID,
+			&row.Price, &row.Currency, &row.Comment, &row.Status,
+			&rejReason, &row.CreatedAt,
+			&row.CargoStatus, &cargoName, &row.CargoWeight, &row.CargoVolume, &row.CargoTruckType, &row.CargoVehiclesLeft,
+			&tripID, &tripStatus,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if rejReason != "" {
+			row.RejectionReason = &rejReason
+		}
+		if cargoName.Valid {
+			n := cargoName.String
+			row.CargoName = &n
+		}
+		row.TripID = tripID
+		if tripStatus.Valid {
+			s := tripStatus.String
+			row.TripStatus = &s
+		} else {
+			row.TripStatus = nil
+		}
+		list = append(list, row)
+	}
+	return list, rows.Err()
+}
+
+func driverCargoOffersBucketWhere(bucket string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(bucket)) {
+	case "sent":
+		return "o.status = 'PENDING'", nil
+	case "accepted":
+		// Accepted but not yet completed.
+		return "o.status = 'ACCEPTED' AND c.status <> 'COMPLETED'", nil
+	case "completed":
+		return "o.status = 'ACCEPTED' AND c.status = 'COMPLETED'", nil
+	case "rejected", "declined":
+		return "o.status = 'REJECTED'", nil
+	default:
+		return "", errors.New("cargo: invalid bucket")
+	}
+}
+
 // CreateOffer inserts an offer for a cargo.
 func (r *Repo) CreateOffer(ctx context.Context, cargoID, carrierID uuid.UUID, price float64, currency, comment string) (uuid.UUID, error) {
 	var id uuid.UUID
@@ -891,22 +1001,62 @@ func (r *Repo) AcceptOffer(ctx context.Context, offerID uuid.UUID) (cargoID, car
 		return uuid.Nil, uuid.Nil, err
 	}
 	defer tx.Rollback(ctx)
+
 	err = tx.QueryRow(ctx, "SELECT cargo_id, carrier_id FROM offers WHERE id = $1 AND status = 'PENDING'", offerID).Scan(&cargoID, &carrierID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return uuid.Nil, uuid.Nil, errors.New("cargo: offer not found or not pending")
+			return uuid.Nil, uuid.Nil, ErrOfferNotFoundOrNotPending
 		}
 		return uuid.Nil, uuid.Nil, err
 	}
+
+	// Lock cargo row for concurrency correctness (vehicles_left and searching status).
+	var status CargoStatus
+	var vehiclesLeft int
+	err = tx.QueryRow(ctx,
+		`SELECT status, vehicles_left
+		 FROM cargo
+		 WHERE id = $1 AND deleted_at IS NULL
+		 FOR UPDATE`,
+		cargoID).Scan(&status, &vehiclesLeft)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	if !IsSearching(status) {
+		return uuid.Nil, uuid.Nil, ErrCargoNotSearching
+	}
+	if vehiclesLeft <= 0 {
+		return uuid.Nil, uuid.Nil, ErrCargoSlotsFull
+	}
+
+	if err := cargodrivers.AcceptTx(ctx, tx, cargoID, carrierID); err != nil {
+		if errors.Is(err, cargodrivers.ErrDriverBusy) {
+			return uuid.Nil, uuid.Nil, ErrDriverBusy
+		}
+		return uuid.Nil, uuid.Nil, err
+	}
+
 	_, err = tx.Exec(ctx, "UPDATE offers SET status = 'ACCEPTED' WHERE id = $1", offerID)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
-	_, err = tx.Exec(ctx, "UPDATE cargo SET status = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL", StatusAssigned, cargoID)
+
+	// Decrease vehicles_left by 1, assign cargo only when it reaches 0.
+	var newLeft int
+	err = tx.QueryRow(ctx,
+		`UPDATE cargo
+		 SET vehicles_left = vehicles_left - 1,
+		     status = CASE WHEN vehicles_left - 1 <= 0 THEN $2 ELSE status END,
+		     updated_at = now()
+		 WHERE id = $1 AND deleted_at IS NULL AND vehicles_left > 0
+		 RETURNING vehicles_left`,
+		cargoID, StatusAssigned,
+	).Scan(&newLeft)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
-	_, _ = tx.Exec(ctx, "UPDATE offers SET status = 'REJECTED' WHERE cargo_id = $1 AND id != $2 AND status = 'PENDING'", cargoID, offerID)
+
+	// Do NOT auto-reject other pending offers: cargo may require multiple vehicles.
 	return cargoID, carrierID, tx.Commit(ctx)
 }
 
@@ -1004,10 +1154,68 @@ func (r *Repo) SetCargoStatusInProgress(ctx context.Context, cargoID uuid.UUID) 
 
 // SetCargoStatusCompleted sets cargo status to completed (when trip is completed).
 func (r *Repo) SetCargoStatusCompleted(ctx context.Context, cargoID uuid.UUID) error {
+	// For multi-vehicle cargo: consider cargo completed only when
+	// - it is already in progress/in transit AND
+	// - there are no ACTIVE drivers left AND
+	// - vehicles_left is 0 (fully staffed).
 	_, err := r.pg.Exec(ctx,
-		"UPDATE cargo SET status = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL AND (status = $3 OR status = $4)",
+		`UPDATE cargo
+		 SET status = $1, updated_at = now()
+		 WHERE id = $2
+		   AND deleted_at IS NULL
+		   AND (status = $3 OR status = $4)
+		   AND COALESCE(vehicles_left, 0) <= 0
+		   AND NOT EXISTS (
+		     SELECT 1 FROM cargo_drivers cd
+		     WHERE cd.cargo_id = cargo.id AND cd.status = 'ACTIVE'
+		   )`,
 		StatusCompleted, cargoID, StatusInProgress, StatusInTransit)
 	return err
+}
+
+// MarkDriverCompleted marks driver-cargo link completed (frees driver for next cargo).
+func (r *Repo) MarkDriverCompleted(ctx context.Context, cargoID, driverID uuid.UUID) error {
+	_, err := r.pg.Exec(ctx,
+		`UPDATE cargo_drivers
+		 SET status = 'COMPLETED', updated_at = now()
+		 WHERE cargo_id = $1 AND driver_id = $2 AND status = 'ACTIVE'`,
+		cargoID, driverID)
+	return err
+}
+
+// MarkDriverCancelled marks driver-cargo link cancelled and returns slot back (vehicles_left++).
+// This makes cargo searchable again if it was fully staffed (ASSIGNED) and a slot was freed.
+func (r *Repo) MarkDriverCancelled(ctx context.Context, cargoID, driverID uuid.UUID) error {
+	tx, err := r.pg.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	res, err := tx.Exec(ctx,
+		`UPDATE cargo_drivers
+		 SET status = 'CANCELLED', updated_at = now()
+		 WHERE cargo_id = $1 AND driver_id = $2 AND status = 'ACTIVE'`,
+		cargoID, driverID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return nil
+	}
+
+	// Return one slot back, but do not exceed vehicles_amount.
+	_, err = tx.Exec(ctx,
+		`UPDATE cargo
+		 SET vehicles_left = LEAST(vehicles_amount, vehicles_left + 1),
+		     status = CASE WHEN status = $2 THEN $3 ELSE status END,
+		     updated_at = now()
+		 WHERE id = $1 AND deleted_at IS NULL`,
+		cargoID, StatusAssigned, StatusSearchingAll)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // emptyToNil returns nil for empty string (for NULL in DB), else the string.

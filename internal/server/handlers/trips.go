@@ -195,7 +195,10 @@ func (h *TripsHandler) PatchStatus(c *gin.Context) {
 		if req.Status == trips.StatusLoading {
 			_ = h.cargoRepo.SetCargoStatusInProgress(c.Request.Context(), t.CargoID)
 		} else if req.Status == trips.StatusCompleted {
+			_ = h.cargoRepo.MarkDriverCompleted(c.Request.Context(), t.CargoID, driverID)
 			_ = h.cargoRepo.SetCargoStatusCompleted(c.Request.Context(), t.CargoID)
+		} else if req.Status == trips.StatusCancelled {
+			_ = h.cargoRepo.MarkDriverCancelled(c.Request.Context(), t.CargoID, driverID)
 		}
 	}
 	resp.OKLang(c, "updated", gin.H{"status": req.Status})

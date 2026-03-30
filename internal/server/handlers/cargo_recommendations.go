@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -210,7 +211,16 @@ func (h *CargoRecommendationsHandler) AcceptRecommendation(c *gin.Context) {
 	}
 	_, carrierID, err := h.cargoRepo.AcceptOffer(c.Request.Context(), offerID)
 	if err != nil {
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
+		switch {
+		case errors.Is(err, cargo.ErrCargoSlotsFull):
+			resp.ErrorLang(c, http.StatusConflict, "cargo_slots_full")
+		case errors.Is(err, cargo.ErrDriverBusy):
+			resp.ErrorLang(c, http.StatusConflict, "driver_busy_with_another_cargo")
+		case errors.Is(err, cargo.ErrCargoNotSearching):
+			resp.ErrorLang(c, http.StatusConflict, "cargo_not_searching")
+		default:
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
+		}
 		return
 	}
 	_, _ = h.recRepo.Accept(c.Request.Context(), cargoID, driverID)

@@ -868,6 +868,90 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 	resp.OKLang(c, "ok", gin.H{"items": toOfferList(offers)})
 }
 
+// ListMyCargoOffers lists driver offers (requests) grouped by bucket:
+// sent (PENDING), accepted (ACCEPTED, not completed), completed (ACCEPTED + cargo COMPLETED), rejected (REJECTED).
+// Endpoint: GET /v1/driver/cargo-offers?bucket=...
+func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+
+	bucket := strings.ToLower(strings.TrimSpace(c.Query("bucket")))
+	if bucket == "" {
+		bucket = "sent"
+	}
+	switch bucket {
+	case "sent", "accepted", "completed", "rejected":
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_cargo_offer_bucket")
+		return
+	}
+
+	page := getIntQuery(c, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	limit := getIntQuery(c, "limit", 30)
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	total, err := h.repo.CountDriverCargoOffersByBucket(c.Request.Context(), driverID, bucket)
+	if err != nil {
+		h.logger.Error("driver cargo offers count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_cargo_offers")
+		return
+	}
+
+	rows, err := h.repo.ListDriverCargoOffersByBucket(c.Request.Context(), driverID, bucket, limit, offset)
+	if err != nil {
+		h.logger.Error("driver cargo offers list", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_cargo_offers")
+		return
+	}
+
+	items := make([]gin.H, 0, len(rows))
+	for _, row := range rows {
+		item := gin.H{
+			"offer_id":          row.ID.String(),
+			"cargo_id":          row.CargoID.String(),
+			"status":            row.Status,
+			"price":             row.Price,
+			"currency":          row.Currency,
+			"comment":           row.Comment,
+			"created_at":        row.CreatedAt,
+			"rejection_reason": row.RejectionReason,
+			"cargo": gin.H{
+				"id":                row.CargoID.String(),
+				"name":              row.CargoName,
+				"status":            row.CargoStatus,
+				"weight":            row.CargoWeight,
+				"volume":            row.CargoVolume,
+				"truck_type":        row.CargoTruckType,
+				"vehicles_left":     row.CargoVehiclesLeft,
+			},
+		}
+
+		if row.TripID != nil {
+			item["trip"] = gin.H{
+				"id":     row.TripID.String(),
+				"status": row.TripStatus,
+			}
+		} else {
+			item["trip"] = nil
+		}
+
+		items = append(items, item)
+	}
+
+	resp.OKLang(c, "cargo_offers_listed", gin.H{
+		"items":  items,
+		"total":  total,
+		"page":   page,
+		"limit":  limit,
+		"bucket": bucket,
+	})
+}
+
 func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	offerID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -876,7 +960,18 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	}
 	cargoID, carrierID, err := h.repo.AcceptOffer(c.Request.Context(), offerID)
 	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		switch {
+		case errors.Is(err, cargo.ErrOfferNotFoundOrNotPending):
+			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
+		case errors.Is(err, cargo.ErrCargoSlotsFull):
+			resp.ErrorLang(c, http.StatusConflict, "cargo_slots_full")
+		case errors.Is(err, cargo.ErrDriverBusy):
+			resp.ErrorLang(c, http.StatusConflict, "driver_busy_with_another_cargo")
+		case errors.Is(err, cargo.ErrCargoNotSearching):
+			resp.ErrorLang(c, http.StatusConflict, "cargo_not_searching")
+		default:
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		}
 		return
 	}
 	if h.tripsRepo != nil {
@@ -1283,6 +1378,7 @@ func toCargoItem(c *cargo.Cargo) gin.H {
 	out := gin.H{
 		"id": c.ID.String(), "name": c.Name, "weight": c.Weight, "volume": c.Volume,
 		"vehicles_amount": c.VehiclesAmount,
+		"vehicles_left": c.VehiclesLeft,
 		"capacity_required": c.CapacityRequired,
 		"packaging": c.Packaging, "dimensions": c.Dimensions, "photos": c.PhotoURLs,
 		"ready_enabled": c.ReadyEnabled, "ready_at": c.ReadyAt, "load_comment": c.LoadComment,

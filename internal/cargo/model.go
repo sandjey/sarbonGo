@@ -56,6 +56,8 @@ type Cargo struct {
 	Volume       float64
 	// VehiclesAmount — сколько машин требуется для этого груза.
 	VehiclesAmount int
+	// VehiclesLeft — сколько машин ещё нужно (уменьшается при принятии водителя).
+	VehiclesLeft int
 	// CapacityRequired — требуемая грузоподъёмность ТС (тонны), из POST /api/cargo.
 	CapacityRequired *float64
 	Packaging        *string
@@ -145,9 +147,24 @@ type Offer struct {
 	Price          float64
 	Currency       string
 	Comment        *string
-	Status         string // pending, accepted, rejected
+	Status         string // PENDING, ACCEPTED, REJECTED
 	RejectionReason *string // optional, when dispatcher rejects
 	CreatedAt      time.Time
+}
+
+// DriverCargoOffer is one driver offer plus minimal cargo/trip info.
+// Used by GET /v1/driver/cargo-offers.
+type DriverCargoOffer struct {
+	Offer
+	CargoStatus    CargoStatus
+	CargoName      *string
+	CargoWeight    float64
+	CargoVolume    float64
+	CargoTruckType string
+	CargoVehiclesLeft int
+
+	TripID     *uuid.UUID
+	TripStatus *string
 }
 
 // CargoPhoto is metadata for a cargo photo stored on disk.

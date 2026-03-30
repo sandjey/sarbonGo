@@ -17,6 +17,7 @@ import (
 	"sarbonNew/internal/appusers"
 	"sarbonNew/internal/calls"
 	"sarbonNew/internal/cargo"
+	"sarbonNew/internal/cargodrivers"
 	"sarbonNew/internal/cargorecommendations"
 	"sarbonNew/internal/chat"
 	"sarbonNew/internal/favorites"
@@ -94,6 +95,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	appusersRepo := appusers.NewRepo(deps.PG)
 	cargoRepo := cargo.NewRepo(deps.PG)
 	tripsRepo := trips.NewRepo(deps.PG)
+	cargoDriversRepo := cargodrivers.NewRepo(deps.PG)
 	dcrRepo := dispatchercompanies.NewRepo(deps.PG)
 	dispInvRepo := dispatcherinvitations.NewRepo(deps.PG)
 	driverInvRepo := driverinvitations.NewRepo(deps.PG)
@@ -157,6 +159,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo)
 	cargoRecRepo := cargorecommendations.NewRepo(deps.PG)
 	cargoRecH := handlers.NewCargoRecommendationsHandler(logger, cargoRecRepo, cargoRepo, tripsRepo)
+
+	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo)
 
 	favRepo := favorites.NewRepo(deps.PG)
 	favH := handlers.NewFavoritesHandler(logger, favRepo, cargoRepo, driversRepo)
@@ -321,6 +325,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/recommended-cargo/:cargoId/decline", cargoRecH.DeclineRecommendation)
 	driverAuthed.GET("/nearby-cargo", driverCargoSearchH.NearbyCargoForDriver)
 	driverAuthed.GET("/matching-cargo", driverCargoSearchH.MatchingCargoForDriver)
+	driverAuthed.GET("/active-cargo", cargoDriversH.GetMyActiveCargo)
+	driverAuthed.GET("/cargo-offers", cargoH.ListMyCargoOffers)
 
 	// Dispatchers: только API диспетчера
 	dispAuthed := v1.Group("/dispatchers")
@@ -356,6 +362,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.PUT("/drivers/:driverId/trailer", driverInvH.SetDriverTrailer)
 	dispAuthed.PATCH("/trips/:id/assign-driver", tripsH.AssignDriver)
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
+	dispAuthed.GET("/cargo/:id/drivers", cargoDriversH.ListByCargo)
+	dispAuthed.POST("/cargo/:id/drivers/remove", cargoDriversH.RemoveFromCargo)
 	dispAuthed.GET("/cargo/export.xlsx", dispCargoExportH.ExportMyCargoExcel)
 	dispAuthed.POST("/cargo/:id/recommend", cargoRecH.Recommend)
 	dispAuthed.POST("/favorite-cargo", favH.AddDispatcherFavoriteCargo)
