@@ -157,9 +157,11 @@ tags:
       **Безопасность:** Все методы этого раздела доступны **только админам**. Сервер проверяет оба токена: **X-Client-Token** (обязателен для всех /v1) и **X-User-Token** (JWT после /v1/admin/auth/login/password с role=admin). При отсутствии или неверном X-User-Token или при JWT с другой ролью возвращается 401.
 
       **Поток (два шага):** 1) POST /v1/admin/companies — только создание компании (name обязательно, company_type, inn, address, phone, email, website, license_number, status, лимиты). Владелец не указывается. 2) GET /v1/admin/company-users/owners/search?q=... — поиск владельцев (только role=OWNER) по телефону, имени или фамилии; сортировка по релевантности. 3) PATCH /v1/admin/companies/:id/owner — привязать владельца (owner_id = UUID из company_users с **role=OWNER**). После назначения: у компании — owner_id и status=active, у пользователя в company_users — company_id (двусторонняя связь).
+      **Dev режим:** если на сервере env `COMPANIES_MODERATION_ENABLED=false`, то `POST /v1/admin/companies` создаёт компанию сразу со статусом `active` (без `pending` и без обязательного dev-шага “проставить owner”).
   - name: "Admin / Cargo moderation"
     description: |
-        **Модерация грузов.** Фрилансер создаёт груз → PENDING_MODERATION. Админ: GET /v1/admin/cargo/moderation — список; POST .../accept (тело: search_visibility all|company) — принять (→ SEARCHING_ALL или SEARCHING_COMPANY); POST .../reject — отклонить (reason обязателен, → REJECTED). Ответы на 5 языках.
+      **Модерация грузов.** Фрилансер создаёт груз → PENDING_MODERATION. Админ: GET /v1/admin/cargo/moderation — список; POST .../accept (тело: search_visibility all|company) — принять (→ SEARCHING_ALL или SEARCHING_COMPANY); POST .../reject — отклонить (reason обязателен, → REJECTED). Ответы на 5 языках.
+      **Dev режим:** если на сервере env `CARGO_MODERATION_ENABLED=false`, то `POST /api/cargo` создаёт груз сразу в SEARCHING_ALL, и этот раздел модерации в разработке не требуется.
   - name: Reference
     description: |
       **Руководство: Справочники (общие)**
@@ -888,13 +890,12 @@ paths:
             schema: { $ref: "#/components/schemas/CargoCreateRequest" }
             description: |
               Примеры:
-              **Важно:** Перед созданием получите `cargo_type_id` через `GET /v1/reference/cargo-types/hint?q=пшеница` → `items[0].id` и вставьте в тело запроса.
+              Примечание: поле `cargo_type_id` **опционально**. Если хотите привязать груз к типу — получите актуальный UUID через `GET /v1/reference/cargo-types/hint?q=...` и подставьте в запрос.
             examples:
               freelance_dispatcher:
                 summary: "Freelance dispatcher с типом груза Пшеница"
                 value:
                   name: "Пшеница, Ташкент → Самарканд, тент 20т/82м³"
-                  cargo_type_id: "e607fa35-3cb2-4e19-a80b-7056247ca2cd"
                   packaging: "Мешки по 50 кг на паллетах"
                   dimensions: "13.6x2.45x2.7"
                   photos:
@@ -967,7 +968,6 @@ paths:
                 summary: "Company cargo: с company_id и cargo_type_id"
                 value:
                   name: "Пшеница, Ташкент → Самарканд, тент 20т/82м³"
-                  cargo_type_id: "e607fa35-3cb2-4e19-a80b-7056247ca2cd"
                   weight: 20
                   volume: 82
                   vehicles_amount: 1

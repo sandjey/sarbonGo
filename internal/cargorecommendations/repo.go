@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,6 +25,11 @@ const statusPending = "PENDING"
 const statusAccepted = "ACCEPTED"
 const statusDeclined = "DECLINED"
 
+var (
+	ErrDriverNotFound = errors.New("recommendation: driver not found")
+	ErrCargoNotFound  = errors.New("recommendation: cargo not found")
+)
+
 // Create creates a recommendation (dispatcher recommends cargo to driver). Unique (cargo_id, driver_id).
 func (r *Repo) Create(ctx context.Context, cargoID, driverID, dispatcherID uuid.UUID) error {
 	_, err := r.pg.Exec(ctx,
@@ -31,6 +37,17 @@ func (r *Repo) Create(ctx context.Context, cargoID, driverID, dispatcherID uuid.
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (cargo_id, driver_id) DO UPDATE SET invited_by_dispatcher_id = $3, status = $4`,
 		cargoID, driverID, dispatcherID, statusPending)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			switch pgErr.ConstraintName {
+			case "cargo_driver_recommendations_driver_id_fkey":
+				return ErrDriverNotFound
+			case "cargo_driver_recommendations_cargo_id_fkey":
+				return ErrCargoNotFound
+			}
+		}
+	}
 	return err
 }
 

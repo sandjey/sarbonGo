@@ -41,6 +41,12 @@ type Config struct {
 	// FreelanceDispatcherCargoLimit — макс. число грузов на одного фриланс-диспетчера (0 = без лимита)
 	FreelanceDispatcherCargoLimit int
 
+	// CargoModerationEnabled — если false, груз после POST /api/cargo создаётся сразу в SEARCHING_ALL (dev mode).
+	CargoModerationEnabled bool
+
+	// CompaniesModerationEnabled — если false, POST /v1/admin/companies создаёт компанию сразу со статусом active (dev mode).
+	CompaniesModerationEnabled bool
+
 	// Calls (Voice)
 	CallsRingingTimeout time.Duration // how long call may stay RINGING before MISSED
 	CallsCreateLimit    int           // rate limit per window (per user)
@@ -89,6 +95,11 @@ func LoadFromEnv() (Config, error) {
 	cfg.TelegramGatewayBaseURL = strings.TrimRight(cfg.TelegramGatewayBaseURL, "/")
 
 	cfg.FreelanceDispatcherCargoLimit = mustAtoi(getEnv("FREELANCE_DISPATCHER_CARGO_LIMIT", "0"))
+
+	// Cargo moderation (dev toggle): default true.
+	cfg.CargoModerationEnabled = mustBool(getEnv("CARGO_MODERATION_ENABLED", "true"))
+	// Companies moderation (dev toggle): default true.
+	cfg.CompaniesModerationEnabled = mustBool(getEnv("COMPANIES_MODERATION_ENABLED", "true"))
 
 	// Calls defaults: 30s ringing timeout; 6 creates per minute.
 	cfg.CallsRingingTimeout = time.Duration(mustAtoi(getEnv("CALLS_RINGING_TIMEOUT_SECONDS", "30"))) * time.Second

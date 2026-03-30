@@ -175,7 +175,9 @@ INSERT INTO cargo (name, weight, volume, vehicles_amount, vehicles_left, capacit
   power_plate_type, trailer_plate_type,
   temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
   documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, created_by_type, created_by_id, company_id, cargo_type_id)
-VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, COALESCE(NULLIF(TRIM($25),''), 'PENDING_MODERATION'), now(), now(), NULL, $26, $27, $28, $29)
+-- NOTE: placeholder order must match tx.QueryRow args:
+-- ... documents($23), contact_name($24), contact_phone($25), status($26), created_by_type($27), created_by_id($28), company_id($29), cargo_type_id($30)
+VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, COALESCE(NULLIF(TRIM($26),''), 'PENDING_MODERATION'), now(), now(), NULL, $27, $28, $29, $30)
 RETURNING id`
 	err = tx.QueryRow(ctx, q,
 		p.Name,

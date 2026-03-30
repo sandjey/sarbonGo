@@ -245,6 +245,10 @@ func (h *CargoHandler) Create(c *gin.Context) {
 	params.Photos = externalPhotos
 	params.RoutePoints = routeInputs
 	params.CompanyID = req.CompanyID
+	// Dev toggle: skip moderation and publish immediately.
+	if !h.cfg.CargoModerationEnabled {
+		params.Status = cargo.StatusSearchingAll
+	}
 	// Автоматически записываем, кто создал груз: admin, dispatcher или company
 	raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken))
 	if raw != "" && h.jwtm != nil {

@@ -59,6 +59,14 @@ func (h *CargoRecommendationsHandler) Recommend(c *gin.Context) {
 		return
 	}
 	if err := h.recRepo.Create(c.Request.Context(), cargoID, req.DriverID, dispatcherID); err != nil {
+		switch {
+		case errors.Is(err, cargorecommendations.ErrDriverNotFound):
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
+			return
+		case errors.Is(err, cargorecommendations.ErrCargoNotFound):
+			resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
+			return
+		}
 		h.logger.Error("cargo recommend create", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_recommendation")
 		return

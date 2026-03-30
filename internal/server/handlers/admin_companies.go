@@ -11,6 +11,7 @@ import (
 
 	"sarbonNew/internal/appusers"
 	"sarbonNew/internal/companies"
+	"sarbonNew/internal/config"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 )
@@ -22,10 +23,11 @@ type AdminCompaniesHandler struct {
 	logger   *zap.Logger
 	repo     *companies.Repo
 	usersRepo *appusers.Repo
+	cfg      config.Config
 }
 
-func NewAdminCompaniesHandler(logger *zap.Logger, repo *companies.Repo, usersRepo *appusers.Repo) *AdminCompaniesHandler {
-	return &AdminCompaniesHandler{logger: logger, repo: repo, usersRepo: usersRepo}
+func NewAdminCompaniesHandler(logger *zap.Logger, repo *companies.Repo, usersRepo *appusers.Repo, cfg config.Config) *AdminCompaniesHandler {
+	return &AdminCompaniesHandler{logger: logger, repo: repo, usersRepo: usersRepo, cfg: cfg}
 }
 
 type adminCreateCompanyReq struct {
@@ -84,6 +86,12 @@ func (h *AdminCompaniesHandler) Create(c *gin.Context) {
 			}[s]
 			companyType = &dbVal
 		}
+	}
+
+	// Dev toggle: allow creating companies without pending/manual owner step.
+	if !h.cfg.CompaniesModerationEnabled {
+		active := "active"
+		req.Status = &active
 	}
 
 	id, err := h.repo.Create(c.Request.Context(), companies.CreateParams{
