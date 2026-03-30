@@ -25,33 +25,38 @@ func New(ctx context.Context, cfg config.Config, logger *zap.Logger) (*Infra, er
 		return nil, err
 	}
 
+	// Create extension for UUID generation
+	if _, err := pool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS "uuid-ossp";`); err != nil {
+		logger.Warn("failed to create uuid-ossp extension (might already exist)", zap.Error(err))
+	}
+
 	// Self-bootstrap schema: ensure `drivers` exists before serving requests.
 	if err := EnsureDriversTable(ctx, pool); err != nil {
 		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("EnsureDriversTable: %w", err)
 	}
 
 	// Ensure `admins` exists before serving requests.
 	if err := EnsureAdminsTable(ctx, pool); err != nil {
 		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("EnsureAdminsTable: %w", err)
 	}
 
 	// Ensure `companies` exists before serving requests.
 	if err := EnsureCompaniesTable(ctx, pool); err != nil {
 		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("EnsureCompaniesTable: %w", err)
 	}
 
 	// Ensure cargo, route_points, payments, offers (auto create/update on run).
 	if err := EnsureCargoTables(ctx, pool); err != nil {
 		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("EnsureCargoTables: %w", err)
 	}
 
 	if err := EnsureChatTables(ctx, pool); err != nil {
 		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("EnsureChatTables: %w", err)
 	}
 
 	rdb := redis.NewClient(&redis.Options{
@@ -61,7 +66,7 @@ func New(ctx context.Context, cfg config.Config, logger *zap.Logger) (*Infra, er
 	})
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		pool.Close()
-		return nil, err
+		return nil, fmt.Errorf("redis ping: %w", err)
 	}
 
 	logger.Info("infra ready")
