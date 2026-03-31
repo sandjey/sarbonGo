@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Sarbon - Calls Test Lab</title>
+  <title>123 Sarbon - Calls Test Lab</title>
   <style>
     *{box-sizing:border-box}
     body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:20px}
@@ -20,11 +20,13 @@
     textarea{min-height:92px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
     .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
     .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-    button{border:none;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer}
+    button{border:none;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(15,23,42,.12)}
     .b1{background:#2563eb;color:#fff}
     .b2{background:#16a34a;color:#fff}
     .b3{background:#dc2626;color:#fff}
     .b4{background:#475569;color:#fff}
+    .b5{background:#f59e0b;color:#111827}
+    .b5:hover{filter:brightness(.96)}
     .hint{font-size:12px;color:#64748b;margin-top:8px}
     #log{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;height:280px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;line-height:1.5}
     .w{grid-column:1 / -1}
@@ -60,8 +62,8 @@
       <textarea id="ut" placeholder="paste access_token here"></textarea>
       <div class="btns">
         <button class="b4" onclick="saveAuth()">Save local</button>
-        <button class="b1" onclick="getIceServers()">GET /v1/calls/ice-servers</button>
-        <button class="b1" onclick="getBootstrap()">GET /v1/calls/test/bootstrap</button>
+        <button class="b5" onclick="getIceServers()">GET /v1/calls/ice-servers</button>
+        <button class="b5" onclick="getBootstrap()">GET /v1/calls/test/bootstrap</button>
       </div>
       <div class="hint">Open this page on both devices and set JWT of current user on each device.</div>
     </div>
@@ -91,7 +93,8 @@
       <label>WS auth mode</label>
       <select id="wsmode"><option value="token">token</option></select>
       <label>WS auth value</label>
-      <input id="wsvalue" placeholder="jwt or user uuid" />
+      <input id="wsvalue" placeholder="jwt token" />
+      <div class="hint">Tip: if empty, WS will use X-User-Token automatically.</div>
       <div class="btns">
         <button class="b2" onclick="wsConnect()">WS Connect</button>
         <button class="b3" onclick="wsClose()">WS Close</button>
@@ -132,7 +135,8 @@ function loadAuth() {
   $("ct").value = localStorage.getItem(LS+"ct") || "";
   $("ut").value = localStorage.getItem(LS+"ut") || "";
   $("wsmode").value = localStorage.getItem(LS+"wsmode") || "token";
-  $("wsvalue").value = localStorage.getItem(LS+"wsvalue") || "";
+  const savedWS = localStorage.getItem(LS+"wsvalue") || "";
+  $("wsvalue").value = savedWS || $("ut").value || "";
 }
 
 function saveAuth() {
@@ -196,10 +200,19 @@ function wsConnect() {
   const base = $("base").value.trim().replace(/\/+$/, "");
   const wsBase = base.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
   const mode = $("wsmode").value;
-  const val = encodeURIComponent($("wsvalue").value.trim());
+  let rawVal = $("wsvalue").value.trim();
+  if (!rawVal && mode === "token") {
+    rawVal = $("ut").value.trim();
+    $("wsvalue").value = rawVal;
+  }
+  const val = encodeURIComponent(rawVal);
   const dt = encodeURIComponent($("device").value);
   const ln = encodeURIComponent($("lang").value);
   const ct = encodeURIComponent($("ct").value.trim());
+  if (!rawVal) {
+    log("WS token is empty");
+    return;
+  }
   const url = wsBase + "/v1/chat/ws?" + mode + "=" + val + "&device_type=" + dt + "&language=" + ln + "&client_token=" + ct;
   if (ws) ws.close();
   log("WS connect " + url);
