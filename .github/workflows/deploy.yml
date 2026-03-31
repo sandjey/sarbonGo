@@ -20,5 +20,5 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
                  export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
-              /home/dev_backend/restart.sh
+                 /home/dev_backend/restart.sh
 
