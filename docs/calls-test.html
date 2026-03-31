@@ -15,6 +15,7 @@
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
     .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px}
     .card h2{font-size:15px;margin:0 0 10px}
+    .card h3{font-size:13px;margin:10px 0 6px;color:#334155}
     label{display:block;font-size:12px;color:#334155;margin:8px 0 4px}
     input,select,textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px}
     textarea{min-height:92px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
@@ -27,6 +28,7 @@
     .b4{background:#475569;color:#fff}
     .b5{background:#f59e0b;color:#111827}
     .b5:hover{filter:brightness(.96)}
+    .b6{background:#7c3aed;color:#fff}
     .hint{font-size:12px;color:#64748b;margin-top:8px}
     #log{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;height:280px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;line-height:1.5}
     .w{grid-column:1 / -1}
@@ -111,6 +113,40 @@
     </div>
 
     <div class="card w">
+      <h2>Auto Auth A/B (one-click helpers)</h2>
+      <div class="row">
+        <div>
+          <h3>User A: Freelancer dispatcher (phone + password)</h3>
+          <label>A phone</label>
+          <input id="a_phone" placeholder="+998901234567" />
+          <label>A password</label>
+          <input id="a_password" type="password" placeholder="password" />
+          <div class="btns">
+            <button class="b6" onclick="loginA()">Login A</button>
+            <button class="b4" onclick="useAToken()">Use A token now</button>
+          </div>
+          <label>A token</label>
+          <textarea id="a_token" placeholder="A access token will appear here"></textarea>
+        </div>
+        <div>
+          <h3>User B: Driver (OTP flow)</h3>
+          <label>B phone</label>
+          <input id="b_phone" placeholder="+998901234568" />
+          <label>B OTP code</label>
+          <input id="b_otp" placeholder="123456" />
+          <div class="btns">
+            <button class="b6" onclick="sendOtpB()">Send OTP B</button>
+            <button class="b6" onclick="verifyOtpB()">Verify OTP B</button>
+            <button class="b4" onclick="useBToken()">Use B token now</button>
+          </div>
+          <label>B token</label>
+          <textarea id="b_token" placeholder="B access token will appear here"></textarea>
+        </div>
+      </div>
+      <div class="hint">Use this panel to quickly get tokens for two users and switch active token for calls/ws without manual copy-paste.</div>
+    </div>
+
+    <div class="card w">
       <h2>Log</h2>
       <div id="log"></div>
     </div>
@@ -137,6 +173,12 @@ function loadAuth() {
   $("wsmode").value = localStorage.getItem(LS+"wsmode") || "token";
   const savedWS = localStorage.getItem(LS+"wsvalue") || "";
   $("wsvalue").value = savedWS || $("ut").value || "";
+  $("a_phone").value = localStorage.getItem(LS+"a_phone") || "";
+  $("a_password").value = localStorage.getItem(LS+"a_password") || "";
+  $("a_token").value = localStorage.getItem(LS+"a_token") || "";
+  $("b_phone").value = localStorage.getItem(LS+"b_phone") || "";
+  $("b_otp").value = localStorage.getItem(LS+"b_otp") || "";
+  $("b_token").value = localStorage.getItem(LS+"b_token") || "";
 }
 
 function saveAuth() {
@@ -147,6 +189,12 @@ function saveAuth() {
   localStorage.setItem(LS+"ut", $("ut").value.trim());
   localStorage.setItem(LS+"wsmode", $("wsmode").value);
   localStorage.setItem(LS+"wsvalue", $("wsvalue").value.trim());
+  localStorage.setItem(LS+"a_phone", $("a_phone").value.trim());
+  localStorage.setItem(LS+"a_password", $("a_password").value);
+  localStorage.setItem(LS+"a_token", $("a_token").value.trim());
+  localStorage.setItem(LS+"b_phone", $("b_phone").value.trim());
+  localStorage.setItem(LS+"b_otp", $("b_otp").value.trim());
+  localStorage.setItem(LS+"b_token", $("b_token").value.trim());
   log("auth saved");
 }
 
@@ -172,6 +220,99 @@ async function api(method, path, body) {
   const text = await res.text();
   log("HTTP " + res.status + " " + text);
   return { status: res.status, text: text };
+}
+
+function authlessHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "X-Device-Type": $("device").value,
+    "X-Language": $("lang").value,
+    "X-Client-Token": $("ct").value.trim()
+  };
+}
+
+async function apiAuthless(method, path, body) {
+  const base = $("base").value.trim().replace(/\/+$/, "");
+  const url = base + path;
+  log(method + " " + url);
+  const res = await fetch(url, {
+    method: method,
+    headers: authlessHeaders(),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await res.text();
+  log("HTTP " + res.status + " " + text);
+  return { status: res.status, text: text };
+}
+
+function extractAccessToken(rawText) {
+  try {
+    const d = JSON.parse(rawText);
+    if (d && d.data && d.data.tokens && d.data.tokens.access_token) return d.data.tokens.access_token;
+    if (d && d.data && d.data.access_token) return d.data.access_token;
+    if (d && d.tokens && d.tokens.access_token) return d.tokens.access_token;
+    if (d && d.access_token) return d.access_token;
+  } catch (_) {}
+  return "";
+}
+
+function setActiveToken(token, label) {
+  if (!token) {
+    log(label + " token is empty");
+    return;
+  }
+  $("ut").value = token;
+  $("wsvalue").value = token;
+  saveAuth();
+  log("Active token set from " + label);
+}
+
+function useAToken() { setActiveToken($("a_token").value.trim(), "A"); }
+function useBToken() { setActiveToken($("b_token").value.trim(), "B"); }
+
+async function loginA() {
+  const phone = $("a_phone").value.trim();
+  const password = $("a_password").value;
+  if (!phone || !password) {
+    log("A phone/password required");
+    return;
+  }
+  const res = await apiAuthless("POST", "/v1/dispatchers/auth/login/password", { phone: phone, password: password });
+  const token = extractAccessToken(res.text);
+  if (!token) {
+    log("A login: access_token not found in response");
+    return;
+  }
+  $("a_token").value = token;
+  saveAuth();
+  log("A token received");
+}
+
+async function sendOtpB() {
+  const phone = $("b_phone").value.trim();
+  if (!phone) {
+    log("B phone required");
+    return;
+  }
+  await apiAuthless("POST", "/v1/driver/auth/phone", { phone: phone });
+}
+
+async function verifyOtpB() {
+  const phone = $("b_phone").value.trim();
+  const otp = $("b_otp").value.trim();
+  if (!phone || !otp) {
+    log("B phone + otp required");
+    return;
+  }
+  const res = await apiAuthless("POST", "/v1/driver/auth/otp/verify", { phone: phone, otp: otp });
+  const token = extractAccessToken(res.text);
+  if (!token) {
+    log("B verify: access_token not found (maybe new user needs registration)");
+    return;
+  }
+  $("b_token").value = token;
+  saveAuth();
+  log("B token received");
 }
 
 async function getBootstrap() { await api("GET", "/v1/calls/test/bootstrap"); }
