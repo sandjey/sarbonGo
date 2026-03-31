@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sarbon - WebRTC Voice Call Test</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;padding:20px;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f1f5f9;color:#0f172a}
+    .container{max-width:1100px;margin:0 auto}
+    h1{margin:0 0 6px;font-size:26px}
+    .sub{margin:0 0 14px;font-size:13px;color:#64748b}
+    .sub a{color:#2563eb;text-decoration:none}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px}
+    .card h2{margin:0 0 8px;font-size:15px}
+    .card h3{margin:8px 0 6px;font-size:13px;color:#334155}
+    label{display:block;font-size:12px;color:#475569;margin:8px 0 4px}
+    input,select,textarea{width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:9px;font-size:14px}
+    textarea{min-height:78px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    button{border:none;border-radius:10px;padding:10px 14px;font-size:14px;font-weight:700;cursor:pointer}
+    .b1{background:#2563eb;color:#fff}
+    .b2{background:#16a34a;color:#fff}
+    .b3{background:#dc2626;color:#fff}
+    .b4{background:#475569;color:#fff}
+    .b5{background:#7c3aed;color:#fff}
+    .hint{font-size:12px;color:#64748b;margin-top:8px}
+    .badge{display:inline-block;padding:4px 9px;border-radius:999px;font-size:12px;font-weight:700}
+    .ok{background:#dcfce7;color:#166534}
+    .warn{background:#ffedd5;color:#9a3412}
+    .err{background:#fee2e2;color:#991b1b}
+    #log{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;height:320px;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.5;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .w{grid-column:1 / -1}
+    audio{width:100%;margin-top:8px}
+    .incoming{display:none;background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:10px;margin-top:8px}
+    .incoming.show{display:block}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>WebRTC Voice Call Test</h1>
+  <p class="sub"><a href="/docs">Swagger</a> · <a href="/calls-test">Calls Test Lab</a> · Real browser-to-browser audio call</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Base Config</h2>
+      <label>API Base URL</label>
+      <input id="base" placeholder="https://api.sarbon.me"/>
+      <div class="row">
+        <div>
+          <label>X-Device-Type</label>
+          <select id="device"><option>web</option><option>ios</option><option>android</option></select>
+        </div>
+        <div>
+          <label>X-Language</label>
+          <select id="lang"><option>ru</option><option>en</option><option>uz</option><option>tr</option><option>zh</option></select>
+        </div>
+      </div>
+      <label>X-Client-Token</label>
+      <input id="ct" placeholder="client token"/>
+      <label>Current JWT token</label>
+      <textarea id="token" placeholder="access token"></textarea>
+      <div class="btns">
+        <button class="b4" onclick="saveState()">Save</button>
+        <button class="b1" onclick="refreshMe()">Get My ID</button>
+      </div>
+      <div class="hint">My user id: <span id="myId">-</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Auth (Auto)</h2>
+      <h3>Freelancer: phone + password</h3>
+      <div class="row">
+        <div>
+          <label>Dispatcher phone</label>
+          <input id="d_phone" placeholder="+998901234567"/>
+        </div>
+        <div>
+          <label>Password</label>
+          <input id="d_password" type="password" placeholder="password"/>
+        </div>
+      </div>
+      <div class="btns">
+        <button class="b5" onclick="loginDispatcher()">Login Dispatcher</button>
+      </div>
+
+      <h3>Driver: OTP</h3>
+      <div class="row">
+        <div>
+          <label>Driver phone</label>
+          <input id="dr_phone" placeholder="+998901234568"/>
+        </div>
+        <div>
+          <label>OTP</label>
+          <input id="dr_otp" placeholder="123456"/>
+        </div>
+      </div>
+      <div class="btns">
+        <button class="b5" onclick="sendDriverOtp()">Send OTP</button>
+        <button class="b5" onclick="verifyDriverOtp()">Verify OTP</button>
+      </div>
+      <div class="hint">After login/verify, token is auto-set as current token.</div>
+    </div>
+
+    <div class="card">
+      <h2>Connection</h2>
+      <div>WS: <span id="wsState" class="badge warn">CLOSED</span></div>
+      <div>Peer: <span id="pcState" class="badge warn">IDLE</span></div>
+      <div class="btns">
+        <button class="b2" onclick="connectWS()">Connect WS</button>
+        <button class="b3" onclick="disconnectWS()">Disconnect WS</button>
+        <button class="b2" onclick="startMic()">Start Mic</button>
+      </div>
+      <label>Peer user id</label>
+      <input id="peerId" placeholder="UUID of second user"/>
+      <label>Current call id</label>
+      <input id="callId" placeholder="auto-filled"/>
+      <div class="btns">
+        <button class="b2" onclick="callPeer()">Call</button>
+        <button class="b2" onclick="acceptCall()">Accept</button>
+        <button class="b3" onclick="declineCall()">Decline</button>
+        <button class="b3" onclick="hangup()">Hangup</button>
+      </div>
+      <div id="incoming" class="incoming">
+        <b>Incoming call</b>: <span id="incomingText"></span>
+      </div>
+      <audio id="remoteAudio" autoplay controls></audio>
+      <audio id="localAudio" autoplay muted controls></audio>
+    </div>
+
+    <div class="card w">
+      <h2>Log</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const LS = "sarbon_webrtc_";
+const $ = (id) => document.getElementById(id);
+let ws = null;
+let pc = null;
+let localStream = null;
+let currentCallId = "";
+
+function log(msg) {
+  const el = $("log");
+  el.textContent += "[" + new Date().toLocaleTimeString() + "] " + msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+function setBadge(id, text, cls) {
+  const e = $(id);
+  e.textContent = text;
+  e.className = "badge " + cls;
+}
+function saveState() {
+  localStorage.setItem(LS + "base", $("base").value.trim());
+  localStorage.setItem(LS + "device", $("device").value);
+  localStorage.setItem(LS + "lang", $("lang").value);
+  localStorage.setItem(LS + "ct", $("ct").value.trim());
+  localStorage.setItem(LS + "token", $("token").value.trim());
+  localStorage.setItem(LS + "peerId", $("peerId").value.trim());
+  localStorage.setItem(LS + "d_phone", $("d_phone").value.trim());
+  localStorage.setItem(LS + "d_password", $("d_password").value);
+  localStorage.setItem(LS + "dr_phone", $("dr_phone").value.trim());
+  localStorage.setItem(LS + "dr_otp", $("dr_otp").value.trim());
+  log("state saved");
+}
+function loadState() {
+  $("base").value = localStorage.getItem(LS + "base") || location.origin;
+  $("device").value = localStorage.getItem(LS + "device") || "web";
+  $("lang").value = localStorage.getItem(LS + "lang") || "ru";
+  $("ct").value = localStorage.getItem(LS + "ct") || "";
+  $("token").value = localStorage.getItem(LS + "token") || "";
+  $("peerId").value = localStorage.getItem(LS + "peerId") || "";
+  $("d_phone").value = localStorage.getItem(LS + "d_phone") || "";
+  $("d_password").value = localStorage.getItem(LS + "d_password") || "";
+  $("dr_phone").value = localStorage.getItem(LS + "dr_phone") || "";
+  $("dr_otp").value = localStorage.getItem(LS + "dr_otp") || "";
+}
+function baseHeaders(withAuth=true) {
+  const h = {
+    "Content-Type": "application/json",
+    "X-Device-Type": $("device").value,
+    "X-Language": $("lang").value,
+    "X-Client-Token": $("ct").value.trim()
+  };
+  if (withAuth) h["X-User-Token"] = $("token").value.trim();
+  return h;
+}
+async function api(method, path, body, withAuth=true) {
+  const base = $("base").value.trim().replace(/\/+$/, "");
+  const url = base + path;
+  log(method + " " + url);
+  const res = await fetch(url, {
+    method,
+    headers: baseHeaders(withAuth),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await res.text();
+  log("HTTP " + res.status + " " + text);
+  return { status: res.status, text };
+}
+function decodeJwtPayload(token) {
+  try {
+    const p = token.split(".")[1];
+    const b64 = p.replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(b64));
+  } catch (_) {
+    return null;
+  }
+}
+function extractAccessToken(rawText) {
+  try {
+    const d = JSON.parse(rawText);
+    if (d?.data?.tokens?.access_token) return d.data.tokens.access_token;
+    return "";
+  } catch (_) {
+    return "";
+  }
+}
+async function refreshMe() {
+  const r = await api("GET", "/v1/calls/test/bootstrap");
+  if (r.status !== 200) return;
+  try {
+    const d = JSON.parse(r.text);
+    $("myId").textContent = d?.data?.current_user_id || "-";
+  } catch (_) {}
+}
+async function loginDispatcher() {
+  const phone = $("d_phone").value.trim();
+  const password = $("d_password").value;
+  if (!phone || !password) return log("dispatcher phone/password required");
+  const r = await api("POST", "/v1/dispatchers/auth/login/password", { phone, password }, false);
+  const token = extractAccessToken(r.text);
+  if (!token) return log("dispatcher login failed");
+  $("token").value = token;
+  saveState();
+  await refreshMe();
+}
+async function sendDriverOtp() {
+  const phone = $("dr_phone").value.trim();
+  if (!phone) return log("driver phone required");
+  await api("POST", "/v1/driver/auth/phone", { phone }, false);
+}
+async function verifyDriverOtp() {
+  const phone = $("dr_phone").value.trim();
+  const otp = $("dr_otp").value.trim();
+  if (!phone || !otp) return log("driver phone + otp required");
+  const r = await api("POST", "/v1/driver/auth/otp/verify", { phone, otp }, false);
+  const token = extractAccessToken(r.text);
+  if (!token) return log("driver verify failed");
+  $("token").value = token;
+  saveState();
+  await refreshMe();
+}
+function wsUrl() {
+  const base = $("base").value.trim().replace(/\/+$/, "");
+  const wsBase = base.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+  const token = encodeURIComponent($("token").value.trim());
+  const dt = encodeURIComponent($("device").value);
+  const ln = encodeURIComponent($("lang").value);
+  const ct = encodeURIComponent($("ct").value.trim());
+  return wsBase + "/v1/chat/ws?token=" + token + "&device_type=" + dt + "&language=" + ln + "&client_token=" + ct;
+}
+async function connectWS() {
+  const token = $("token").value.trim();
+  if (!token) return log("token required");
+  if (ws) ws.close();
+  const url = wsUrl();
+  log("WS connect " + url);
+  ws = new WebSocket(url);
+  ws.onopen = () => setBadge("wsState", "OPEN", "ok");
+  ws.onclose = (e) => {
+    setBadge("wsState", "CLOSED", "warn");
+    log("WS CLOSE code=" + e.code);
+  };
+  ws.onerror = () => {
+    setBadge("wsState", "ERROR", "err");
+    log("WS ERROR");
+  };
+  ws.onmessage = async (e) => {
+    let obj = null;
+    try { obj = JSON.parse(e.data); } catch (_) {}
+    log("WS IN " + (obj ? JSON.stringify(obj) : e.data));
+    if (!obj || !obj.type) return;
+    if (obj.type === "call.invite") {
+      const call = obj?.data?.call;
+      if (!call?.id) return;
+      currentCallId = call.id;
+      $("callId").value = call.id;
+      $("incomingText").textContent = "from " + call.caller_id + ", call_id=" + call.id;
+      $("incoming").classList.add("show");
+      return;
+    }
+    if (!obj.data || !obj.data.call_id) return;
+    const callID = obj.data.call_id;
+    if (!currentCallId) {
+      currentCallId = callID;
+      $("callId").value = callID;
+    }
+    if (callID !== currentCallId) return;
+    if (obj.type === "webrtc.offer") {
+      await ensurePeerConnection();
+      await pc.setRemoteDescription(new RTCSessionDescription(obj.data.payload));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      sendSignal("webrtc.answer", pc.localDescription);
+      return;
+    }
+    if (obj.type === "webrtc.answer") {
+      if (!pc) return;
+      await pc.setRemoteDescription(new RTCSessionDescription(obj.data.payload));
+      return;
+    }
+    if (obj.type === "webrtc.ice") {
+      if (!pc || !obj.data.payload) return;
+      try { await pc.addIceCandidate(obj.data.payload); } catch (_) {}
+      return;
+    }
+  };
+}
+function disconnectWS() {
+  if (ws) ws.close();
+  ws = null;
+}
+async function getIceServers() {
+  const r = await api("GET", "/v1/calls/ice-servers");
+  if (r.status !== 200) return [{ urls: ["stun:stun.l.google.com:19302"] }];
+  try {
+    const d = JSON.parse(r.text);
+    const list = d?.data?.ice_servers || [];
+    if (!Array.isArray(list) || list.length === 0) return [{ urls: ["stun:stun.l.google.com:19302"] }];
+    return list;
+  } catch (_) {
+    return [{ urls: ["stun:stun.l.google.com:19302"] }];
+  }
+}
+async function startMic() {
+  if (localStream) return localStream;
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    $("localAudio").srcObject = localStream;
+    log("mic ready");
+    return localStream;
+  } catch (e) {
+    log("mic error: " + e.message);
+    throw e;
+  }
+}
+async function ensurePeerConnection() {
+  if (pc) return pc;
+  const iceServers = await getIceServers();
+  pc = new RTCPeerConnection({ iceServers });
+  setBadge("pcState", "PC READY", "warn");
+  pc.onconnectionstatechange = () => {
+    const s = pc.connectionState || "unknown";
+    if (s === "connected") setBadge("pcState", "CONNECTED", "ok");
+    else if (s === "failed" || s === "disconnected" || s === "closed") setBadge("pcState", s.toUpperCase(), "err");
+    else setBadge("pcState", s.toUpperCase(), "warn");
+    log("pc state " + s);
+  };
+  pc.onicecandidate = (ev) => {
+    if (!ev.candidate) return;
+    sendSignal("webrtc.ice", ev.candidate);
+  };
+  pc.ontrack = (ev) => {
+    const [stream] = ev.streams;
+    $("remoteAudio").srcObject = stream || null;
+    log("remote audio track received");
+  };
+  const stream = await startMic();
+  stream.getTracks().forEach((t) => pc.addTrack(t, stream));
+  return pc;
+}
+function sendSignal(type, payload) {
+  if (!ws || ws.readyState !== 1) return log("ws not open for signal");
+  if (!currentCallId) return log("call id empty");
+  const msg = { type, data: { call_id: currentCallId, payload } };
+  ws.send(JSON.stringify(msg));
+  log("WS OUT " + JSON.stringify(msg));
+}
+async function callPeer() {
+  const peerID = $("peerId").value.trim();
+  if (!peerID) return log("peer id required");
+  const crid = "web-" + Date.now();
+  const r = await api("POST", "/v1/calls", { peer_id: peerID, client_request_id: crid });
+  if (r.status !== 201) return;
+  let call = null;
+  try { call = JSON.parse(r.text)?.data?.call; } catch (_) {}
+  if (!call?.id) return log("call id missing in create");
+  currentCallId = call.id;
+  $("callId").value = call.id;
+  await ensurePeerConnection();
+  const offer = await pc.createOffer({ offerToReceiveAudio: true });
+  await pc.setLocalDescription(offer);
+  sendSignal("webrtc.offer", pc.localDescription);
+}
+async function acceptCall() {
+  const cid = $("callId").value.trim() || currentCallId;
+  if (!cid) return log("call id required");
+  const r = await api("POST", "/v1/calls/" + encodeURIComponent(cid) + "/accept");
+  if (r.status !== 200) return;
+  currentCallId = cid;
+  $("callId").value = cid;
+  $("incoming").classList.remove("show");
+  await ensurePeerConnection();
+}
+async function declineCall() {
+  const cid = $("callId").value.trim() || currentCallId;
+  if (!cid) return log("call id required");
+  await api("POST", "/v1/calls/" + encodeURIComponent(cid) + "/decline", { reason: "manual_decline" });
+  $("incoming").classList.remove("show");
+}
+async function hangup() {
+  const cid = $("callId").value.trim() || currentCallId;
+  if (cid) await api("POST", "/v1/calls/" + encodeURIComponent(cid) + "/end", { reason: "manual_end" });
+  try {
+    if (pc) pc.close();
+    pc = null;
+    setBadge("pcState", "IDLE", "warn");
+  } catch (_) {}
+}
+
+loadState();
+setBadge("wsState", "CLOSED", "warn");
+setBadge("pcState", "IDLE", "warn");
+refreshMe();
+</script>
+</body>
+</html>

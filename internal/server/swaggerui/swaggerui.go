@@ -37,6 +37,14 @@ func Register(r *gin.Engine) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, "<html><body><h3>calls-test page not found</h3></body></html>")
 	})
+	r.GET("/calls-webrtc", func(c *gin.Context) {
+		if p, ok := findUp("docs/calls-webrtc.html", 10); ok {
+			c.File(p)
+			return
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, "<html><body><h3>calls-webrtc page not found</h3></body></html>")
+	})
 }
 
 func findUp(rel string, maxDepth int) (string, bool) {
@@ -344,6 +352,7 @@ const swaggerHTML = `<!doctype html>
       <button class="btn" data-group="chat">Chat</button>
       <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">&#9889; WS Test</a>
       <a class="btn" href="/calls-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#7c3aed;color:#fff;border-color:#7c3aed">&#128222; Calls Test Lab</a>
+      <a class="btn" href="/calls-webrtc" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#1d4ed8;color:#fff;border-color:#1d4ed8">&#127908; WebRTC Call</a>
       <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">&#128187; Terminal</a>
       <button class="btn" data-group="company">Company</button>
       <button class="btn" data-group="reference">Reference</button>
