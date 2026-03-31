@@ -29,6 +29,14 @@ func Register(r *gin.Engine) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, wsTestHTML)
 	})
+	r.GET("/calls-test", func(c *gin.Context) {
+		if p, ok := findUp("docs/calls-test.html", 10); ok {
+			c.File(p)
+			return
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, "<html><body><h3>calls-test page not found</h3></body></html>")
+	})
 }
 
 func findUp(rel string, maxDepth int) (string, bool) {
@@ -335,6 +343,7 @@ const swaggerHTML = `<!doctype html>
       <button class="btn" data-group="cargo">Cargo API</button>
       <button class="btn" data-group="chat">Chat</button>
       <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">&#9889; WS Test</a>
+      <a class="btn" href="/calls-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#7c3aed;color:#fff;border-color:#7c3aed">&#128222; Calls Test Lab</a>
       <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">&#128187; Terminal</a>
       <button class="btn" data-group="company">Company</button>
       <button class="btn" data-group="reference">Reference</button>
@@ -491,6 +500,7 @@ const swaggerHTML = `<!doctype html>
           'Cargo — Диспетчер, компания, админ',
           'Chat',
           'Calls (Voice)',
+          'Calls (Voice) / Test Lab',
           'Company',
           'Reference',
           'Reference / Drivers',
@@ -699,7 +709,6 @@ const wsTestHTML = `<!doctype html>
         <label>Auth method</label>
         <select id="authMethod">
           <option value="token">JWT token (query ?token=)</option>
-          <option value="user_id">User ID (query ?user_id=)</option>
         </select>
       </div>
     </div>
@@ -787,7 +796,7 @@ function doConnect() {
   const host = $('host').value.replace(/\/+$/, '');
   const method = $('authMethod').value;
   const val = $('authValue').value.trim();
-  if (!val) { log('log-err', 'ERR', 'token / user_id is required'); return; }
+  if (!val) { log('log-err', 'ERR', 'token is required'); return; }
 
   const dt = $('deviceType').value;
   const ln = $('lang').value;

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Sarbon - Calls Test Lab</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#f8fafc;color:#0f172a;margin:0;padding:20px}
+    .container{max-width:1060px;margin:0 auto}
+    .head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+    h1{font-size:24px;margin:0}
+    .sub{color:#475569;font-size:13px}
+    .sub a{color:#2563eb;text-decoration:none}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+    .card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:14px}
+    .card h2{font-size:15px;margin:0 0 10px}
+    label{display:block;font-size:12px;color:#334155;margin:8px 0 4px}
+    input,select,textarea{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px}
+    textarea{min-height:92px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    button{border:none;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer}
+    .b1{background:#2563eb;color:#fff}
+    .b2{background:#16a34a;color:#fff}
+    .b3{background:#dc2626;color:#fff}
+    .b4{background:#475569;color:#fff}
+    .hint{font-size:12px;color:#64748b;margin-top:8px}
+    #log{background:#0f172a;color:#e2e8f0;border-radius:10px;padding:12px;height:280px;overflow:auto;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;line-height:1.5}
+    .w{grid-column:1 / -1}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="head">
+    <h1>Calls Test Lab</h1>
+    <div class="sub"><a href="/docs">Swagger</a> · <a href="/ws-test">WS Test</a></div>
+  </div>
+  <p class="sub">REST + WebSocket signaling testing for two devices (caller/callee).</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Auth + Base Headers</h2>
+      <label>API Base URL</label>
+      <input id="base" placeholder="https://api.example.com" />
+      <div class="row">
+        <div>
+          <label>X-Device-Type</label>
+          <select id="device"><option>web</option><option>ios</option><option>android</option></select>
+        </div>
+        <div>
+          <label>X-Language</label>
+          <select id="lang"><option>en</option><option>ru</option><option>uz</option><option>tr</option><option>zh</option></select>
+        </div>
+      </div>
+      <label>X-Client-Token</label>
+      <input id="ct" placeholder="client token" />
+      <label>X-User-Token (JWT)</label>
+      <textarea id="ut" placeholder="paste access_token here"></textarea>
+      <div class="btns">
+        <button class="b4" onclick="saveAuth()">Save local</button>
+        <button class="b1" onclick="getBootstrap()">GET /v1/calls/test/bootstrap</button>
+      </div>
+      <div class="hint">Open this page on both devices and set JWT of current user on each device.</div>
+    </div>
+
+    <div class="card">
+      <h2>Call Control (REST)</h2>
+      <label>Peer ID (callee user UUID)</label>
+      <input id="peer" placeholder="11111111-1111-1111-1111-111111111111" />
+      <label>Call ID</label>
+      <input id="callid" placeholder="call id after create/list" />
+      <label>Client Request ID (optional)</label>
+      <input id="crid" placeholder="tap-001" />
+      <div class="btns">
+        <button class="b2" onclick="createCall()">Create</button>
+        <button class="b1" onclick="listCalls()">List</button>
+        <button class="b1" onclick="getCall()">Get</button>
+        <button class="b2" onclick="acceptCall()">Accept</button>
+        <button class="b3" onclick="declineCall()">Decline</button>
+        <button class="b3" onclick="cancelCall()">Cancel</button>
+        <button class="b3" onclick="endCall()">End</button>
+      </div>
+      <div class="hint">Use same call id on both devices to run lifecycle tests.</div>
+    </div>
+
+    <div class="card">
+      <h2>WebSocket Signaling</h2>
+      <label>WS auth mode</label>
+      <select id="wsmode"><option value="token">token</option></select>
+      <label>WS auth value</label>
+      <input id="wsvalue" placeholder="jwt or user uuid" />
+      <div class="btns">
+        <button class="b2" onclick="wsConnect()">WS Connect</button>
+        <button class="b3" onclick="wsClose()">WS Close</button>
+        <button class="b4" onclick="wsTemplate('offer')">Template offer</button>
+        <button class="b4" onclick="wsTemplate('answer')">Template answer</button>
+        <button class="b4" onclick="wsTemplate('ice')">Template ice</button>
+        <button class="b4" onclick="wsTemplate('end')">Template end</button>
+      </div>
+      <label>WS message JSON</label>
+      <textarea id="wsmsg" placeholder='{"type":"webrtc.offer","data":{"call_id":"...","payload":{"sdp":"..."}}}'></textarea>
+      <div class="btns">
+        <button class="b1" onclick="wsSend()">WS Send</button>
+      </div>
+    </div>
+
+    <div class="card w">
+      <h2>Log</h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let ws = null;
+const $ = (id) => document.getElementById(id);
+const LS = "sarbon_calls_lab_";
+
+function log(msg) {
+  const el = $("log");
+  el.textContent += "[" + new Date().toLocaleTimeString() + "] " + msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+
+function loadAuth() {
+  $("base").value = localStorage.getItem(LS+"base") || (location.origin || "");
+  $("device").value = localStorage.getItem(LS+"device") || "web";
+  $("lang").value = localStorage.getItem(LS+"lang") || "en";
+  $("ct").value = localStorage.getItem(LS+"ct") || "";
+  $("ut").value = localStorage.getItem(LS+"ut") || "";
+  $("wsmode").value = localStorage.getItem(LS+"wsmode") || "token";
+  $("wsvalue").value = localStorage.getItem(LS+"wsvalue") || "";
+}
+
+function saveAuth() {
+  localStorage.setItem(LS+"base", $("base").value.trim());
+  localStorage.setItem(LS+"device", $("device").value);
+  localStorage.setItem(LS+"lang", $("lang").value);
+  localStorage.setItem(LS+"ct", $("ct").value.trim());
+  localStorage.setItem(LS+"ut", $("ut").value.trim());
+  localStorage.setItem(LS+"wsmode", $("wsmode").value);
+  localStorage.setItem(LS+"wsvalue", $("wsvalue").value.trim());
+  log("auth saved");
+}
+
+function headers() {
+  return {
+    "Content-Type": "application/json",
+    "X-Device-Type": $("device").value,
+    "X-Language": $("lang").value,
+    "X-Client-Token": $("ct").value.trim(),
+    "X-User-Token": $("ut").value.trim()
+  };
+}
+
+async function api(method, path, body) {
+  const base = $("base").value.trim().replace(/\/+$/, "");
+  const url = base + path;
+  log(method + " " + url);
+  const res = await fetch(url, {
+    method: method,
+    headers: headers(),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const text = await res.text();
+  log("HTTP " + res.status + " " + text);
+  return { status: res.status, text: text };
+}
+
+async function getBootstrap() { await api("GET", "/v1/calls/test/bootstrap"); }
+async function listCalls() { await api("GET", "/v1/calls?limit=20"); }
+async function getCall() { await api("GET", "/v1/calls/" + encodeURIComponent($("callid").value.trim())); }
+async function createCall() {
+  const body = { peer_id: $("peer").value.trim() };
+  const crid = $("crid").value.trim();
+  if (crid) body.client_request_id = crid;
+  const res = await api("POST", "/v1/calls", body);
+  try {
+    const d = JSON.parse(res.text);
+    if (d && d.data && d.data.call && d.data.call.id) {
+      $("callid").value = d.data.call.id;
+      log("call_id auto-filled: " + d.data.call.id);
+    }
+  } catch (e) {}
+}
+async function acceptCall() { await api("POST", "/v1/calls/" + encodeURIComponent($("callid").value.trim()) + "/accept"); }
+async function declineCall() { await api("POST", "/v1/calls/" + encodeURIComponent($("callid").value.trim()) + "/decline", { reason: "manual_decline" }); }
+async function cancelCall() { await api("POST", "/v1/calls/" + encodeURIComponent($("callid").value.trim()) + "/cancel"); }
+async function endCall() { await api("POST", "/v1/calls/" + encodeURIComponent($("callid").value.trim()) + "/end", { reason: "manual_end" }); }
+
+function wsConnect() {
+  const base = $("base").value.trim().replace(/\/+$/, "");
+  const wsBase = base.replace(/^http:/, "ws:").replace(/^https:/, "wss:");
+  const mode = $("wsmode").value;
+  const val = encodeURIComponent($("wsvalue").value.trim());
+  const dt = encodeURIComponent($("device").value);
+  const ln = encodeURIComponent($("lang").value);
+  const ct = encodeURIComponent($("ct").value.trim());
+  const url = wsBase + "/v1/chat/ws?" + mode + "=" + val + "&device_type=" + dt + "&language=" + ln + "&client_token=" + ct;
+  if (ws) ws.close();
+  log("WS connect " + url);
+  ws = new WebSocket(url);
+  ws.onopen = () => log("WS OPEN");
+  ws.onclose = (e) => log("WS CLOSE code=" + e.code + " reason=" + (e.reason || "-"));
+  ws.onerror = () => log("WS ERROR");
+  ws.onmessage = (e) => {
+    let txt = e.data;
+    try { txt = JSON.stringify(JSON.parse(e.data), null, 2); } catch (_) {}
+    log("WS IN " + txt);
+  };
+}
+
+function wsClose() {
+  if (ws) ws.close();
+  ws = null;
+}
+
+function wsSend() {
+  if (!ws || ws.readyState !== 1) {
+    log("WS not connected");
+    return;
+  }
+  const msg = $("wsmsg").value.trim();
+  ws.send(msg);
+  log("WS OUT " + msg);
+}
+
+function wsTemplate(kind) {
+  const cid = $("callid").value.trim() || "CALL_ID";
+  let payload = "";
+  if (kind === "offer") payload = '{"type":"webrtc.offer","data":{"call_id":"' + cid + '","payload":{"sdp":"..."}}}';
+  if (kind === "answer") payload = '{"type":"webrtc.answer","data":{"call_id":"' + cid + '","payload":{"sdp":"..."}}}';
+  if (kind === "ice") payload = '{"type":"webrtc.ice","data":{"call_id":"' + cid + '","payload":{"candidate":"..."}}}';
+  if (kind === "end") payload = '{"type":"call.end","data":{"call_id":"' + cid + '","payload":{"reason":"manual"}}}';
+  $("wsmsg").value = payload;
+}
+
+loadAuth();
+</script>
+</body>
+</html>

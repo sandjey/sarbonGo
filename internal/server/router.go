@@ -387,7 +387,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	appUserAuthed.PUT("/companies/:companyId/users/:userId/role", companyTZH.UpdateUserRole)
 	appUserAuthed.DELETE("/companies/:companyId/users/:userId", companyTZH.RemoveUser)
 
-	// Chat (driver, dispatcher, admin): JWT or X-User-ID for Swagger testing; WS supports ?user_id= or ?token=
+	// Chat (driver, dispatcher, admin): JWT auth only; WS uses ?token=JWT.
 	chatGroup := v1.Group("/chat")
 	chatGroup.Use(mw.RequireChatUser(jwtm, refreshStore))
 	chatGroup.GET("/conversations", chatH.ListConversations)
@@ -405,6 +405,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	callsGroup := v1.Group("/calls")
 	callsGroup.Use(mw.RequireChatUser(jwtm, refreshStore))
 	callsGroup.GET("", callsH.ListMyCalls)
+	callsGroup.GET("/test/bootstrap", callsH.GetCallTestBootstrap)
 	callsGroup.POST("", callsH.CreateCall)
 	callsGroup.GET("/:id", callsH.GetCall)
 	callsGroup.POST("/:id/accept", callsH.AcceptCall)

@@ -652,7 +652,7 @@ func (h *ChatHandler) GetPresence(c *gin.Context) {
 }
 
 // ServeWS upgrades connection to WebSocket and runs the client (read/write pumps).
-// GET /v1/chat/ws?token=JWT or ?user_id=UUID (for Swagger)
+// GET /v1/chat/ws?token=JWT
 func (h *ChatHandler) ServeWS(c *gin.Context) {
 	userID, ok := h.getUserID(c)
 	if !ok {

@@ -69,19 +69,12 @@ func RequireDispatcher(jwtm *security.JWTManager, refreshStore *store.RefreshSto
 	}
 }
 
-// RequireChatUser sets CtxUserID and CtxUserRole. Accepts:
-// - X-User-Token (JWT) or header X-User-ID (Swagger)
-// - Query ?user_id=uuid or ?token=JWT (for WebSocket)
+// RequireChatUser sets CtxUserID and CtxUserRole.
+// Auth sources:
+// - Query ?token=JWT (for WebSocket)
+// - Header X-User-Token (for HTTP)
 func RequireChatUser(jwtm *security.JWTManager, refreshStore *store.RefreshStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tryUserID := func(raw string) (uuid.UUID, bool) {
-			raw = strings.TrimSpace(raw)
-			if raw == "" {
-				return uuid.Nil, false
-			}
-			id, err := uuid.Parse(raw)
-			return id, err == nil && id != uuid.Nil
-		}
 		tryToken := func(raw string) (uuid.UUID, string, bool) {
 			raw = strings.TrimSpace(raw)
 			if raw == "" {
@@ -97,12 +90,6 @@ func RequireChatUser(jwtm *security.JWTManager, refreshStore *store.RefreshStore
 			return id, role, true
 		}
 		// 1) Query (for WS)
-		if id, ok := tryUserID(c.Query("user_id")); ok {
-			c.Set(CtxUserID, id)
-			c.Set(CtxUserRole, "user")
-			c.Next()
-			return
-		}
 		if id, role, ok := tryToken(c.Query("token")); ok {
 			c.Set(CtxUserID, id)
 			c.Set(CtxUserRole, role)
@@ -110,15 +97,9 @@ func RequireChatUser(jwtm *security.JWTManager, refreshStore *store.RefreshStore
 			return
 		}
 		// 2) Headers
-		if id, ok := tryUserID(c.GetHeader(HeaderUserID)); ok {
-			c.Set(CtxUserID, id)
-			c.Set(CtxUserRole, "user")
-			c.Next()
-			return
-		}
 		raw := strings.TrimSpace(c.GetHeader(HeaderUserToken))
 		if raw == "" {
-			resp.ErrorLang(c, 401, "missing_user_token_or_id")
+			resp.ErrorLang(c, 401, "missing_user_token")
 			c.Abort()
 			return
 		}

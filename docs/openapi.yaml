@@ -212,7 +212,7 @@ tags:
     description: |
       **Универсальный чат (driver ↔ dispatcher и др.)**
       **Кто вызывает:** Водитель, диспетчер или админ (JWT в X-User-Token). Для тестов в Swagger можно передать **X-User-ID** (UUID пользователя) вместо JWT.
-      **Поток:** GET /v1/chat/conversations → POST /v1/chat/conversations (body peer_id) → GET/POST /v1/chat/conversations/:id/messages. PATCH/DELETE /v1/chat/messages/:id. Presence: GET /v1/chat/presence/:user_id. WebSocket: GET /v1/chat/ws?user_id=UUID или ?token=JWT.
+      **Поток:** GET /v1/chat/conversations → POST /v1/chat/conversations (body peer_id) → GET/POST /v1/chat/conversations/:id/messages. PATCH/DELETE /v1/chat/messages/:id. Presence: GET /v1/chat/presence/:user_id. WebSocket: GET /v1/chat/ws?token=JWT.
   - name: Calls (Voice)
     description: |
       **Голосовые звонки (как Telegram по архитектуре):** медиа (аудио) идёт по **WebRTC**, а этот раздел отвечает за **создание/статусы звонка** и **signaling** через WebSocket чата.
@@ -231,6 +231,21 @@ tags:
       - **Busy**: сервер не даст создать новый звонок, если у caller или callee уже есть звонок в статусе RINGING/ACTIVE.
       - **Rate limit** на `POST /v1/calls` (по user_id): управляется env `CALLS_CREATE_LIMIT` и `CALLS_CREATE_WINDOW_SECONDS`.
       - **Timeout**: звонок в `RINGING` автоматически перейдёт в `MISSED` через `CALLS_RINGING_TIMEOUT_SECONDS`.
+  - name: Calls (Voice) / Test Lab
+    description: |
+      **Каталог для тестирования voice call c 2 устройств.**
+
+      Быстрые инструменты:
+      - Веб-стенд: `/calls-test` (REST + WebSocket сценарии в одном месте)
+      - WebSocket консоль: `/ws-test`
+      - Swagger: `/docs?group=chat`
+
+      Рекомендуемый порядок:
+      1) Подключить WS на обоих устройствах.
+      2) Caller создаёт звонок `POST /v1/calls`.
+      3) Callee принимает `POST /v1/calls/{id}/accept`.
+      4) Обмен `webrtc.offer/answer/ice`.
+      5) Завершение `POST /v1/calls/{id}/end`.
   - name: Company Users
     description: |
       **Один auth API для пользователей компаний.** Все владельцы проходят верификацию номера телефона через OTP.
@@ -4967,7 +4982,7 @@ paths:
       tags: [Chat]
       summary: "WebSocket чат"
       description: |
-        Подключение к чату в реальном времени. Авторизация через query: **user_id=UUID** (для теста) или **token=JWT**.
+        Подключение к чату в реальном времени. Авторизация через query: **token=JWT**.
         После подключения: отправка типа "typing" с data.conversation_id; получение событий "message" и "typing".
 
         **Дополнительно (Calls / WebRTC signaling):**
@@ -4980,10 +4995,6 @@ paths:
         `{ "type": "webrtc.offer", "data": { "call_id": "<uuid>", "from_id": "<uuid>", "payload": { ... } } }`
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       parameters:
-        - name: user_id
-          in: query
-          description: UUID пользователя (для теста без JWT)
-          schema: { type: string, format: uuid }
         - name: token
           in: query
           description: JWT access token
@@ -5089,6 +5100,57 @@ paths:
                 code: 429
                 description: "Слишком много запросов, попробуйте позже"
                 data: null
+
+  /v1/calls/test/bootstrap:
+    get:
+      tags: ["Calls (Voice) / Test Lab"]
+      summary: "Bootstrap для ручного теста voice call"
+      description: |
+        Возвращает готовые подсказки для теста звонков на 2 устройства:
+        - ссылки на `/docs`, `/ws-test`, `/calls-test`
+        - обязательные заголовки
+        - рекомендуемый REST flow
+        - готовые шаблоны websocket signaling сообщений.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "success" }
+                  code: { type: integer, example: 200 }
+                  description: { type: string, example: "ok" }
+                  data:
+                    type: object
+                    properties:
+                      tooling:
+                        type: object
+                        properties:
+                          swagger_docs_url: { type: string, example: "/docs?group=chat" }
+                          ws_test_url: { type: string, example: "/ws-test" }
+                          calls_test_url: { type: string, example: "/calls-test" }
+                      current_user_id: { type: string, format: uuid }
+                      required_headers:
+                        type: array
+                        items: { type: string }
+                      rest_flow:
+                        type: array
+                        items: { type: string }
+                      ws_templates:
+                        type: object
+                        properties:
+                          offer: { type: string }
+                          answer: { type: string }
+                          ice: { type: string }
+                          end: { type: string }
+                      notes:
+                        type: array
+                        items: { type: string }
+                required: [status, code, description, data]
+        "401": { description: unauthorized }
 
   /v1/calls/{id}:
     get:
