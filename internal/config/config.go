@@ -51,6 +51,9 @@ type Config struct {
 	CallsRingingTimeout time.Duration // how long call may stay RINGING before MISSED
 	CallsCreateLimit    int           // rate limit per window (per user)
 	CallsCreateWindow   time.Duration // rate limit window
+	CallsICEURLs        string        // comma-separated ICE URLs for clients
+	CallsICEUsername    string        // TURN username (static for now)
+	CallsICECredential  string        // TURN credential (static for now)
 }
 
 func LoadFromEnv() (Config, error) {
@@ -105,6 +108,9 @@ func LoadFromEnv() (Config, error) {
 	cfg.CallsRingingTimeout = time.Duration(mustAtoi(getEnv("CALLS_RINGING_TIMEOUT_SECONDS", "30"))) * time.Second
 	cfg.CallsCreateLimit = mustAtoi(getEnv("CALLS_CREATE_LIMIT", "6"))
 	cfg.CallsCreateWindow = time.Duration(mustAtoi(getEnv("CALLS_CREATE_WINDOW_SECONDS", "60"))) * time.Second
+	cfg.CallsICEURLs = strings.TrimSpace(getEnv("CALLS_ICE_URLS", "stun:stun.l.google.com:19302"))
+	cfg.CallsICEUsername = strings.TrimSpace(os.Getenv("CALLS_TURN_USERNAME"))
+	cfg.CallsICECredential = strings.TrimSpace(os.Getenv("CALLS_TURN_CREDENTIAL"))
 
 	return cfg, nil
 }

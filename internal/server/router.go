@@ -405,6 +405,30 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	callsGroup := v1.Group("/calls")
 	callsGroup.Use(mw.RequireChatUser(jwtm, refreshStore))
 	callsGroup.GET("", callsH.ListMyCalls)
+	callsGroup.GET("/ice-servers", func(c *gin.Context) {
+		raw := strings.TrimSpace(cfg.CallsICEURLs)
+		if raw == "" {
+			raw = "stun:stun.l.google.com:19302"
+		}
+		parts := strings.Split(raw, ",")
+		urls := make([]string, 0, len(parts))
+		for _, p := range parts {
+			u := strings.TrimSpace(p)
+			if u != "" {
+				urls = append(urls, u)
+			}
+		}
+		ice := gin.H{"urls": urls}
+		if cfg.CallsICEUsername != "" {
+			ice["username"] = cfg.CallsICEUsername
+		}
+		if cfg.CallsICECredential != "" {
+			ice["credential"] = cfg.CallsICECredential
+		}
+		resp.OKLang(c, "ok", gin.H{
+			"ice_servers": []gin.H{ice},
+		})
+	})
 	callsGroup.GET("/test/bootstrap", callsH.GetCallTestBootstrap)
 	callsGroup.POST("", callsH.CreateCall)
 	callsGroup.GET("/:id", callsH.GetCall)

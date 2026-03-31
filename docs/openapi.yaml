@@ -5152,6 +5152,44 @@ paths:
                 required: [status, code, description, data]
         "401": { description: unauthorized }
 
+  /v1/calls/ice-servers:
+    get:
+      tags: ["Calls (Voice) / Test Lab"]
+      summary: "Получить ICE/TURN конфиг для клиента"
+      description: |
+        Возвращает `ice_servers` для WebRTC клиента.
+        Данные берутся из env:
+        - `CALLS_ICE_URLS` (через запятую)
+        - `CALLS_TURN_USERNAME`
+        - `CALLS_TURN_CREDENTIAL`
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "success" }
+                  code: { type: integer, example: 200 }
+                  description: { type: string, example: "ok" }
+                  data:
+                    type: object
+                    properties:
+                      ice_servers:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            urls:
+                              type: array
+                              items: { type: string }
+                            username: { type: string, nullable: true }
+                            credential: { type: string, nullable: true }
+                required: [status, code, description, data]
+        "401": { description: unauthorized }
+
   /v1/calls/{id}:
     get:
       tags: ["Calls (Voice)"]

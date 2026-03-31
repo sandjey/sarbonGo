@@ -60,6 +60,7 @@
       <textarea id="ut" placeholder="paste access_token here"></textarea>
       <div class="btns">
         <button class="b4" onclick="saveAuth()">Save local</button>
+        <button class="b1" onclick="getIceServers()">GET /v1/calls/ice-servers</button>
         <button class="b1" onclick="getBootstrap()">GET /v1/calls/test/bootstrap</button>
       </div>
       <div class="hint">Open this page on both devices and set JWT of current user on each device.</div>
@@ -170,6 +171,7 @@ async function api(method, path, body) {
 }
 
 async function getBootstrap() { await api("GET", "/v1/calls/test/bootstrap"); }
+async function getIceServers() { await api("GET", "/v1/calls/ice-servers"); }
 async function listCalls() { await api("GET", "/v1/calls?limit=20"); }
 async function getCall() { await api("GET", "/v1/calls/" + encodeURIComponent($("callid").value.trim())); }
 async function createCall() {
