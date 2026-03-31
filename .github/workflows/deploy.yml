@@ -19,5 +19,6 @@ jobs:
           username:  dev_backend
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-               bash -lc "~/restart.sh"
+                 export PATH="/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
+              /home/dev_backend/restart.sh
 
