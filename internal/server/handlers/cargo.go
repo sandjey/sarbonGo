@@ -70,16 +70,14 @@ type CreateCargoReq struct {
 	Photos           []string       `json:"photos"` // до 5: внешние URL и/или pending с POST /api/cargo/photos (url или UUID)
 	ReadyEnabled     bool           `json:"ready_enabled"`
 	ReadyAt          *string        `json:"ready_at"`
-	LoadComment      *string        `json:"load_comment"`
+	Comment          *string        `json:"comment"`
 	PowerPlateType   string         `json:"power_plate_type" binding:"required"`
 	TrailerPlateType string         `json:"trailer_plate_type" binding:"required"`
-	CapacityRequired float64        `json:"capacity_required" binding:"required,gt=0"`
 	TempMin          *float64       `json:"temp_min"`
 	TempMax          *float64       `json:"temp_max"`
 	ADREnabled       bool           `json:"adr_enabled"`
 	ADRClass         *string        `json:"adr_class"`
 	LoadingTypes     []string       `json:"loading_types"`
-	Requirements     []string       `json:"requirements"`
 	ShipmentType     *string        `json:"shipment_type"`
 	BeltsCount       *int           `json:"belts_count"`
 	Documents        *cargo.Documents `json:"documents"`
@@ -114,7 +112,6 @@ type PaymentReq struct {
 	TotalAmount        *float64 `json:"total_amount"`
 	TotalCurrency      *string  `json:"total_currency"`
 	WithPrepayment     bool     `json:"with_prepayment"`
-	WithoutPrepayment  bool     `json:"without_prepayment"`
 	PrepaymentAmount   *float64 `json:"prepayment_amount"`
 	PrepaymentCurrency *string  `json:"prepayment_currency"`
 	PrepaymentType     *string  `json:"prepayment_type"`
@@ -663,20 +660,7 @@ func (h *CargoHandler) DeletePhoto(c *gin.Context) {
 }
 
 func (h *CargoHandler) List(c *gin.Context) {
-	f := cargo.ListFilter{
-		Page:        getIntQuery(c, "page", 1),
-		Limit:       getIntQuery(c, "limit", 20),
-		Sort:        c.DefaultQuery("sort", "created_at:desc"),
-		TruckType:   strings.TrimSpace(c.Query("truck_type")),
-		CreatedFrom: strings.TrimSpace(c.Query("created_from")),
-		CreatedTo:   strings.TrimSpace(c.Query("created_to")),
-	}
-	if v := c.Query("status"); v != "" {
-		f.Status = strings.Split(v, ",")
-		for i := range f.Status {
-			f.Status[i] = strings.TrimSpace(strings.ToUpper(f.Status[i]))
-		}
-	}
+	f := parseCargoListFilterFromQuery(c)
 	// Optional JWT-based restrictions:
 	// - driver: when listing "searching" cargo, show only SEARCHING_ALL + SEARCHING_COMPANY (his company)
 	// - dispatcher (freelance): show only cargo created by this dispatcher (created_by_type=DISPATCHER, created_by_id=me)
@@ -700,6 +684,54 @@ func (h *CargoHandler) List(c *gin.Context) {
 			}
 		}
 	}
+	h.listCargoPage(c, f)
+}
+
+// ListActiveCargoForDriver GET /v1/driver/cargo/active — активные грузы в поиске (рынок): по умолчанию SEARCHING_*,
+// с фильтрами как у GET /api/cargo. Водитель с company_id видит SEARCHING_ALL + SEARCHING_COMPANY своей компании.
+func (h *CargoHandler) ListActiveCargoForDriver(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	f := parseCargoListFilterFromQuery(c)
+	if len(f.Status) == 0 {
+		f.Status = []string{string(cargo.StatusSearchingAll)}
+	}
+	if h.drivers != nil {
+		if drv, err := h.drivers.FindByID(c.Request.Context(), driverID); err == nil && drv != nil && drv.CompanyID != nil && *drv.CompanyID != "" {
+			if cid, err := uuid.Parse(*drv.CompanyID); err == nil {
+				f.ForDriverCompanyID = &cid
+			}
+		}
+	}
+	h.listCargoPage(c, f)
+}
+
+// ListActiveCargoForDispatcher GET /v1/dispatchers/cargo/active — маркетплейс: все активные грузы в поиске по базе
+// (не только созданные этим диспетчером). По умолчанию status=SEARCHING_ALL; можно расширить status, q, фильтры.
+func (h *CargoHandler) ListActiveCargoForDispatcher(c *gin.Context) {
+	_ = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	f := parseCargoListFilterFromQuery(c)
+	if len(f.Status) == 0 {
+		f.Status = []string{string(cargo.StatusSearchingAll)}
+	}
+	// без CreatedByDispatcherID — полный каталог
+	h.listCargoPage(c, f)
+}
+
+func parseCargoListFilterFromQuery(c *gin.Context) cargo.ListFilter {
+	f := cargo.ListFilter{
+		Page:        getIntQuery(c, "page", 1),
+		Limit:       getIntQuery(c, "limit", 20),
+		Sort:        c.DefaultQuery("sort", "created_at:desc"),
+		TruckType:   strings.TrimSpace(c.Query("truck_type")),
+		CreatedFrom: strings.TrimSpace(c.Query("created_from")),
+		CreatedTo:   strings.TrimSpace(c.Query("created_to")),
+	}
+	if v := c.Query("status"); v != "" {
+		f.Status = strings.Split(v, ",")
+		for i := range f.Status {
+			f.Status[i] = strings.TrimSpace(strings.ToUpper(f.Status[i]))
+		}
+	}
 	if v := c.Query("weight_min"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil {
 			f.WeightMin = &n
@@ -714,6 +746,19 @@ func (h *CargoHandler) List(c *gin.Context) {
 		b := strings.ToLower(v) == "true" || v == "1"
 		f.WithOffers = &b
 	}
+	q := strings.TrimSpace(c.Query("q"))
+	if q != "" {
+		f.NameContains = q
+	}
+	if v := c.Query("company_id"); v != "" {
+		if id, err := uuid.Parse(strings.TrimSpace(v)); err == nil && id != uuid.Nil {
+			f.CompanyID = &id
+		}
+	}
+	return f
+}
+
+func (h *CargoHandler) listCargoPage(c *gin.Context, f cargo.ListFilter) {
 	result, err := h.repo.List(c.Request.Context(), f)
 	if err != nil {
 		h.logger.Error("cargo list", zap.Error(err))
@@ -1057,15 +1102,13 @@ type UpdateCargoReq struct {
 	Photos           []string         `json:"photos"`
 	ReadyEnabled     *bool            `json:"ready_enabled"`
 	ReadyAt          *string          `json:"ready_at"`
-	LoadComment      *string          `json:"load_comment"`
+	Comment          *string          `json:"comment"`
 	TruckType        *string          `json:"truck_type"`
-	CapacityRequired *float64         `json:"capacity_required"`
 	TempMin          *float64         `json:"temp_min"`
 	TempMax          *float64         `json:"temp_max"`
 	ADREnabled       *bool            `json:"adr_enabled"`
 	ADRClass         *string          `json:"adr_class"`
 	LoadingTypes     []string         `json:"loading_types"`
-	Requirements     []string         `json:"requirements"`
 	ShipmentType     *string          `json:"shipment_type"`
 	BeltsCount       *int             `json:"belts_count"`
 	Documents        *cargo.Documents `json:"documents"`
@@ -1308,17 +1351,15 @@ func toCreateParams(req CreateCargoReq) cargo.CreateParams {
 		Photos:           req.Photos,
 		ReadyEnabled:     req.ReadyEnabled,
 		ReadyAt:          req.ReadyAt,
-		LoadComment:      req.LoadComment,
+		Comment:          req.Comment,
 		TruckType:        trailerPlateToTruckType(req.TrailerPlateType),
 		PowerPlateType:   upperStr(req.PowerPlateType),
 		TrailerPlateType: upperStr(req.TrailerPlateType),
-		CapacityRequired: req.CapacityRequired,
 		TempMin:          req.TempMin,
 		TempMax:          req.TempMax,
 		ADREnabled:       req.ADREnabled,
 		ADRClass:         strPtrUpper(req.ADRClass),
 		LoadingTypes:     loadingTypes,
-		Requirements:     req.Requirements,
 		ShipmentType:     shipmentTypePtrUpper(req.ShipmentType),
 		BeltsCount:       req.BeltsCount,
 		Documents:        req.Documents,
@@ -1334,7 +1375,6 @@ func toCreateParams(req CreateCargoReq) cargo.CreateParams {
 			TotalAmount:        req.Payment.TotalAmount,
 			TotalCurrency:      strPtrUpper(req.Payment.TotalCurrency),
 			WithPrepayment:     req.Payment.WithPrepayment,
-			WithoutPrepayment:  req.Payment.WithoutPrepayment,
 			PrepaymentAmount:   req.Payment.PrepaymentAmount,
 			PrepaymentCurrency: strPtrUpper(req.Payment.PrepaymentCurrency),
 			PrepaymentType:     strPtrUpper(req.Payment.PrepaymentType),
@@ -1356,12 +1396,11 @@ func toUpdateParams(req UpdateCargoReq) cargo.UpdateParams {
 	p.Photos = req.Photos
 	p.ReadyEnabled = req.ReadyEnabled
 	p.ReadyAt = req.ReadyAt
-	p.LoadComment = req.LoadComment
+	p.Comment = req.Comment
 	if req.TruckType != nil {
 		u := upperStr(*req.TruckType)
 		p.TruckType = &u
 	}
-	p.CapacityRequired = req.CapacityRequired
 	p.TempMin = req.TempMin
 	p.TempMax = req.TempMax
 	p.ADREnabled = req.ADREnabled
@@ -1373,7 +1412,6 @@ func toUpdateParams(req UpdateCargoReq) cargo.UpdateParams {
 		}
 		p.LoadingTypes = loadingTypes
 	}
-	p.Requirements = req.Requirements
 	p.ShipmentType = shipmentTypePtrUpper(req.ShipmentType)
 	p.BeltsCount = req.BeltsCount
 	p.Documents = req.Documents
@@ -1383,7 +1421,7 @@ func toUpdateParams(req UpdateCargoReq) cargo.UpdateParams {
 		p.Payment = &cargo.PaymentInput{
 			IsNegotiable: req.Payment.IsNegotiable, PriceRequest: req.Payment.PriceRequest,
 			TotalAmount: req.Payment.TotalAmount, TotalCurrency: strPtrUpper(req.Payment.TotalCurrency),
-			WithPrepayment: req.Payment.WithPrepayment, WithoutPrepayment: req.Payment.WithoutPrepayment,
+			WithPrepayment: req.Payment.WithPrepayment,
 			PrepaymentAmount: req.Payment.PrepaymentAmount, PrepaymentCurrency: strPtrUpper(req.Payment.PrepaymentCurrency),
 			PrepaymentType: strPtrUpper(req.Payment.PrepaymentType), RemainingAmount: req.Payment.RemainingAmount,
 			RemainingCurrency: strPtrUpper(req.Payment.RemainingCurrency), RemainingType: strPtrUpper(req.Payment.RemainingType),
@@ -1405,12 +1443,11 @@ func toCargoItem(c *cargo.Cargo) gin.H {
 		"id": c.ID.String(), "name": c.Name, "weight": c.Weight, "volume": c.Volume,
 		"vehicles_amount": c.VehiclesAmount,
 		"vehicles_left": c.VehiclesLeft,
-		"capacity_required": c.CapacityRequired,
 		"packaging": c.Packaging, "dimensions": c.Dimensions, "photos": c.PhotoURLs,
-		"ready_enabled": c.ReadyEnabled, "ready_at": c.ReadyAt, "load_comment": c.LoadComment,
+		"ready_enabled": c.ReadyEnabled, "ready_at": c.ReadyAt, "comment": c.Comment,
 		"truck_type": c.TruckType, "temp_min": c.TempMin, "temp_max": c.TempMax,
 		"power_plate_type": c.PowerPlateType, "trailer_plate_type": c.TrailerPlateType,
-		"adr_enabled": c.ADREnabled, "adr_class": c.ADRClass, "loading_types": c.LoadingTypes, "requirements": c.Requirements,
+		"adr_enabled": c.ADREnabled, "adr_class": c.ADRClass, "loading_types": c.LoadingTypes,
 		"shipment_type": c.ShipmentType, "belts_count": c.BeltsCount, "documents": c.Documents,
 		"contact_name": c.ContactName, "contact_phone": c.ContactPhone, "status": c.Status,
 		"created_at": c.CreatedAt, "updated_at": c.UpdatedAt,
@@ -1484,7 +1521,7 @@ func toPaymentResp(p *cargo.Payment) gin.H {
 	return gin.H{
 		"id": p.ID.String(), "cargo_id": p.CargoID.String(), "is_negotiable": p.IsNegotiable, "price_request": p.PriceRequest,
 		"total_amount": p.TotalAmount, "total_currency": p.TotalCurrency,
-		"with_prepayment": p.WithPrepayment, "without_prepayment": p.WithoutPrepayment,
+		"with_prepayment": p.WithPrepayment,
 		"prepayment_amount": p.PrepaymentAmount, "prepayment_currency": p.PrepaymentCurrency, "prepayment_type": p.PrepaymentType,
 		"remaining_amount": p.RemainingAmount, "remaining_currency": p.RemainingCurrency, "remaining_type": p.RemainingType,
 	}

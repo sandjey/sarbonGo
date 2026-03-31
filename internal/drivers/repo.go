@@ -482,12 +482,34 @@ func (r *Repo) DeleteAndArchive(ctx context.Context, id uuid.UUID) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	tag, err := tx.Exec(ctx, `INSERT INTO deleted_drivers SELECT * FROM drivers WHERE id = $1`, id)
+	// Explicit column list to avoid schema drift issues (e.g. when drivers schema is upgraded/split).
+	tag, err := tx.Exec(ctx, `
+INSERT INTO deleted_drivers (
+  id, phone, created_at, updated_at, last_online_at, latitude, longitude, push_token,
+  registration_step, registration_status, name, driver_type, rating, work_status,
+  freelancer_id, company_id, account_status,
+  driver_passport_series, driver_passport_number, driver_pinfl, driver_scan_status,
+  driver_owner, kyc_status,
+  photo_data, photo_content_type
+)
+SELECT
+  id, phone, created_at, updated_at, last_online_at, latitude, longitude, push_token,
+  registration_step, registration_status, name, driver_type, rating, work_status,
+  freelancer_id, company_id, account_status,
+  driver_passport_series, driver_passport_number, driver_pinfl, driver_scan_status,
+  driver_owner, kyc_status,
+  photo_data, photo_content_type
+FROM drivers
+WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrDeleteNotFound
+	}
+	// trips.driver_id has FK without ON DELETE; detach before deleting the driver row.
+	if _, err := tx.Exec(ctx, `UPDATE trips SET driver_id = NULL, updated_at = now() WHERE driver_id = $1`, id); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM drivers WHERE id = $1`, id); err != nil {
 		return err

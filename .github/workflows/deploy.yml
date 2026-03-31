@@ -1,0 +1,23 @@
+name: Deploy Go App
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 46.8.176.2
+          username:  dev_backend
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            ../..restart.sh
+

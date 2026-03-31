@@ -77,6 +77,19 @@ func (h *KYCHandler) Submit(c *gin.Context) {
 	req.TrailerData.OwnerName = trim(req.TrailerData.OwnerName)
 
 	// Completion rules (for StatusFull): all required fields are present + scan statuses are true.
+	if errKey := validatePassportSeries(req.DriverData.PassportSeries); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	if errKey := validatePassportNumber(req.DriverData.PassportNumber); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	if errKey := validatePINFL(req.DriverData.PINFL); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+
 	driverOK := req.DriverData.PassportSeries != "" && req.DriverData.PassportNumber != "" && req.DriverData.PINFL != "" &&
 		req.DriverData.ScanStatus != nil && *req.DriverData.ScanStatus
 
@@ -148,11 +161,15 @@ func (h *KYCHandler) Submit(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	updated, _ := h.drivers.FindByID(c.Request.Context(), driverID)
+	updated, err := h.drivers.FindByID(c.Request.Context(), driverID)
+	if err != nil {
+		h.logger.Error("driver reload after kyc failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 	resp.OKLang(c, "ok", gin.H{
 		"event":   "updated",
 		"is_full": isFull,
 		"driver":  updated,
 	})
 }
-

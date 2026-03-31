@@ -44,24 +44,10 @@ CREATE TABLE IF NOT EXISTS drivers (
   driver_pinfl VARCHAR NULL,
   driver_scan_status BOOLEAN NULL,
 
-  power_plate_type VARCHAR NULL,
-  power_plate_number VARCHAR NULL,
-  power_tech_series VARCHAR NULL,
-  power_tech_number VARCHAR NULL,
-  power_owner_id VARCHAR NULL,
-  power_owner_name VARCHAR NULL,
-  power_scan_status BOOLEAN NULL,
-
-  trailer_plate_type VARCHAR NULL,
-  trailer_plate_number VARCHAR NULL,
-  trailer_tech_series VARCHAR NULL,
-  trailer_tech_number VARCHAR NULL,
-  trailer_owner_id VARCHAR NULL,
-  trailer_owner_name VARCHAR NULL,
-  trailer_scan_status BOOLEAN NULL,
-
   driver_owner BOOLEAN NULL,
-  kyc_status VARCHAR NULL
+  kyc_status VARCHAR NULL,
+  photo_data BYTEA NULL,
+  photo_content_type VARCHAR(50) NULL
 );
 `)
 	if err != nil {
@@ -74,12 +60,6 @@ CREATE TABLE IF NOT EXISTS drivers (
 ALTER TABLE drivers
   ADD COLUMN IF NOT EXISTS push_token VARCHAR NULL,
   ADD COLUMN IF NOT EXISTS name VARCHAR NULL,
-  ADD COLUMN IF NOT EXISTS power_plate_type VARCHAR NULL,
-  ADD COLUMN IF NOT EXISTS trailer_plate_type VARCHAR NULL,
-  ADD COLUMN IF NOT EXISTS power_owner_id VARCHAR NULL,
-  ADD COLUMN IF NOT EXISTS power_owner_name VARCHAR NULL,
-  ADD COLUMN IF NOT EXISTS trailer_owner_id VARCHAR NULL,
-  ADD COLUMN IF NOT EXISTS trailer_owner_name VARCHAR NULL,
   ADD COLUMN IF NOT EXISTS driver_owner BOOLEAN NULL,
   ADD COLUMN IF NOT EXISTS driver_scan_status BOOLEAN NULL,
   ADD COLUMN IF NOT EXISTS photo_data BYTEA NULL,
@@ -95,15 +75,8 @@ ALTER TABLE drivers
 	}
 
 	// Archive table for hard deletes (clone structure without constraints).
+	// Must match latest drivers schema; otherwise DELETE /v1/driver/profile may fail on INSERT ... SELECT *.
 	_, err = pg.Exec(ctx, `CREATE TABLE IF NOT EXISTS deleted_drivers (LIKE drivers INCLUDING DEFAULTS);`)
-	if err != nil {
-		return err
-	}
-	_, err = pg.Exec(ctx, `
-ALTER TABLE deleted_drivers
-  ADD COLUMN IF NOT EXISTS photo_data BYTEA NULL,
-  ADD COLUMN IF NOT EXISTS photo_content_type VARCHAR(50) NULL;
-`)
 	if err != nil {
 		return err
 	}

@@ -10,7 +10,7 @@ type Dispatcher struct {
 
 	Name     *string `json:"name"`
 	Phone    string  `json:"phone"`
-	Password string  `json:"password"` // stored as bcrypt hash
+	Password string `json:"-"` // bcrypt hash; never serialize
 
 	PassportSeries *string `json:"passport_series"`
 	PassportNumber *string `json:"passport_number"`

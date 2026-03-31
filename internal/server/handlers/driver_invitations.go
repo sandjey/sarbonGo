@@ -66,6 +66,16 @@ func (h *DriverInvitationsHandler) Create(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_in_company")
 		return
 	}
+	dup, err := h.repo.HasPendingCompanyInvitation(c.Request.Context(), companyID, phone)
+	if err != nil {
+		h.logger.Error("driver invitation duplicate check", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
+		return
+	}
+	if dup {
+		resp.ErrorLang(c, http.StatusConflict, "driver_invitation_already_pending")
+		return
+	}
 	token, err := h.repo.Create(c.Request.Context(), companyID, phone, dispatcherID, 7*24*time.Hour)
 	if err != nil {
 		h.logger.Error("driver invitation create", zap.Error(err))
@@ -108,8 +118,23 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
 	}
+	if drv == nil {
+		// Phone not found in drivers table.
+		resp.ErrorLang(c, http.StatusBadRequest, "driver_not_found")
+		return
+	}
 	if drv != nil && drv.FreelancerID != nil && *drv.FreelancerID == dispatcherID.String() {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_accepted_your_invitation")
+		return
+	}
+	dup, err := h.repo.HasPendingFreelanceInvitation(c.Request.Context(), dispatcherID, phone)
+	if err != nil {
+		h.logger.Error("driver invitation duplicate check freelance", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
+		return
+	}
+	if dup {
+		resp.ErrorLang(c, http.StatusConflict, "driver_invitation_already_pending")
 		return
 	}
 	token, err := h.repo.CreateForFreelance(c.Request.Context(), dispatcherID, phone, 7*24*time.Hour)
@@ -258,6 +283,19 @@ func (h *DriverInvitationsHandler) SetDriverPower(c *gin.Context) {
 	trimPtr(&req.PowerTechSeries)
 	trimPtr(&req.PowerTechNumber)
 	trimPtr(&req.PowerOwnerName)
+	// Validate power_plate_type when provided.
+	if req.PowerPlateType != nil {
+		v := strings.ToUpper(strings.TrimSpace(*req.PowerPlateType))
+		if v == "" {
+			req.PowerPlateType = nil
+		} else {
+			if v != "TRUCK" && v != "TRACTOR" {
+				resp.ErrorLang(c, http.StatusBadRequest, "invalid_power_plate_type")
+				return
+			}
+			req.PowerPlateType = &v
+		}
+	}
 	if err := h.drv.UpdatePowerProfile(c.Request.Context(), driverID, drivers.UpdatePowerProfile{
 		PowerPlateType:   req.PowerPlateType,
 		PowerPlateNumber: req.PowerPlateNumber,
@@ -322,6 +360,25 @@ func (h *DriverInvitationsHandler) SetDriverTrailer(c *gin.Context) {
 	trimPtr(&req.TrailerTechSeries)
 	trimPtr(&req.TrailerTechNumber)
 	trimPtr(&req.TrailerOwnerName)
+	// Validate trailer_plate_type when provided (against power_plate_type if we know it).
+	if req.TrailerPlateType != nil {
+		v := strings.ToUpper(strings.TrimSpace(*req.TrailerPlateType))
+		if v == "" {
+			req.TrailerPlateType = nil
+		} else {
+			power := ""
+			if drv.PowerPlateType != nil {
+				power = *drv.PowerPlateType
+			}
+			if power != "" {
+				if errKey := validatePowerTrailerTypes(power, v); errKey != "" {
+					resp.ErrorLang(c, http.StatusBadRequest, errKey)
+					return
+				}
+			}
+			req.TrailerPlateType = &v
+		}
+	}
 	if err := h.drv.UpdateTrailerProfile(c.Request.Context(), driverID, drivers.UpdateTrailerProfile{
 		TrailerPlateType:   req.TrailerPlateType,
 		TrailerPlateNumber: req.TrailerPlateNumber,

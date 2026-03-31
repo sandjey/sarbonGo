@@ -19,7 +19,7 @@ import (
 	"sarbonNew/internal/util"
 )
 
-const maxDispatcherPhotoSize = 5 * 1024 * 1024 // 5 MB
+const maxDispatcherPhotoSize = 10 * 1024 * 1024 // 10 MB
 var allowedPhotoTypes = map[string]bool{"image/jpeg": true, "image/png": true}
 
 type DispatcherProfileHandler struct {
@@ -77,6 +77,31 @@ func (h *DispatcherProfileHandler) Patch(c *gin.Context) {
 	trim(&req.PINFL)
 	trim(&req.Photo)
 
+	if req.Name != nil {
+		if errKey := validatePersonName(*req.Name); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
+	if req.PassportSeries != nil {
+		if errKey := validatePassportSeries(*req.PassportSeries); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
+	if req.PassportNumber != nil {
+		if errKey := validatePassportNumber(*req.PassportNumber); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
+	if req.PINFL != nil {
+		if errKey := validatePINFL(*req.PINFL); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
+
 	if err := h.repo.UpdateProfile(c.Request.Context(), id, dispatchers.UpdateProfileParams{
 		Name: req.Name, PassportSeries: req.PassportSeries, PassportNumber: req.PassportNumber, PINFL: req.PINFL, Photo: req.Photo,
 	}); err != nil {
@@ -84,7 +109,12 @@ func (h *DispatcherProfileHandler) Patch(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	d, _ := h.repo.FindByID(c.Request.Context(), id)
+	d, err := h.repo.FindByID(c.Request.Context(), id)
+	if err != nil {
+		h.logger.Error("dispatcher profile reload after patch failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 	resp.OKLang(c, "ok", gin.H{"status": "ok", "dispatcher": d})
 }
 
@@ -105,7 +135,16 @@ func (h *DispatcherProfileHandler) ChangePassword(c *gin.Context) {
 		return
 	}
 	d, err := h.repo.FindByID(c.Request.Context(), id)
-	if err != nil || !util.ComparePassword(d.Password, req.CurrentPassword) {
+	if err != nil {
+		if errors.Is(err, dispatchers.ErrNotFound) {
+			resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+			return
+		}
+		h.logger.Error("dispatcher find for password change failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if !util.ComparePassword(d.Password, req.CurrentPassword) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_current_password")
 		return
 	}
@@ -258,6 +297,13 @@ func (h *DispatcherProfileHandler) GetPhoto(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	etag := weakETagBytes(data)
+	if inm := strings.TrimSpace(c.GetHeader("If-None-Match")); inm != "" && inm == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	c.Data(http.StatusOK, contentType, data)
 }
 

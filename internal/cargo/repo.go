@@ -58,6 +58,8 @@ type ListFilter struct {
 	Status             []string   // status=SEARCHING_ALL,SEARCHING_COMPANY
 	ForDriverCompanyID *uuid.UUID // when set, "searching" filter shows SEARCHING_ALL + SEARCHING_COMPANY for this company only
 	CreatedByDispatcherID *uuid.UUID // only cargo created by this dispatcher (export / «мои грузы»)
+	CompanyID          *uuid.UUID // optional: only cargo for this company_id (marketplace filter)
+	NameContains       string     // optional: ILIKE substring on c.name (from q=)
 	WeightMin          *float64
 	WeightMax          *float64
 	TruckType          string
@@ -89,19 +91,17 @@ type CreateParams struct {
 	// Шаг 2 — Готовность
 	ReadyEnabled bool
 	ReadyAt      *string
-	LoadComment  *string
+	Comment      *string
 
 	// Шаг 3 — Транспорт
 	TruckType        string        `validate:"required"`
 	PowerPlateType   string        `validate:"required"` // TRUCK|TRACTOR (GET /v1/driver/transport-options)
 	TrailerPlateType string        `validate:"required"` // depends on PowerPlateType
-	CapacityRequired float64       `validate:"required,gt=0"` // Грузоподъёмность
 	TempMin          *float64
 	TempMax          *float64
 	ADREnabled       bool
 	ADRClass         *string       `validate:"required_if=ADREnabled true"`
 	LoadingTypes     []string
-	Requirements     []string
 	ShipmentType     *ShipmentType
 	BeltsCount       *int
 	Documents        *Documents // TIR, T1, CMR, Medbook, GLONASS, Seal, Permit
@@ -151,7 +151,6 @@ type PaymentInput struct {
 	TotalAmount        *float64
 	TotalCurrency      *string
 	WithPrepayment     bool
-	WithoutPrepayment  bool
 	PrepaymentAmount   *float64
 	PrepaymentCurrency *string
 	PrepaymentType     *string
@@ -171,21 +170,40 @@ func (r *Repo) Create(ctx context.Context, p CreateParams) (uuid.UUID, error) {
 	docJSON, _ := DocumentsToJSON(p.Documents)
 	var id uuid.UUID
 	q := `
-INSERT INTO cargo (name, weight, volume, vehicles_amount, vehicles_left, capacity_required, packaging, dimensions, photo_urls, ready_enabled, ready_at, load_comment, truck_type,
-  power_plate_type, trailer_plate_type,
-  temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
-  documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, created_by_type, created_by_id, company_id, cargo_type_id)
--- NOTE: placeholder order must match tx.QueryRow args:
--- ... documents($23), contact_name($24), contact_phone($25), status($26), created_by_type($27), created_by_id($28), company_id($29), cargo_type_id($30)
-VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, COALESCE(NULLIF(TRIM($26),''), 'PENDING_MODERATION'), now(), now(), NULL, $27, $28, $29, $30)
+INSERT INTO cargo (
+  name, weight, volume, vehicles_amount, vehicles_left,
+  packaging, dimensions, photo_urls,
+  ready_enabled, ready_at, load_comment,
+  truck_type, power_plate_type, trailer_plate_type,
+  temp_min, temp_max, adr_enabled, adr_class,
+  loading_types, shipment_type, belts_count,
+  documents, contact_name, contact_phone,
+  status, created_at, updated_at, deleted_at,
+  created_by_type, created_by_id, company_id, cargo_type_id
+)
+-- NOTE: load_comment column is used as generic comment in API (field name: comment).
+VALUES (
+  $1, $2, $3, $4, $4,
+  $5, $6, $7,
+  $8, $9, $10,
+  $11, $12, $13,
+  $14, $15, $16, $17,
+  $18, $19, $20,
+  $21, $22, $23,
+  COALESCE(NULLIF(TRIM($24),''), 'PENDING_MODERATION'), now(), now(), NULL,
+  $25, $26, $27, $28
+)
 RETURNING id`
 	err = tx.QueryRow(ctx, q,
 		p.Name,
-		p.Weight, p.Volume, p.VehiclesAmount, p.CapacityRequired, p.Packaging, p.Dimensions, p.Photos,
-		p.ReadyEnabled, p.ReadyAt, p.LoadComment, p.TruckType,
-		p.PowerPlateType, p.TrailerPlateType,
-		p.TempMin, p.TempMax, p.ADREnabled, p.ADRClass, p.LoadingTypes, p.Requirements, p.ShipmentType, p.BeltsCount,
-		docJSON, p.ContactName, p.ContactPhone, p.Status,
+		p.Weight, p.Volume, p.VehiclesAmount,
+		p.Packaging, p.Dimensions, p.Photos,
+		p.ReadyEnabled, p.ReadyAt, p.Comment,
+		p.TruckType, p.PowerPlateType, p.TrailerPlateType,
+		p.TempMin, p.TempMax, p.ADREnabled, p.ADRClass,
+		p.LoadingTypes, p.ShipmentType, p.BeltsCount,
+		docJSON, p.ContactName, p.ContactPhone,
+		p.Status,
 		p.CreatedByType, p.CreatedByID, p.CompanyID, p.CargoTypeID,
 	).Scan(&id)
 	if err != nil {
@@ -204,12 +222,18 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 
 	if p.Payment != nil {
 		_, err = tx.Exec(ctx, `
-INSERT INTO payments (cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment, without_prepayment,
-  prepayment_amount, prepayment_currency, prepayment_type, remaining_amount, remaining_currency, remaining_type)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+INSERT INTO payments (
+  cargo_id, is_negotiable, price_request,
+  total_amount, total_currency,
+  with_prepayment,
+  prepayment_amount, prepayment_currency, prepayment_type,
+  remaining_amount, remaining_currency, remaining_type
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 			id, p.Payment.IsNegotiable, p.Payment.PriceRequest, p.Payment.TotalAmount, p.Payment.TotalCurrency,
-			p.Payment.WithPrepayment, p.Payment.WithoutPrepayment, p.Payment.PrepaymentAmount, p.Payment.PrepaymentCurrency,
-			p.Payment.PrepaymentType, p.Payment.RemainingAmount, p.Payment.RemainingCurrency, p.Payment.RemainingType)
+			p.Payment.WithPrepayment,
+			p.Payment.PrepaymentAmount, p.Payment.PrepaymentCurrency, p.Payment.PrepaymentType,
+			p.Payment.RemainingAmount, p.Payment.RemainingCurrency, p.Payment.RemainingType)
 		if err != nil {
 			return uuid.Nil, err
 		}
@@ -220,9 +244,9 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
 
 // GetByID returns cargo by id (excluding soft-deleted if needAll=false).
 func (r *Repo) GetByID(ctx context.Context, id uuid.UUID, includeDeleted bool) (*Cargo, error) {
-	q := `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+	q := `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0), c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
   c.ready_enabled, c.ready_at, c.load_comment, c.truck_type, COALESCE(c.power_plate_type,''), COALESCE(c.trailer_plate_type,''),
-  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
+  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
   c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
   ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
@@ -261,11 +285,11 @@ FROM route_points WHERE cargo_id = $1 ORDER BY point_order`,
 func (r *Repo) GetPayment(ctx context.Context, cargoID uuid.UUID) (*Payment, error) {
 	var pay Payment
 	err := r.pg.QueryRow(ctx, `
-SELECT id, cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment, without_prepayment,
+SELECT id, cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment,
   prepayment_amount, prepayment_currency, prepayment_type, remaining_amount, remaining_currency, remaining_type
 FROM payments WHERE cargo_id = $1`, cargoID).Scan(
 		&pay.ID, &pay.CargoID, &pay.IsNegotiable, &pay.PriceRequest, &pay.TotalAmount, &pay.TotalCurrency,
-		&pay.WithPrepayment, &pay.WithoutPrepayment, &pay.PrepaymentAmount, &pay.PrepaymentCurrency,
+		&pay.WithPrepayment, &pay.PrepaymentAmount, &pay.PrepaymentCurrency,
 		&pay.PrepaymentType, &pay.RemainingAmount, &pay.RemainingCurrency, &pay.RemainingType)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -333,13 +357,12 @@ func (r *Repo) DeleteCargoPhoto(ctx context.Context, photoID uuid.UUID) error {
 func scanCargo(row pgx.Row) (*Cargo, error) {
 	var c Cargo
 	var docBytes []byte
-	var loadingTypes, requirements []string
-	var cap sql.NullFloat64
+	var loadingTypes []string
 	var packaging, dimensions sql.NullString
 	var ctCode, ctRU, ctUZ, ctEN, ctTR, ctZH sql.NullString
 	err := row.Scan(
-		&c.ID, &c.Name, &c.Weight, &c.Volume, &c.VehiclesAmount, &c.VehiclesLeft, &cap, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.LoadComment, &c.TruckType, &c.PowerPlateType, &c.TrailerPlateType,
-		&c.TempMin, &c.TempMax, &c.ADREnabled, &c.ADRClass, &loadingTypes, &requirements, &c.ShipmentType, &c.BeltsCount,
+		&c.ID, &c.Name, &c.Weight, &c.Volume, &c.VehiclesAmount, &c.VehiclesLeft, &packaging, &dimensions, &c.PhotoURLs, &c.ReadyEnabled, &c.ReadyAt, &c.Comment, &c.TruckType, &c.PowerPlateType, &c.TrailerPlateType,
+		&c.TempMin, &c.TempMax, &c.ADREnabled, &c.ADRClass, &loadingTypes, &c.ShipmentType, &c.BeltsCount,
 		&docBytes, &c.ContactName, &c.ContactPhone, &c.Status, &c.CreatedAt, &c.UpdatedAt, &c.DeletedAt,
 		&c.ModerationRejectionReason, &c.CreatedByType, &c.CreatedByID, &c.CompanyID, &c.CargoTypeID,
 		&ctCode, &ctRU, &ctUZ, &ctEN, &ctTR, &ctZH,
@@ -348,11 +371,6 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 		return nil, err
 	}
 	c.LoadingTypes = loadingTypes
-	c.Requirements = requirements
-	if cap.Valid {
-		v := cap.Float64
-		c.CapacityRequired = &v
-	}
 	if packaging.Valid {
 		s := packaging.String
 		c.Packaging = &s
@@ -376,9 +394,9 @@ func scanCargo(row pgx.Row) (*Cargo, error) {
 }
 
 func cargoListSelectFrom() string {
-	return `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0), c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+	return `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0), c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
   c.ready_enabled, c.ready_at, c.load_comment, c.truck_type, COALESCE(c.power_plate_type,''), COALESCE(c.trailer_plate_type,''),
-  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
+  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
   c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
   ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
@@ -403,6 +421,11 @@ func buildCargoListWhereAndOrder(f ListFilter) (where string, args []any, order 
 		args = append(args, *f.CreatedByDispatcherID)
 		argNum++
 	}
+	if f.CompanyID != nil {
+		conds = append(conds, "c.company_id = $"+strconv.Itoa(argNum))
+		args = append(args, *f.CompanyID)
+		argNum++
+	}
 
 	// When driver lists "searching" cargo, show SEARCHING_ALL + SEARCHING_COMPANY (only his company)
 	if f.ForDriverCompanyID != nil && len(f.Status) > 0 && statusListContainsSearching(f.Status) {
@@ -412,6 +435,11 @@ func buildCargoListWhereAndOrder(f ListFilter) (where string, args []any, order 
 	} else if len(f.Status) > 0 {
 		conds = append(conds, "c.status = ANY($"+strconv.Itoa(argNum)+")")
 		args = append(args, f.Status)
+		argNum++
+	}
+	if pat := sanitizeCargoNameLikePattern(f.NameContains); pat != "" {
+		conds = append(conds, "c.name ILIKE $"+strconv.Itoa(argNum))
+		args = append(args, pat)
 		argNum++
 	}
 	if f.WeightMin != nil {
@@ -528,7 +556,7 @@ func (r *Repo) GetPaymentsForCargoIDs(ctx context.Context, cargoIDs []uuid.UUID)
 		return out, nil
 	}
 	rows, err := r.pg.Query(ctx, `
-SELECT id, cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment, without_prepayment,
+SELECT id, cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment,
   prepayment_amount, prepayment_currency, prepayment_type, remaining_amount, remaining_currency, remaining_type
 FROM payments WHERE cargo_id = ANY($1::uuid[])`, cargoIDs)
 	if err != nil {
@@ -539,7 +567,7 @@ FROM payments WHERE cargo_id = ANY($1::uuid[])`, cargoIDs)
 		var pay Payment
 		if err := rows.Scan(
 			&pay.ID, &pay.CargoID, &pay.IsNegotiable, &pay.PriceRequest, &pay.TotalAmount, &pay.TotalCurrency,
-			&pay.WithPrepayment, &pay.WithoutPrepayment, &pay.PrepaymentAmount, &pay.PrepaymentCurrency,
+			&pay.WithPrepayment, &pay.PrepaymentAmount, &pay.PrepaymentCurrency,
 			&pay.PrepaymentType, &pay.RemainingAmount, &pay.RemainingCurrency, &pay.RemainingType); err != nil {
 			return nil, err
 		}
@@ -600,6 +628,24 @@ func statusListContainsSearching(statuses []string) bool {
 	return false
 }
 
+// sanitizeCargoNameLikePattern builds a safe ILIKE pattern: trim, max length, strip % _ \.
+func sanitizeCargoNameLikePattern(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	s = strings.ReplaceAll(s, "%", "")
+	s = strings.ReplaceAll(s, "_", "")
+	s = strings.ReplaceAll(s, "\\", "")
+	if s == "" {
+		return ""
+	}
+	return "%" + s + "%"
+}
+
 // nextArgNum returns placeholder number as string (1, 2, ...).
 func nextArgNum(n *int) string {
 	x := *n
@@ -617,15 +663,13 @@ type UpdateParams struct {
 	Photos           []string
 	ReadyEnabled     *bool
 	ReadyAt          *string
-	LoadComment      *string
+	Comment          *string
 	TruckType        *string
-	CapacityRequired *float64
 	TempMin          *float64
 	TempMax          *float64
 	ADREnabled       *bool
 	ADRClass         *string
 	LoadingTypes     []string
-	Requirements     []string
 	ShipmentType     *ShipmentType
 	BeltsCount       *int
 	Documents        *Documents
@@ -672,9 +716,6 @@ func (r *Repo) Update(ctx context.Context, id uuid.UUID, p UpdateParams) error {
 	if p.Volume != nil {
 		add("volume", *p.Volume)
 	}
-	if p.CapacityRequired != nil {
-		add("capacity_required", *p.CapacityRequired)
-	}
 	if p.Packaging != nil {
 		add("packaging", *p.Packaging)
 	}
@@ -690,8 +731,8 @@ func (r *Repo) Update(ctx context.Context, id uuid.UUID, p UpdateParams) error {
 	if p.ReadyAt != nil {
 		add("ready_at", p.ReadyAt)
 	}
-	if p.LoadComment != nil {
-		add("load_comment", *p.LoadComment)
+	if p.Comment != nil {
+		add("load_comment", *p.Comment)
 	}
 	if p.TruckType != nil {
 		add("truck_type", *p.TruckType)
@@ -710,9 +751,6 @@ func (r *Repo) Update(ctx context.Context, id uuid.UUID, p UpdateParams) error {
 	}
 	if p.LoadingTypes != nil {
 		add("loading_types", p.LoadingTypes)
-	}
-	if p.Requirements != nil {
-		add("requirements", p.Requirements)
 	}
 	if p.ShipmentType != nil {
 		add("shipment_type", *p.ShipmentType)
@@ -754,12 +792,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 
 	if p.Payment != nil && existing.Status != StatusAssigned && existing.Status != StatusInTransit && existing.Status != StatusDelivered {
 		_, err = tx.Exec(ctx, `
-UPDATE payments SET is_negotiable=$2, price_request=$3, total_amount=$4, total_currency=$5, with_prepayment=$6, without_prepayment=$7,
-  prepayment_amount=$8, prepayment_currency=$9, prepayment_type=$10, remaining_amount=$11, remaining_currency=$12, remaining_type=$13
+UPDATE payments SET is_negotiable=$2, price_request=$3, total_amount=$4, total_currency=$5, with_prepayment=$6,
+  prepayment_amount=$7, prepayment_currency=$8, prepayment_type=$9, remaining_amount=$10, remaining_currency=$11, remaining_type=$12
 WHERE cargo_id = $1`,
 			id, p.Payment.IsNegotiable, p.Payment.PriceRequest, p.Payment.TotalAmount, p.Payment.TotalCurrency,
-			p.Payment.WithPrepayment, p.Payment.WithoutPrepayment, p.Payment.PrepaymentAmount, p.Payment.PrepaymentCurrency,
-			p.Payment.PrepaymentType, p.Payment.RemainingAmount, p.Payment.RemainingCurrency, p.Payment.RemainingType)
+			p.Payment.WithPrepayment,
+			p.Payment.PrepaymentAmount, p.Payment.PrepaymentCurrency, p.Payment.PrepaymentType,
+			p.Payment.RemainingAmount, p.Payment.RemainingCurrency, p.Payment.RemainingType)
 		if err != nil {
 			return err
 		}
@@ -768,12 +807,13 @@ WHERE cargo_id = $1`,
 		_ = tx.QueryRow(ctx, "SELECT 1 FROM payments WHERE cargo_id = $1", id).Scan(&n)
 		if n == 0 {
 			_, err = tx.Exec(ctx, `
-INSERT INTO payments (cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment, without_prepayment,
+INSERT INTO payments (cargo_id, is_negotiable, price_request, total_amount, total_currency, with_prepayment,
   prepayment_amount, prepayment_currency, prepayment_type, remaining_amount, remaining_currency, remaining_type)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 				id, p.Payment.IsNegotiable, p.Payment.PriceRequest, p.Payment.TotalAmount, p.Payment.TotalCurrency,
-				p.Payment.WithPrepayment, p.Payment.WithoutPrepayment, p.Payment.PrepaymentAmount, p.Payment.PrepaymentCurrency,
-				p.Payment.PrepaymentType, p.Payment.RemainingAmount, p.Payment.RemainingCurrency, p.Payment.RemainingType)
+				p.Payment.WithPrepayment,
+				p.Payment.PrepaymentAmount, p.Payment.PrepaymentCurrency, p.Payment.PrepaymentType,
+				p.Payment.RemainingAmount, p.Payment.RemainingCurrency, p.Payment.RemainingType)
 			if err != nil {
 				return err
 			}
@@ -1120,10 +1160,7 @@ func (r *Repo) ModerationReject(ctx context.Context, cargoID uuid.UUID, reason s
 func (r *Repo) ListPendingModeration(ctx context.Context, limit, offset int) ([]Cargo, int, error) {
 	var total int
 	_ = r.pg.QueryRow(ctx, "SELECT count(*) FROM cargo WHERE deleted_at IS NULL AND status = $1", StatusPendingModeration).Scan(&total)
-	q := `SELECT id, weight, volume, ready_enabled, ready_at, load_comment, truck_type,
-  temp_min, temp_max, adr_enabled, adr_class, loading_types, requirements, shipment_type, belts_count,
-  documents, contact_name, contact_phone, status, created_at, updated_at, deleted_at, moderation_rejection_reason, created_by_type, created_by_id, company_id
-FROM cargo WHERE deleted_at IS NULL AND status = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3`
+	q := cargoListSelectFrom() + `c.deleted_at IS NULL AND c.status = $1 ORDER BY c.created_at ASC LIMIT $2 OFFSET $3`
 	rows, err := r.pg.Query(ctx, q, StatusPendingModeration, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -1303,10 +1340,10 @@ func (r *Repo) ListNearby(ctx context.Context, f NearbyFilter) (NearbyResult, er
 
 	args = append(args, limit, offset)
 	q := `SELECT c.id, c.name, c.weight, c.volume,
-  c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
+  c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
   c.ready_enabled, c.ready_at, c.load_comment,
   c.truck_type, c.temp_min, c.temp_max, c.adr_enabled, c.adr_class,
-  c.loading_types, c.requirements, c.shipment_type, c.belts_count,
+  c.loading_types, c.shipment_type, c.belts_count,
   c.documents, c.contact_name, c.contact_phone, c.status,
   c.created_at, c.updated_at, c.deleted_at,
   c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
@@ -1329,16 +1366,15 @@ LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 	for rows.Next() {
 		var item NearbyItem
 		var docBytes []byte
-		var loadingTypes, requirements []string
-		var capN sql.NullFloat64
+		var loadingTypes []string
 		var packaging, dimensions sql.NullString
 		var ctCode, ctRU, ctUZ, ctEN, ctTR, ctZH sql.NullString
 		if err := rows.Scan(
 			&item.ID, &item.Name, &item.Weight, &item.Volume,
-			&capN, &packaging, &dimensions, &item.PhotoURLs,
-			&item.ReadyEnabled, &item.ReadyAt, &item.LoadComment,
+			&packaging, &dimensions, &item.PhotoURLs,
+			&item.ReadyEnabled, &item.ReadyAt, &item.Comment,
 			&item.TruckType, &item.TempMin, &item.TempMax, &item.ADREnabled, &item.ADRClass,
-			&loadingTypes, &requirements, &item.ShipmentType, &item.BeltsCount,
+			&loadingTypes, &item.ShipmentType, &item.BeltsCount,
 			&docBytes, &item.ContactName, &item.ContactPhone, &item.Status,
 			&item.CreatedAt, &item.UpdatedAt, &item.DeletedAt,
 			&item.ModerationRejectionReason, &item.CreatedByType, &item.CreatedByID, &item.CompanyID, &item.CargoTypeID,
@@ -1348,11 +1384,6 @@ LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 			return NearbyResult{}, err
 		}
 		item.LoadingTypes = loadingTypes
-		item.Requirements = requirements
-		if capN.Valid {
-			v := capN.Float64
-			item.CapacityRequired = &v
-		}
 		if packaging.Valid {
 			s := packaging.String
 			item.Packaging = &s
@@ -1439,15 +1470,7 @@ func (r *Repo) ListMatching(ctx context.Context, f MatchingFilter) (ListResult, 
 	}
 
 	args = append(args, limit, offset)
-	q := `SELECT c.id, c.name, c.weight, c.volume, c.capacity_required, c.packaging, c.dimensions, COALESCE(c.photo_urls, ARRAY[]::text[]),
-  c.ready_enabled, c.ready_at, c.load_comment, c.truck_type,
-  c.temp_min, c.temp_max, c.adr_enabled, c.adr_class, c.loading_types, c.requirements, c.shipment_type, c.belts_count,
-  c.documents, c.contact_name, c.contact_phone, c.status, c.created_at, c.updated_at, c.deleted_at,
-  c.moderation_rejection_reason, c.created_by_type, c.created_by_id, c.company_id, c.cargo_type_id,
-  ct.code, ct.name_ru, ct.name_uz, ct.name_en, ct.name_tr, ct.name_zh
-FROM cargo c
-LEFT JOIN cargo_types ct ON ct.id = c.cargo_type_id
-WHERE ` + where + ` ORDER BY c.created_at DESC LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
+	q := cargoListSelectFrom() + where + ` ORDER BY c.created_at DESC LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 
 	rows, err := r.pg.Query(ctx, q, args...)
 	if err != nil {

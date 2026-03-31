@@ -325,6 +325,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/recommended-cargo/:cargoId/decline", cargoRecH.DeclineRecommendation)
 	driverAuthed.GET("/nearby-cargo", driverCargoSearchH.NearbyCargoForDriver)
 	driverAuthed.GET("/matching-cargo", driverCargoSearchH.MatchingCargoForDriver)
+	driverAuthed.GET("/cargo/active", cargoH.ListActiveCargoForDriver)
 	driverAuthed.GET("/active-cargo", cargoDriversH.GetMyActiveCargo)
 	driverAuthed.GET("/cargo-offers", cargoH.ListMyCargoOffers)
 
@@ -362,6 +363,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.PUT("/drivers/:driverId/trailer", driverInvH.SetDriverTrailer)
 	dispAuthed.PATCH("/trips/:id/assign-driver", tripsH.AssignDriver)
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
+	dispAuthed.GET("/cargo/active", cargoH.ListActiveCargoForDispatcher)
 	dispAuthed.GET("/cargo/:id/drivers", cargoDriversH.ListByCargo)
 	dispAuthed.POST("/cargo/:id/drivers/remove", cargoDriversH.RemoveFromCargo)
 	dispAuthed.GET("/cargo/export.xlsx", dispCargoExportH.ExportMyCargoExcel)

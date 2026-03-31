@@ -84,15 +84,23 @@ func (h *DispatcherRegistrationHandler) Complete(c *gin.Context) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
-	if len(name) < 2 {
-		resp.ErrorLang(c, http.StatusBadRequest, "name_too_short")
+	if errKey := validatePersonName(name); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
 		return
 	}
 	ps := strings.TrimSpace(req.PassportSeries)
 	pn := strings.TrimSpace(req.PassportNumber)
 	pinfl := strings.TrimSpace(req.PINFL)
-	if ps == "" || pn == "" || pinfl == "" {
-		resp.ErrorLang(c, http.StatusBadRequest, "passport_pinfl_required")
+	if errKey := validatePassportSeries(ps); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	if errKey := validatePassportNumber(pn); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	if errKey := validatePINFL(pinfl); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
 		return
 	}
 
@@ -122,6 +130,11 @@ func (h *DispatcherRegistrationHandler) Complete(c *gin.Context) {
 	_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 	_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 
-	disp, _ := h.repo.FindByID(c.Request.Context(), id)
+	disp, err := h.repo.FindByID(c.Request.Context(), id)
+	if err != nil {
+		h.logger.Error("dispatcher reload after register failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 	resp.OKLang(c, "ok", gin.H{"status": "registered", "tokens": tokens, "dispatcher": disp})
 }

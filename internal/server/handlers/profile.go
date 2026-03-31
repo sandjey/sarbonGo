@@ -19,7 +19,7 @@ import (
 	"sarbonNew/internal/util"
 )
 
-const maxDriverPhotoSize = 5 * 1024 * 1024 // 5 MB
+const maxDriverPhotoSize = 10 * 1024 * 1024 // 10 MB
 var allowedDriverPhotoTypes = map[string]bool{"image/jpeg": true, "image/png": true}
 
 type ProfileHandler struct {
@@ -66,8 +66,8 @@ func (h *ProfileHandler) PatchDriver(c *gin.Context) {
 
 	if req.Name != nil {
 		v := strings.TrimSpace(*req.Name)
-		if len(v) < 2 {
-			resp.ErrorLang(c, http.StatusBadRequest, "name_too_short")
+		if errKey := validatePersonName(v); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
 			return
 		}
 		req.Name = &v
@@ -84,24 +84,24 @@ func (h *ProfileHandler) PatchDriver(c *gin.Context) {
 	}
 	if req.DriverPassportSeries != nil {
 		v := strings.TrimSpace(*req.DriverPassportSeries)
-		if v == "" {
-			resp.ErrorLang(c, http.StatusBadRequest, "driver_passport_series_required")
+		if errKey := validatePassportSeries(v); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
 			return
 		}
 		req.DriverPassportSeries = &v
 	}
 	if req.DriverPassportNumber != nil {
 		v := strings.TrimSpace(*req.DriverPassportNumber)
-		if v == "" {
-			resp.ErrorLang(c, http.StatusBadRequest, "driver_passport_number_required")
+		if errKey := validatePassportNumber(v); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
 			return
 		}
 		req.DriverPassportNumber = &v
 	}
 	if req.DriverPINFL != nil {
 		v := strings.TrimSpace(*req.DriverPINFL)
-		if v == "" {
-			resp.ErrorLang(c, http.StatusBadRequest, "driver_pinfl_required")
+		if errKey := validatePINFL(v); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
 			return
 		}
 		req.DriverPINFL = &v
@@ -118,7 +118,12 @@ func (h *ProfileHandler) PatchDriver(c *gin.Context) {
 		return
 	}
 
-	d, _ := h.drivers.FindByID(c.Request.Context(), driverID)
+	d, err := h.drivers.FindByID(c.Request.Context(), driverID)
+	if err != nil {
+		h.logger.Error("driver reload after patch failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 	resp.OKLang(c, "updated", gin.H{"event": "updated", "driver": d})
 }
 
@@ -135,12 +140,21 @@ func (h *ProfileHandler) Heartbeat(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
+	if errKey := validateLatLng(req.Latitude, req.Longitude); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
 	if err := h.drivers.UpdateHeartbeat(c.Request.Context(), driverID, req.Latitude, req.Longitude, time.Now().UTC()); err != nil {
 		h.logger.Error("heartbeat update failed", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	d, _ := h.drivers.FindByID(c.Request.Context(), driverID)
+	d, err := h.drivers.FindByID(c.Request.Context(), driverID)
+	if err != nil {
+		h.logger.Error("driver reload after heartbeat failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 	resp.OKLang(c, "heartbeat", gin.H{"event": "heartbeat", "driver": d})
 }
 
@@ -396,6 +410,13 @@ func (h *ProfileHandler) GetPhoto(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	etag := weakETagBytes(data)
+	if inm := strings.TrimSpace(c.GetHeader("If-None-Match")); inm != "" && inm == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	c.Data(http.StatusOK, contentType, data)
 }
 
@@ -409,4 +430,3 @@ func (h *ProfileHandler) DeletePhoto(c *gin.Context) {
 	}
 	resp.OKLang(c, "photo_deleted", gin.H{"status": "ok", "event": "photo_deleted"})
 }
-

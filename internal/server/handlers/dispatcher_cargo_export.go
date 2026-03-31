@@ -70,35 +70,35 @@ func exportColumnTitles(lang string) []string {
 	switch lang {
 	case "ru":
 		return []string{
-			"№", "ID", "Название", "Статус", "Вес (т)", "Объём (м³)", "Грузоподъёмность (т)",
+			"№", "ID", "Название", "Статус", "Вес (т)", "Объём (м³)",
 			"Тип ТС", "Тип груза", "Контакт", "Телефон", "Компания (ID)",
 			"Создан", "Погрузка", "Выгрузка", "Оплата", "Готовность", "ADR",
 			"Упаковка", "Габариты",
 		}
 	case "uz":
 		return []string{
-			"№", "ID", "Nomi", "Holat", "Og'irlik (t)", "Hajm (m³)", "Yuk ko'tarish (t)",
+			"№", "ID", "Nomi", "Holat", "Og'irlik (t)", "Hajm (m³)",
 			"Transport turi", "Yuk turi", "Kontakt", "Telefon", "Kompaniya (ID)",
 			"Yaratilgan", "Yuklash", "Tushirish", "To'lov", "Tayyorlik", "ADR",
 			"O'ram", "O'lchamlar",
 		}
 	case "tr":
 		return []string{
-			"No", "ID", "Ad", "Durum", "Ağırlık (t)", "Hacim (m³)", "Kapasite (t)",
+			"No", "ID", "Ad", "Durum", "Ağırlık (t)", "Hacim (m³)",
 			"Araç tipi", "Yük tipi", "İletişim", "Telefon", "Şirket (ID)",
 			"Oluşturuldu", "Yükleme", "Boşaltma", "Ödeme", "Hazırlık", "ADR",
 			"Ambalaj", "Boyutlar",
 		}
 	case "zh":
 		return []string{
-			"序号", "ID", "名称", "状态", "重量(吨)", "体积(m³)", "载重要求(吨)",
+			"序号", "ID", "名称", "状态", "重量(吨)", "体积(m³)",
 			"车型", "货物类型", "联系人", "电话", "公司(ID)",
 			"创建时间", "装货点", "卸货点", "运费", "就绪时间", "ADR",
 			"包装", "尺寸",
 		}
 	default: // en
 		return []string{
-			"#", "ID", "Name", "Status", "Weight (t)", "Volume (m³)", "Capacity (t)",
+			"#", "ID", "Name", "Status", "Weight (t)", "Volume (m³)",
 			"Truck type", "Cargo type", "Contact", "Phone", "Company ID",
 			"Created at", "Load points", "Unload points", "Payment", "Ready at", "ADR",
 			"Packaging", "Dimensions",
@@ -261,7 +261,7 @@ func (h *DispatcherCargoExportHandler) ExportMyCargoExcel(c *gin.Context) {
 	}
 	_ = f.SetPanes(sheet, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
 
-	widths := []float64{5, 38, 28, 16, 10, 10, 14, 12, 22, 18, 16, 38, 20, 36, 36, 18, 20, 8, 22, 18}
+	widths := []float64{5, 38, 28, 16, 10, 10, 12, 22, 18, 16, 38, 20, 36, 36, 18, 20, 8, 22, 18}
 	for i, w := range widths {
 		if i < len(titles) {
 			col, _ := excelize.ColumnNumberToName(i + 1)
@@ -274,10 +274,6 @@ func (h *DispatcherCargoExportHandler) ExportMyCargoExcel(c *gin.Context) {
 		rps := routesByCargo[item.ID]
 		pay := payByCargo[item.ID]
 
-		capStr := ""
-		if item.CapacityRequired != nil {
-			capStr = fmt.Sprintf("%.3g", *item.CapacityRequired)
-		}
 		adr := ""
 		if item.ADREnabled {
 			adr = "yes"
@@ -301,7 +297,6 @@ func (h *DispatcherCargoExportHandler) ExportMyCargoExcel(c *gin.Context) {
 			string(item.Status),
 			item.Weight,
 			item.Volume,
-			capStr,
 			item.TruckType,
 			cargoTypeNameForLang(&item, lang),
 			exportStrPtr(item.ContactName),

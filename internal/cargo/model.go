@@ -58,14 +58,12 @@ type Cargo struct {
 	VehiclesAmount int
 	// VehiclesLeft — сколько машин ещё нужно (уменьшается при принятии водителя).
 	VehiclesLeft int
-	// CapacityRequired — требуемая грузоподъёмность ТС (тонны), из POST /api/cargo.
-	CapacityRequired *float64
 	Packaging        *string
 	Dimensions       *string
 	PhotoURLs        []string
 	ReadyEnabled bool
 	ReadyAt      *time.Time
-	LoadComment  *string
+	Comment      *string
 	TruckType    string
 	PowerPlateType   string
 	TrailerPlateType string
@@ -74,7 +72,6 @@ type Cargo struct {
 	ADREnabled   bool
 	ADRClass     *string
 	LoadingTypes []string
-	Requirements []string
 	ShipmentType *ShipmentType
 	BeltsCount   *int
 	Documents    *Documents
@@ -130,7 +127,6 @@ type Payment struct {
 	TotalAmount       *float64
 	TotalCurrency     *string
 	WithPrepayment    bool
-	WithoutPrepayment bool
 	PrepaymentAmount  *float64
 	PrepaymentCurrency *string
 	PrepaymentType    *string

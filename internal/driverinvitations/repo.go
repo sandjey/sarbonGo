@@ -48,6 +48,43 @@ func (r *Repo) CreateForFreelance(ctx context.Context, dispatcherID uuid.UUID, p
 	return token, err
 }
 
+// HasPendingFreelanceInvitation returns true if a non-expired freelance invitation exists for this dispatcher + phone.
+func (r *Repo) HasPendingFreelanceInvitation(ctx context.Context, dispatcherID uuid.UUID, phone string) (bool, error) {
+	var n int
+	err := r.pg.QueryRow(ctx,
+		`SELECT 1 FROM driver_invitations
+		 WHERE expires_at > now() AND company_id IS NULL
+		   AND invited_by_dispatcher_id = $1
+		   AND trim(replace(phone, ' ', '')) = trim(replace($2, ' ', ''))
+		 LIMIT 1`,
+		dispatcherID, phone).Scan(&n)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// HasPendingCompanyInvitation returns true if a non-expired company invitation exists for this company + phone.
+func (r *Repo) HasPendingCompanyInvitation(ctx context.Context, companyID uuid.UUID, phone string) (bool, error) {
+	var n int
+	err := r.pg.QueryRow(ctx,
+		`SELECT 1 FROM driver_invitations
+		 WHERE expires_at > now() AND company_id = $1
+		   AND trim(replace(phone, ' ', '')) = trim(replace($2, ' ', ''))
+		 LIMIT 1`,
+		companyID, phone).Scan(&n)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // GetByToken returns invitation if not expired.
 func (r *Repo) GetByToken(ctx context.Context, token string) (*Invitation, error) {
 	var i Invitation
