@@ -19,6 +19,5 @@ jobs:
           username:  dev_backend
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            script: |
               ~/restart.sh
 
