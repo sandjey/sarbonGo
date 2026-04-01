@@ -7,11 +7,29 @@ API для логистики и грузоперевозок (водители,
 go run ./cmd/admin -login admin -password "Secret123" -name "Main Admin"
 
 ## Run locally
-http://api.sarbon.me/docs
-1) Start infra:
+1) One command start (backend + postgres + redis):
 
 ```bash
-docker compose up -d
+docker compose up -d --build
+```
+
+2) Open API:
+
+- API: `http://localhost:8080`
+- Swagger UI: `http://localhost:8080/docs`
+
+Notes:
+- Migrations run automatically on API startup (`cmd/api`).
+- In Docker mode, `DATABASE_URL` and `REDIS_ADDR` are overridden to internal service names (`postgres`, `redis`).
+
+## Run without Docker
+
+If you want to run API directly on host:
+
+1) Start only infra:
+
+```bash
+docker compose up -d postgres redis
 ```
 
 2) Configure env:
@@ -20,13 +38,7 @@ docker compose up -d
 cp .env.example .env
 ```
 
-3) Apply migrations:
-
-```bash
-go run ./cmd/migrate -direction up
-```
-
-4) Run API:
+3) Run API:
 
 ```bash
 go run ./cmd/api
@@ -34,10 +46,6 @@ go run ./cmd/api
 
 API: `http://localhost:8080`  
 Swagger UI: `http://localhost:8080/docs`
-
-## Run without Docker
-
-Установи локально **PostgreSQL** и **Redis**, затем проверь доступ:
 
 **PostgreSQL** (в `.env`: `DATABASE_URL=postgres://sarbon:sarbon@localhost:5432/sarbon?sslmode=disable`):
 

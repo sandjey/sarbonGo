@@ -579,10 +579,59 @@ func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 // Query: phone (search), work_status, truck_type (power_plate_type), page, limit, sort (e.g. updated_at:desc, name:asc, last_online_at:desc, work_status:asc).
 func (h *DriverInvitationsHandler) ListAllDriversForFreelance(c *gin.Context) {
 	_ = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var (
+		latPtr    *float64
+		lngPtr    *float64
+		radiusPtr *float64
+		hasPhoto  *bool
+	)
+	if v := strings.TrimSpace(c.Query("latitude")); v != "" {
+		if f64, err := strconv.ParseFloat(v, 64); err == nil {
+			latPtr = &f64
+		} else {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_latitude")
+			return
+		}
+	}
+	if v := strings.TrimSpace(c.Query("longitude")); v != "" {
+		if f64, err := strconv.ParseFloat(v, 64); err == nil {
+			lngPtr = &f64
+		} else {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_longitude")
+			return
+		}
+	}
+	if v := strings.TrimSpace(c.Query("radius_km")); v != "" {
+		if f64, err := strconv.ParseFloat(v, 64); err == nil && f64 > 0 {
+			radiusPtr = &f64
+		} else {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+	}
+	if (latPtr != nil || lngPtr != nil || radiusPtr != nil) && !(latPtr != nil && lngPtr != nil && radiusPtr != nil) {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	if v := strings.TrimSpace(c.Query("has_photo")); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			hasPhoto = &b
+		} else {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+	}
 	f := drivers.ListDriversFilter{
 		Phone:      strings.TrimSpace(c.Query("phone")),
+		Name:       strings.TrimSpace(c.Query("name")),
 		WorkStatus: strings.TrimSpace(c.Query("work_status")),
 		TruckType:  strings.TrimSpace(c.Query("truck_type")),
+		DriverType: strings.TrimSpace(c.Query("driver_type")),
+		AccountStatus: strings.TrimSpace(c.Query("account_status")),
+		HasPhoto:   hasPhoto,
+		Latitude:   latPtr,
+		Longitude:  lngPtr,
+		RadiusKM:   radiusPtr,
 		Page:       1,
 		Limit:      20,
 		Sort:       strings.TrimSpace(c.DefaultQuery("sort", "updated_at:desc")),
@@ -606,5 +655,16 @@ func (h *DriverInvitationsHandler) ListAllDriversForFreelance(c *gin.Context) {
 	if list == nil {
 		list = []*drivers.Driver{}
 	}
-	resp.OKLang(c, "ok", gin.H{"items": list, "total": total})
+	totalPages := 0
+	if f.Limit > 0 {
+		totalPages = (total + f.Limit - 1) / f.Limit
+	}
+	resp.OKLang(c, "ok", gin.H{
+		"items":      list,
+		"total":      total,
+		"page":       f.Page,
+		"limit":      f.Limit,
+		"total_pages": totalPages,
+		"has_next":   f.Page < totalPages,
+	})
 }

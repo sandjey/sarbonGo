@@ -91,6 +91,7 @@ type CreateCargoReq struct {
 
 type RoutePointReq struct {
 	Type         string   `json:"type" binding:"required,oneof=LOAD UNLOAD CUSTOMS TRANSIT"`
+	CountryCode  string   `json:"country_code" binding:"required"` // код страны (UZ, AE, RU и т.д.)
 	CityCode     string   `json:"city_code" binding:"required"`  // код города (TAS, SAM, DXB) — из справочника
 	RegionCode   string   `json:"region_code"`                   // код региона/области (опционально)
 	Address      string   `json:"address" binding:"required"`    // адрес (улица, дом)
@@ -1182,6 +1183,9 @@ func validateCargoCreate(req CreateCargoReq) error {
 	derivedTruckType := trailerPlateToTruckType(trailer)
 	hasLoad, hasUnload := false, false
 	for _, rp := range req.RoutePoints {
+		if strings.TrimSpace(rp.CountryCode) == "" {
+			return errors.New("route_points[].country_code is required")
+		}
 		if !reference.IsAllowed(rp.Type, reference.AllowedRoutePointTypes()) {
 			return errors.New("route_points[].type must be one of: load, unload, customs, transit")
 		}
@@ -1262,6 +1266,9 @@ func validateCargoUpdate(req UpdateCargoReq) error {
 		}
 	}
 	for i, rp := range req.RoutePoints {
+		if strings.TrimSpace(rp.CountryCode) == "" {
+			return errors.New("route_points[" + strconv.Itoa(i) + "].country_code is required")
+		}
 		if rp.Type != "" && !reference.IsAllowed(rp.Type, reference.AllowedRoutePointTypes()) {
 			return errors.New("route_points[" + strconv.Itoa(i) + "].type must be one of: load, unload, customs, transit")
 		}
@@ -1324,6 +1331,7 @@ func buildRoutePointInputs(points []RoutePointReq) ([]cargo.RoutePointInput, err
 		}
 		out = append(out, cargo.RoutePointInput{
 			Type:         upperStr(rp.Type),
+			CountryCode:  upperStr(rp.CountryCode),
 			CityCode:     rp.CityCode,
 			RegionCode:   rp.RegionCode,
 			Address:      rp.Address,
@@ -1522,7 +1530,7 @@ func toRoutePointsResp(p []cargo.RoutePoint) []gin.H {
 	for _, rp := range p {
 		item := gin.H{
 			"id": rp.ID.String(), "cargo_id": rp.CargoID.String(), "type": upperStr(rp.Type),
-			"city_code": rp.CityCode, "region_code": rp.RegionCode, "address": rp.Address, "orientir": rp.Orientir,
+			"country_code": upperStr(rp.CountryCode), "city_code": rp.CityCode, "region_code": rp.RegionCode, "address": rp.Address, "orientir": rp.Orientir,
 			"lat": rp.Lat, "lng": rp.Lng, "place_id": rp.PlaceID, "comment": rp.Comment,
 			"point_order": rp.PointOrder, "is_main_load": rp.IsMainLoad, "is_main_unload": rp.IsMainUnload,
 		}

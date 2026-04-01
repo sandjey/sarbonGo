@@ -116,6 +116,7 @@ type Hub struct {
 	presence *PresenceStore
 	onTyping OnTypingPeer
 	onCall   OnCallSignal
+	onUserConnected func(userID uuid.UUID)
 	logger   *zap.Logger
 }
 
@@ -140,6 +141,13 @@ func (h *Hub) SetOnCallSignal(f OnCallSignal) {
 	h.onCall = f
 }
 
+// SetOnUserConnected sets callback called when a user opens a new WS connection.
+func (h *Hub) SetOnUserConnected(f func(userID uuid.UUID)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onUserConnected = f
+}
+
 func (h *Hub) Register(userID uuid.UUID, conn *websocket.Conn) *Client {
 	c := &Client{
 		UserID: userID,
@@ -153,6 +161,12 @@ func (h *Hub) Register(userID uuid.UUID, conn *websocket.Conn) *Client {
 	h.mu.Unlock()
 	if h.presence != nil {
 		_ = h.presence.SetOnline(context.Background(), userID)
+	}
+	h.mu.RLock()
+	cb := h.onUserConnected
+	h.mu.RUnlock()
+	if cb != nil {
+		go cb(userID)
 	}
 	return c
 }
@@ -191,6 +205,13 @@ func (h *Hub) SendToUser(userID uuid.UUID, payload []byte) {
 			// skip if buffer full
 		}
 	}
+}
+
+// IsOnline returns true if user has at least one active WS client.
+func (h *Hub) IsOnline(userID uuid.UUID) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients[userID]) > 0
 }
 
 // BroadcastToConversation sends payload to both participants (userA, userB).

@@ -130,6 +130,7 @@ type CreateParams struct {
 
 type RoutePointInput struct {
 	Type         string  `validate:"required,oneof=load unload customs transit"`
+	CountryCode  string
 	CityCode     string
 	RegionCode   string
 	Address      string  `validate:"required"`
@@ -212,9 +213,9 @@ RETURNING id`
 
 	for _, rp := range p.RoutePoints {
 		_, err = tx.Exec(ctx, `
-INSERT INTO route_points (cargo_id, type, city_code, region_code, address, orientir, lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-			id, rp.Type, emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.PlaceID, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload, rp.PointAt)
+INSERT INTO route_points (cargo_id, type, country_code, city_code, region_code, address, orientir, lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+			id, rp.Type, emptyToNil(strings.ToUpper(strings.TrimSpace(rp.CountryCode))), emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.PlaceID, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload, rp.PointAt)
 		if err != nil {
 			return uuid.Nil, err
 		}
@@ -262,7 +263,7 @@ WHERE c.id = $1`
 // GetRoutePoints returns route points for a cargo.
 func (r *Repo) GetRoutePoints(ctx context.Context, cargoID uuid.UUID) ([]RoutePoint, error) {
 	rows, err := r.pg.Query(ctx, `
-SELECT id, cargo_id, type, COALESCE(city_code,''), COALESCE(region_code,''), address, COALESCE(orientir,''), lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at
+SELECT id, cargo_id, type, COALESCE(country_code,''), COALESCE(city_code,''), COALESCE(region_code,''), address, COALESCE(orientir,''), lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at
 FROM route_points WHERE cargo_id = $1 ORDER BY point_order`,
 		cargoID)
 	if err != nil {
@@ -272,7 +273,7 @@ FROM route_points WHERE cargo_id = $1 ORDER BY point_order`,
 	var list []RoutePoint
 	for rows.Next() {
 		var rp RoutePoint
-		err := rows.Scan(&rp.ID, &rp.CargoID, &rp.Type, &rp.CityCode, &rp.RegionCode, &rp.Address, &rp.Orientir, &rp.Lat, &rp.Lng, &rp.PlaceID, &rp.Comment, &rp.PointOrder, &rp.IsMainLoad, &rp.IsMainUnload, &rp.PointAt)
+		err := rows.Scan(&rp.ID, &rp.CargoID, &rp.Type, &rp.CountryCode, &rp.CityCode, &rp.RegionCode, &rp.Address, &rp.Orientir, &rp.Lat, &rp.Lng, &rp.PlaceID, &rp.Comment, &rp.PointOrder, &rp.IsMainLoad, &rp.IsMainUnload, &rp.PointAt)
 		if err != nil {
 			return nil, err
 		}
@@ -533,7 +534,7 @@ func (r *Repo) GetRoutePointsForCargoIDs(ctx context.Context, cargoIDs []uuid.UU
 		return out, nil
 	}
 	rows, err := r.pg.Query(ctx, `
-SELECT id, cargo_id, type, COALESCE(city_code,''), COALESCE(region_code,''), address, COALESCE(orientir,''), lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at
+SELECT id, cargo_id, type, COALESCE(country_code,''), COALESCE(city_code,''), COALESCE(region_code,''), address, COALESCE(orientir,''), lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at
 FROM route_points WHERE cargo_id = ANY($1::uuid[]) ORDER BY cargo_id, point_order`, cargoIDs)
 	if err != nil {
 		return nil, err
@@ -541,7 +542,7 @@ FROM route_points WHERE cargo_id = ANY($1::uuid[]) ORDER BY cargo_id, point_orde
 	defer rows.Close()
 	for rows.Next() {
 		var rp RoutePoint
-		if err := rows.Scan(&rp.ID, &rp.CargoID, &rp.Type, &rp.CityCode, &rp.RegionCode, &rp.Address, &rp.Orientir, &rp.Lat, &rp.Lng, &rp.PlaceID, &rp.Comment, &rp.PointOrder, &rp.IsMainLoad, &rp.IsMainUnload, &rp.PointAt); err != nil {
+		if err := rows.Scan(&rp.ID, &rp.CargoID, &rp.Type, &rp.CountryCode, &rp.CityCode, &rp.RegionCode, &rp.Address, &rp.Orientir, &rp.Lat, &rp.Lng, &rp.PlaceID, &rp.Comment, &rp.PointOrder, &rp.IsMainLoad, &rp.IsMainUnload, &rp.PointAt); err != nil {
 			return nil, err
 		}
 		out[rp.CargoID] = append(out[rp.CargoID], rp)
@@ -781,9 +782,9 @@ func (r *Repo) Update(ctx context.Context, id uuid.UUID, p UpdateParams) error {
 		_, _ = tx.Exec(ctx, "DELETE FROM route_points WHERE cargo_id = $1", id)
 		for _, rp := range p.RoutePoints {
 			_, err = tx.Exec(ctx, `
-INSERT INTO route_points (cargo_id, type, city_code, region_code, address, orientir, lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-				id, rp.Type, emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.PlaceID, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload, rp.PointAt)
+INSERT INTO route_points (cargo_id, type, country_code, city_code, region_code, address, orientir, lat, lng, place_id, comment, point_order, is_main_load, is_main_unload, point_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+				id, rp.Type, emptyToNil(strings.ToUpper(strings.TrimSpace(rp.CountryCode))), emptyToNil(rp.CityCode), emptyToNil(rp.RegionCode), rp.Address, emptyToNil(rp.Orientir), rp.Lat, rp.Lng, rp.PlaceID, rp.Comment, rp.PointOrder, rp.IsMainLoad, rp.IsMainUnload, rp.PointAt)
 			if err != nil {
 				return err
 			}

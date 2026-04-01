@@ -177,7 +177,35 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 
 	callsRepo := calls.NewRepo(deps.PG)
 	callsLimiter := calls.NewCreateLimiter(deps.Redis, cfg.CallsCreateLimit, cfg.CallsCreateWindow)
-	callsH := handlers.NewCallsHandler(logger, callsRepo, chatRepo, chatHub, callsLimiter)
+	callsH := handlers.NewCallsHandler(logger, callsRepo, chatRepo, chatHub, callsLimiter, cfg.CallsRingingTimeout)
+	chatHub.SetOnUserConnected(func(userID uuid.UUID) {
+		// WS reconnect recovery: clear stale call state for this user.
+		list, err := callsRepo.ListOngoingForUser(context.Background(), userID)
+		if err != nil {
+			return
+		}
+		now := time.Now()
+		timeout := cfg.CallsRingingTimeout
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+		for _, c := range list {
+			peerID := c.CallerID
+			if peerID == userID {
+				peerID = c.CalleeID
+			}
+			switch c.Status {
+			case calls.StatusRinging:
+				if now.Sub(c.CreatedAt) > timeout {
+					_, _ = callsRepo.MissIfRingingSystem(context.Background(), c.ID, "recovered_timeout")
+				}
+			case calls.StatusActive:
+				if !chatHub.IsOnline(peerID) {
+					_, _ = callsRepo.EndIfActiveSystem(context.Background(), c.ID, "peer_offline_recovered")
+				}
+			}
+		}
+	})
 
 	// WebRTC/call signaling routing: requires call_id in payload and validates participants.
 	chatHub.SetOnCallSignal(func(fromUserID uuid.UUID, msgType string, data json.RawMessage) (uuid.UUID, []byte, bool) {

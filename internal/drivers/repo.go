@@ -209,8 +209,15 @@ LIMIT $3`
 // ListDriversFilter for GET /v1/dispatchers/drivers (freelance dispatcher's driver list with filters).
 type ListDriversFilter struct {
 	Phone      string // search by phone (partial match)
+	Name       string // search by name (partial match)
 	WorkStatus string // filter by work_status (e.g. available, busy)
 	TruckType  string // filter by power_plate_type (e.g. TENT, REFRIGERATOR)
+	DriverType string // driver_type (company|freelancer|driver)
+	AccountStatus string // account_status (active|inactive|...)
+	HasPhoto   *bool
+	Latitude   *float64 // geo filter center latitude
+	Longitude  *float64 // geo filter center longitude
+	RadiusKM   *float64 // geo radius in kilometers
 	Page       int
 	Limit      int
 	Sort       string // "updated_at:desc" (default), "name:asc", "last_online_at:desc"
@@ -230,6 +237,11 @@ func (r *Repo) ListByFreelancerIDFilter(ctx context.Context, freelancerID uuid.U
 		args = append(args, "%"+strings.ReplaceAll(strings.ReplaceAll(phoneTerm, " ", ""), "-", "")+"%")
 		argNum++
 	}
+	if nameTerm := strings.TrimSpace(f.Name); nameTerm != "" {
+		conds = append(conds, "COALESCE(d.name,'') ILIKE $"+strconv.Itoa(argNum))
+		args = append(args, "%"+nameTerm+"%")
+		argNum++
+	}
 	if strings.TrimSpace(f.WorkStatus) != "" {
 		conds = append(conds, "d.work_status = $"+strconv.Itoa(argNum))
 		args = append(args, strings.TrimSpace(f.WorkStatus))
@@ -239,6 +251,32 @@ func (r *Repo) ListByFreelancerIDFilter(ctx context.Context, freelancerID uuid.U
 		conds = append(conds, "p.power_plate_type = $"+strconv.Itoa(argNum))
 		args = append(args, strings.TrimSpace(strings.ToUpper(f.TruckType)))
 		argNum++
+	}
+	if strings.TrimSpace(f.DriverType) != "" {
+		conds = append(conds, "d.driver_type = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(f.DriverType))
+		argNum++
+	}
+	if strings.TrimSpace(f.AccountStatus) != "" {
+		conds = append(conds, "d.account_status = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(f.AccountStatus))
+		argNum++
+	}
+	if f.HasPhoto != nil {
+		if *f.HasPhoto {
+			conds = append(conds, "d.photo_data IS NOT NULL")
+		} else {
+			conds = append(conds, "d.photo_data IS NULL")
+		}
+	}
+	if f.Latitude != nil && f.Longitude != nil && f.RadiusKM != nil && *f.RadiusKM > 0 {
+		conds = append(conds, "d.latitude IS NOT NULL AND d.longitude IS NOT NULL")
+		conds = append(conds, `(6371 * acos(least(1, greatest(-1,
+cos(radians($`+strconv.Itoa(argNum)+`)) * cos(radians(d.latitude)) * cos(radians(d.longitude) - radians($`+strconv.Itoa(argNum+1)+`)) +
+sin(radians($`+strconv.Itoa(argNum)+`)) * sin(radians(d.latitude))
+)))) <= $`+strconv.Itoa(argNum+2))
+		args = append(args, *f.Latitude, *f.Longitude, *f.RadiusKM)
+		argNum += 3
 	}
 
 	where := strings.Join(conds, " AND ")
@@ -311,6 +349,11 @@ func (r *Repo) ListAllForFreelancerFilter(ctx context.Context, f ListDriversFilt
 		args = append(args, "%"+strings.ReplaceAll(strings.ReplaceAll(phoneTerm, " ", ""), "-", "")+"%")
 		argNum++
 	}
+	if nameTerm := strings.TrimSpace(f.Name); nameTerm != "" {
+		conds = append(conds, "COALESCE(d.name,'') ILIKE $"+strconv.Itoa(argNum))
+		args = append(args, "%"+nameTerm+"%")
+		argNum++
+	}
 	if strings.TrimSpace(f.WorkStatus) != "" {
 		conds = append(conds, "d.work_status = $"+strconv.Itoa(argNum))
 		args = append(args, strings.TrimSpace(f.WorkStatus))
@@ -320,6 +363,32 @@ func (r *Repo) ListAllForFreelancerFilter(ctx context.Context, f ListDriversFilt
 		conds = append(conds, "p.power_plate_type = $"+strconv.Itoa(argNum))
 		args = append(args, strings.TrimSpace(strings.ToUpper(f.TruckType)))
 		argNum++
+	}
+	if strings.TrimSpace(f.DriverType) != "" {
+		conds = append(conds, "d.driver_type = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(f.DriverType))
+		argNum++
+	}
+	if strings.TrimSpace(f.AccountStatus) != "" {
+		conds = append(conds, "d.account_status = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(f.AccountStatus))
+		argNum++
+	}
+	if f.HasPhoto != nil {
+		if *f.HasPhoto {
+			conds = append(conds, "d.photo_data IS NOT NULL")
+		} else {
+			conds = append(conds, "d.photo_data IS NULL")
+		}
+	}
+	if f.Latitude != nil && f.Longitude != nil && f.RadiusKM != nil && *f.RadiusKM > 0 {
+		conds = append(conds, "d.latitude IS NOT NULL AND d.longitude IS NOT NULL")
+		conds = append(conds, `(6371 * acos(least(1, greatest(-1,
+cos(radians($`+strconv.Itoa(argNum)+`)) * cos(radians(d.latitude)) * cos(radians(d.longitude) - radians($`+strconv.Itoa(argNum+1)+`)) +
+sin(radians($`+strconv.Itoa(argNum)+`)) * sin(radians(d.latitude))
+)))) <= $`+strconv.Itoa(argNum+2))
+		args = append(args, *f.Latitude, *f.Longitude, *f.RadiusKM)
+		argNum += 3
 	}
 
 	where := strings.Join(conds, " AND ")

@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -22,10 +24,11 @@ type CallsHandler struct {
 	chatRepo *chat.Repo
 	hub      *chat.Hub
 	limiter  *calls.CreateLimiter
+	ringingTimeout time.Duration
 }
 
-func NewCallsHandler(logger *zap.Logger, callsRepo *calls.Repo, chatRepo *chat.Repo, hub *chat.Hub, limiter *calls.CreateLimiter) *CallsHandler {
-	return &CallsHandler{logger: logger, calls: callsRepo, chatRepo: chatRepo, hub: hub, limiter: limiter}
+func NewCallsHandler(logger *zap.Logger, callsRepo *calls.Repo, chatRepo *chat.Repo, hub *chat.Hub, limiter *calls.CreateLimiter, ringingTimeout time.Duration) *CallsHandler {
+	return &CallsHandler{logger: logger, calls: callsRepo, chatRepo: chatRepo, hub: hub, limiter: limiter, ringingTimeout: ringingTimeout}
 }
 
 func (h *CallsHandler) userID(c *gin.Context) (uuid.UUID, bool) {
@@ -64,6 +67,8 @@ func (h *CallsHandler) CreateCall(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
 		return
 	}
+	// Recover stale stuck calls first (app killed/disconnected without End).
+	h.recoverUserStaleCalls(c.Request.Context(), userID)
 	if h.limiter != nil {
 		allowed, _, _, _ := h.limiter.Allow(c.Request.Context(), userID)
 		if !allowed {
@@ -89,6 +94,8 @@ func (h *CallsHandler) CreateCall(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_peer_id")
 		return
 	}
+	// Recover stale states for peer too to reduce false "peer busy".
+	h.recoverUserStaleCalls(c.Request.Context(), peerID)
 	if busy, err := h.calls.HasOngoing(c.Request.Context(), peerID); err == nil && busy {
 		resp.ErrorLang(c, http.StatusConflict, "call_peer_busy")
 		return
@@ -150,6 +157,35 @@ func (h *CallsHandler) CreateCall(c *gin.Context) {
 		h.hub.SendToUser(peerID, raw)
 	}
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"call": call})
+}
+
+func (h *CallsHandler) recoverUserStaleCalls(ctx context.Context, userID uuid.UUID) {
+	list, err := h.calls.ListOngoingForUser(ctx, userID)
+	if err != nil || len(list) == 0 {
+		return
+	}
+	timeout := h.ringingTimeout
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	now := time.Now()
+	for _, c := range list {
+		peerID := c.CallerID
+		if peerID == userID {
+			peerID = c.CalleeID
+		}
+		switch c.Status {
+		case calls.StatusRinging:
+			if now.Sub(c.CreatedAt) > timeout {
+				_, _ = h.calls.MissIfRingingSystem(ctx, c.ID, "recovered_timeout")
+			}
+		case calls.StatusActive:
+			// If peer is offline, treat call as stale and auto-end.
+			if h.hub != nil && !h.hub.IsOnline(peerID) {
+				_, _ = h.calls.EndIfActiveSystem(ctx, c.ID, "peer_offline_recovered")
+			}
+		}
+	}
 }
 
 // GetCall GET /v1/calls/:id

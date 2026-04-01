@@ -632,15 +632,16 @@ components:
     RoutePoint:
       type: object
       description: |
-        **Точка маршрута** (погрузка, выгрузка, таможня, транзит). В каждой точке указывается город (код из справочника городов), точный адрес и координаты.
+        **Точка маршрута** (погрузка, выгрузка, таможня, транзит). В каждой точке указывается страна + город (коды из справочника), точный адрес и координаты.
 
         **Типы:** LOAD — погрузка; UNLOAD — выгрузка; CUSTOMS — таможня; TRANSIT — транзитная точка. В маршруте обязательно минимум одна погрузка (LOAD) и одна выгрузка (UNLOAD).
 
-        **Город:** city_code берётся из GET /v1/reference/cities (например TAS — Ташкент, SAM — Самарканд, DXB — Дубай).
+        **Страна и город:** country_code + city_code берутся из GET /v1/reference/cities (например country_code=UZ, city_code=TAS).
       properties:
         id: { type: string, format: uuid, example: "af8be3f7-a8a4-4485-96ad-b6a96f58d015", description: "Уникальный идентификатор точки маршрута" }
         cargo_id: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120", description: "UUID груза, к которому относится точка" }
         type: { type: string, enum: [LOAD, UNLOAD, CUSTOMS, TRANSIT], example: "LOAD", description: "Тип точки (UPPERCASE): LOAD, UNLOAD, CUSTOMS, TRANSIT" }
+        country_code: { type: string, example: "UZ", description: "Код страны (ISO-like): UZ, AE, RU и т.д." }
         city_code: { type: string, example: "TAS", description: "Код города из справочника GET /v1/reference/cities (TAS, SAM, DXB и т.д.)" }
         region_code: { type: string, example: "", description: "Код региона/области (пустая строка если не задан)" }
         address: { type: string, example: "ул. Амира Темура 1, склад №5", description: "Полный адрес: улица, дом, склад, промзона" }
@@ -702,7 +703,7 @@ components:
       description: |
         **Тело запроса POST /api/cargo** — создание груза с точками маршрута и условиями оплаты.
 
-        **Обязательные поля:** weight (вес в тоннах, > 0), volume (объём в м³, > 0), **vehicles_amount** (количество машин, 1..100), **power_plate_type** и **trailer_plate_type** (из справочника GET /v1/driver/transport-options), route_points — массив точек маршрута. В route_points обязательно минимум одна точка с type=LOAD (погрузка) и одна с type=UNLOAD (выгрузка). У каждой точки обязательны: type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code, address, lat, lng, point_order, **date** (RFC3339 UTC, например `2026-03-23T10:45:30Z`).
+        **Обязательные поля:** weight (вес в тоннах, > 0), volume (объём в м³, > 0), **vehicles_amount** (количество машин, 1..100), **power_plate_type** и **trailer_plate_type** (из справочника GET /v1/driver/transport-options), route_points — массив точек маршрута. В route_points обязательно минимум одна точка с type=LOAD (погрузка) и одна с type=UNLOAD (выгрузка). У каждой точки обязательны: type (LOAD/UNLOAD/CUSTOMS/TRANSIT), **country_code**, city_code, address, lat, lng, point_order, **date** (RFC3339 UTC, например `2026-03-23T10:45:30Z`).
 
         **Справочники:** города — GET /v1/reference/cities (коды TAS, SAM, DXB…); транспорт — GET /v1/driver/transport-options (power_plate_type, trailer_plate_type).
 
@@ -798,11 +799,12 @@ components:
       description: |
         **Одна точка маршрута** при создании или редактировании груза (POST /api/cargo, PUT /api/cargo/:id).
 
-        **Обязательно:** type (LOAD/UNLOAD/CUSTOMS/TRANSIT), city_code (код города из GET /v1/reference/cities), address (улица, дом, склад), lat, lng (координаты), point_order (порядок 1, 2, 3…), **date** (RFC3339 в UTC, например `2026-03-23T10:45:30Z`).
+        **Обязательно:** type (LOAD/UNLOAD/CUSTOMS/TRANSIT), country_code + city_code (коды страны/города из GET /v1/reference/cities), address (улица, дом, склад), lat, lng (координаты), point_order (порядок 1, 2, 3…), **date** (RFC3339 в UTC, например `2026-03-23T10:45:30Z`).
 
         **Опционально:** orientir — подсказка для водителя, как найти место; place_id; comment; is_main_load / is_main_unload — отметить основную погрузку/выгрузку.
       properties:
         type: { type: string, enum: [LOAD, UNLOAD, CUSTOMS, TRANSIT], description: "Тип точки: LOAD — погрузка, UNLOAD — выгрузка, CUSTOMS — таможня, TRANSIT — транзит" }
+        country_code: { type: string, description: "Код страны из справочника GET /v1/reference/cities (например UZ, AE, RU)", example: "UZ" }
         city_code: { type: string, description: "Код города из справочника GET /v1/reference/cities (TAS — Ташкент, SAM — Самарканд, DXB — Дубай и т.д.)", example: "TAS" }
         region_code: { type: string, nullable: true, description: "Код региона/области (опционально)" }
         address: { type: string, description: "Полный адрес: улица, дом, номер склада, промзона" }
@@ -822,7 +824,7 @@ components:
           format: date-time
           description: "Плановая дата/время точки в UTC (RFC3339), сохраняется и отдаётся в UTC"
           example: "2026-03-23T10:45:30Z"
-      required: [type, city_code, address, lat, lng, point_order, date]
+      required: [type, country_code, city_code, address, lat, lng, point_order, date]
     PaymentInput:
       type: object
       description: |
@@ -884,7 +886,7 @@ paths:
         **Фриланс-диспетчер:** передайте X-User-Token (JWT после входа) — в груз запишется created_by_type=DISPATCHER.
         **Назначение:** Создание нового груза с точками маршрута и блоком оплаты.
 
-        **Логика:** В одной транзакции создаются запись в `cargo`, записи в `route_points` (все переданные точки), одна запись в `payments` (если передан блок payment). Валидация: weight > 0; минимум одна точка с type=LOAD и одна с type=UNLOAD; у каждой точки обязательны city_code (код города из справочника городов), address, lat, lng, point_order, **date** (RFC3339 в UTC, например `2026-03-23T10:45:30Z`); опционально orientir, place_id. Все enum-поля (type, truck_type и т.д.) — в UPPERCASE. Справочник городов: GET /v1/reference/cities (все города мира, коды TAS/SAM/DXB и т.д.). Если указаны temp_min/temp_max — truck_type должен быть REFRIGERATOR; если adr_enabled=true — обязателен adr_class; если ready_enabled=true — обязателен ready_at.
+        **Логика:** В одной транзакции создаются запись в `cargo`, записи в `route_points` (все переданные точки), одна запись в `payments` (если передан блок payment). Валидация: weight > 0; минимум одна точка с type=LOAD и одна с type=UNLOAD; у каждой точки обязательны country_code + city_code (коды страны и города из справочника городов), address, lat, lng, point_order, **date** (RFC3339 в UTC, например `2026-03-23T10:45:30Z`); опционально orientir, place_id. Все enum-поля (type, truck_type и т.д.) — в UPPERCASE. Справочник городов: GET /v1/reference/cities (все города мира, коды TAS/SAM/DXB и т.д.). Если указаны temp_min/temp_max — truck_type должен быть REFRIGERATOR; если adr_enabled=true — обязателен adr_class; если ready_enabled=true — обязателен ready_at.
 
         **Создатель (автоматически):** Если передан заголовок **X-User-Token** (JWT) с ролью admin или dispatcher — в груз записываются created_by_type и created_by_id. Если JWT не передан, но в теле есть company_id — создателем считается компания (created_by_type=company). Опционально в теле можно передать company_id для привязки груза к компании.
 
@@ -941,6 +943,7 @@ paths:
                   contact_phone: "+998901234567"
                   route_points:
                     - type: "LOAD"
+                      country_code: "UZ"
                       city_code: "TAS"
                       address: "ул. Амира Темура 1, склад №5"
                       orientir: "Въезд со стороны метро Хамза, ворота А"
@@ -953,6 +956,7 @@ paths:
                       is_main_unload: false
                       date: "2026-03-23T08:00:00Z"
                     - type: "UNLOAD"
+                      country_code: "UZ"
                       city_code: "SAM"
                       address: "промзона Южная, терминал А"
                       orientir: "За КПП 2, склад напротив"
@@ -990,6 +994,7 @@ paths:
                   company_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
                   route_points:
                     - type: "LOAD"
+                      country_code: "UZ"
                       city_code: "TAS"
                       address: "ул. Амира Темура 1, склад №5"
                       lat: 41.311081
@@ -997,6 +1002,7 @@ paths:
                       point_order: 1
                       date: "2026-03-23T08:00:00Z"
                     - type: "UNLOAD"
+                      country_code: "UZ"
                       city_code: "SAM"
                       address: "промзона Южная, терминал А"
                       lat: 39.654167
@@ -3165,7 +3171,10 @@ paths:
         - после привязки — отправлять **таклиф** по грузам: POST /v1/dispatchers/cargo/:id/recommend (body: driver_id);
         - водитель увидит приглашённые грузы в GET /v1/driver/recommended-cargo.
 
-        **Фильтры:** phone (поиск по номеру), work_status (available, busy, loaded…), truck_type (тип тягача: TENT, REFRIGERATOR… из power_plate_type). **Пагинация:** page (с 1), limit (по умолчанию 20, макс. 100). **Сортировка:** sort=updated_at:desc (по умолчанию), name:asc, last_online_at:desc, work_status:asc.
+        **Фильтры:** phone, name, work_status, truck_type (power_plate_type), driver_type, account_status, has_photo.
+        **Гео-фильтр:** latitude + longitude + radius_km (в километрах) — вернёт водителей в радиусе по их текущим координатам.
+        **Адаптивная пагинация:** frontend передаёт `limit` (1..100) и `page` (с 1).
+        **Сортировка:** sort=updated_at:desc (по умолчанию), name:asc, last_online_at:desc, work_status:asc.
 
         Требуется X-User-Token (dispatcher). Ответы на 5 языках (заголовок X-Language: ru, uz, en, tr, zh).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -3174,6 +3183,10 @@ paths:
           in: query
           schema: { type: string }
           description: "Поиск по номеру телефона (частичное совпадение)"
+        - name: name
+          in: query
+          schema: { type: string }
+          description: "Поиск по имени водителя (частичное совпадение)"
         - name: work_status
           in: query
           schema: { type: string, example: "available" }
@@ -3182,6 +3195,30 @@ paths:
           in: query
           schema: { type: string, example: "TENT" }
           description: "Фильтр по типу тягача (power_plate_type): TENT, REFRIGERATOR, FLATBED, TANKER, OTHER"
+        - name: driver_type
+          in: query
+          schema: { type: string, example: "freelancer" }
+          description: "Фильтр по типу водителя (driver_type)"
+        - name: account_status
+          in: query
+          schema: { type: string, example: "active" }
+          description: "Фильтр по account_status"
+        - name: has_photo
+          in: query
+          schema: { type: boolean, example: true }
+          description: "Фильтр по наличию фото профиля"
+        - name: latitude
+          in: query
+          schema: { type: number, format: float, example: 41.3111 }
+          description: "Широта центра для гео-поиска (использовать вместе с longitude и radius_km)"
+        - name: longitude
+          in: query
+          schema: { type: number, format: float, example: 69.2797 }
+          description: "Долгота центра для гео-поиска (использовать вместе с latitude и radius_km)"
+        - name: radius_km
+          in: query
+          schema: { type: number, format: float, example: 25 }
+          description: "Радиус поиска в километрах (использовать вместе с latitude и longitude)"
         - name: page
           in: query
           schema: { type: integer, default: 1, minimum: 1 }
@@ -3193,7 +3230,7 @@ paths:
           schema: { type: string, default: "updated_at:desc", example: "updated_at:desc" }
           description: "Сортировка: updated_at:desc, name:asc, last_online_at:desc, work_status:asc"
       responses:
-        "200": { description: "data.items — массив водителей, data.total — всего записей" }
+        "200": { description: "data.items — массив водителей со всеми данными, data.total/page/limit/total_pages/has_next — мета пагинации" }
 
   /v1/dispatchers/drivers/{driverId}:
     delete:

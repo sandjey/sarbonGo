@@ -1,0 +1,14 @@
+.git
+.gitignore
+.cursor
+agent-transcripts
+tmp
+dist
+bin
+*.log
+*.out
+*.exe
+.env
+storage
+uploads
+

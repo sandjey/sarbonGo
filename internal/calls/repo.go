@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -161,6 +162,63 @@ LIMIT $2
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+// ListOngoingForUser returns current RINGING/ACTIVE calls for participant.
+func (r *Repo) ListOngoingForUser(ctx context.Context, userID uuid.UUID) ([]Call, error) {
+	rows, err := r.pg.Query(ctx, `
+SELECT id, conversation_id, caller_id, callee_id, status, created_at, started_at, ended_at, ended_by, ended_reason, client_request_id
+FROM calls
+WHERE (caller_id=$1 OR callee_id=$1) AND status IN ('RINGING','ACTIVE')
+ORDER BY created_at DESC
+`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Call, 0, 8)
+	for rows.Next() {
+		var c Call
+		if err := rows.Scan(&c.ID, &c.ConversationID, &c.CallerID, &c.CalleeID, &c.Status, &c.CreatedAt, &c.StartedAt, &c.EndedAt, &c.EndedBy, &c.EndedReason, &c.ClientRequestID); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// EndIfActiveSystem ends ACTIVE call without participant action (server-side recovery).
+func (r *Repo) EndIfActiveSystem(ctx context.Context, callID uuid.UUID, reason string) (bool, error) {
+	if strings.TrimSpace(reason) == "" {
+		reason = "system_recovered"
+	}
+	cmd, err := r.pg.Exec(ctx, `
+UPDATE calls
+SET status='ENDED', ended_at=now(), ended_reason=$2
+WHERE id=$1 AND status='ACTIVE'
+`, callID, reason)
+	if err != nil {
+		return false, err
+	}
+	_ = r.LogEvent(ctx, callID, nil, "call.ended.system", map[string]any{"reason": reason})
+	return cmd.RowsAffected() > 0, nil
+}
+
+// MissIfRingingSystem marks RINGING call as MISSED (server-side recovery).
+func (r *Repo) MissIfRingingSystem(ctx context.Context, callID uuid.UUID, reason string) (bool, error) {
+	if strings.TrimSpace(reason) == "" {
+		reason = "timeout"
+	}
+	cmd, err := r.pg.Exec(ctx, `
+UPDATE calls
+SET status='MISSED', ended_at=now(), ended_reason=$2
+WHERE id=$1 AND status='RINGING'
+`, callID, reason)
+	if err != nil {
+		return false, err
+	}
+	_ = r.LogEvent(ctx, callID, nil, "call.missed.system", map[string]any{"reason": reason})
+	return cmd.RowsAffected() > 0, nil
 }
 
 func (r *Repo) Accept(ctx context.Context, callID, actorID uuid.UUID) (*Call, error) {

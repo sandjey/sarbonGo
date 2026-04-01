@@ -1,6 +1,34 @@
 services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sarbon-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      HTTP_ADDR: ${HTTP_ADDR:-:8080}
+      DATABASE_URL: postgres://sarbon:sarbon@postgres:5432/sarbon?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - app_storage:/app/storage
+      - app_uploads:/app/uploads
+
   postgres:
     image: postgres:16
+    container_name: sarbon-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: sarbon
       POSTGRES_USER: sarbon
@@ -9,10 +37,26 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sarbon -d sarbon"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   redis:
     image: redis:7
+    container_name: sarbon-redis
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
   pgdata:
+  app_storage:
+  app_uploads:
 
