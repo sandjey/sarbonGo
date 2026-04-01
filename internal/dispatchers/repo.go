@@ -3,6 +3,8 @@ package dispatchers
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +28,177 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
 
+type CatalogFilter struct {
+	Q          string  // name/phone search (ILIKE)
+	PhoneHint  string  // phone prefix hint (LIKE prefix%)
+	Status     *string // account_status
+	WorkStatus *string
+	HasPhoto   *bool
+	RatingMin  *float64
+	RatingMax  *float64
+	Limit      int
+	Offset     int
+}
+
+// ListCatalog returns all active (not deleted) freelance dispatchers with filters + pagination.
+func (r *Repo) ListCatalog(ctx context.Context, f CatalogFilter) (items []Dispatcher, total int64, err error) {
+	limit := f.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	offset := f.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	where := `WHERE deleted_at IS NULL`
+	args := make([]any, 0, 12)
+	argN := 1
+
+	add := func(cond string, v any) {
+		where += " AND " + cond
+		args = append(args, v)
+		argN++
+	}
+
+	if f.Q != "" {
+		// match by phone or name (case-insensitive)
+		add(`(phone ILIKE $`+itoa(argN)+` OR COALESCE(name,'') ILIKE $`+itoa(argN)+`)`, "%"+f.Q+"%")
+	}
+	if f.PhoneHint != "" {
+		add(`phone LIKE $`+itoa(argN)+``, f.PhoneHint+"%")
+	}
+	if f.Status != nil && *f.Status != "" {
+		add(`account_status = $`+itoa(argN)+``, *f.Status)
+	}
+	if f.WorkStatus != nil && *f.WorkStatus != "" {
+		add(`work_status = $`+itoa(argN)+``, *f.WorkStatus)
+	}
+	if f.HasPhoto != nil {
+		if *f.HasPhoto {
+			where += " AND photo_data IS NOT NULL"
+		} else {
+			where += " AND photo_data IS NULL"
+		}
+	}
+	if f.RatingMin != nil {
+		add(`COALESCE(rating,0) >= $`+itoa(argN)+``, *f.RatingMin)
+	}
+	if f.RatingMax != nil {
+		add(`COALESCE(rating,0) <= $`+itoa(argN)+``, *f.RatingMax)
+	}
+
+	// Add pagination args
+	args = append(args, limit, offset)
+
+	const sel = `
+SELECT
+  id, name, phone, '' as password,
+  passport_series, passport_number, pinfl,
+  cargo_id, driver_id,
+  rating, work_status, account_status AS status,
+  photo_path AS photo,
+  (photo_data IS NOT NULL) AS has_photo,
+  created_at, updated_at, last_online_at, deleted_at,
+  COUNT(*) OVER() AS total
+FROM freelance_dispatchers
+%s
+ORDER BY last_online_at DESC NULLS LAST, created_at DESC
+LIMIT $%d OFFSET $%d`
+
+	// last 2 args are limit/offset
+	limitPos := len(args) - 1
+	offsetPos := len(args)
+	q := sprintf(sel, where, limitPos, offsetPos)
+
+	rows, qerr := r.pg.Query(ctx, q, args...)
+	if qerr != nil {
+		return nil, 0, qerr
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var d Dispatcher
+		var dummyPassword string
+		var tot int64
+		if err := rows.Scan(
+			&d.ID, &d.Name, &d.Phone, &dummyPassword,
+			&d.PassportSeries, &d.PassportNumber, &d.PINFL,
+			&d.CargoID, &d.DriverID,
+			&d.Rating, &d.WorkStatus, &d.Status,
+			&d.Photo,
+			&d.HasPhoto,
+			&d.CreatedAt, &d.UpdatedAt, &d.LastOnlineAt, &d.DeletedAt,
+			&tot,
+		); err != nil {
+			return nil, 0, err
+		}
+		// normalize tz
+		d.CreatedAt = util.InTashkent(d.CreatedAt)
+		d.UpdatedAt = util.InTashkent(d.UpdatedAt)
+		if d.LastOnlineAt != nil {
+			v := util.InTashkent(*d.LastOnlineAt)
+			d.LastOnlineAt = &v
+		}
+		if d.DeletedAt != nil {
+			v := util.InTashkent(*d.DeletedAt)
+			d.DeletedAt = &v
+		}
+		total = tot
+		items = append(items, d)
+	}
+	return items, total, rows.Err()
+}
+
+// HintByPhonePrefix returns up to limit dispatchers whose phone starts with prefix.
+func (r *Repo) HintByPhonePrefix(ctx context.Context, prefix string, limit int) ([]Dispatcher, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	const q = `
+SELECT
+  id, name, phone, password,
+  passport_series, passport_number, pinfl,
+  cargo_id, driver_id,
+  rating, work_status, account_status AS status,
+  photo_path AS photo,
+  (photo_data IS NOT NULL) AS has_photo,
+  created_at, updated_at, last_online_at, deleted_at
+FROM freelance_dispatchers
+WHERE deleted_at IS NULL AND phone LIKE $1
+ORDER BY last_online_at DESC NULLS LAST, created_at DESC
+LIMIT $2`
+	rows, err := r.pg.Query(ctx, q, prefix+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Dispatcher, 0, limit)
+	for rows.Next() {
+		var d Dispatcher
+		if err := rows.Scan(
+			&d.ID, &d.Name, &d.Phone, &d.Password,
+			&d.PassportSeries, &d.PassportNumber, &d.PINFL,
+			&d.CargoID, &d.DriverID,
+			&d.Rating, &d.WorkStatus, &d.Status,
+			&d.Photo, &d.HasPhoto,
+			&d.CreatedAt, &d.UpdatedAt, &d.LastOnlineAt, &d.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		// never expose password
+		d.Password = ""
+		d.CreatedAt = util.InTashkent(d.CreatedAt)
+		d.UpdatedAt = util.InTashkent(d.UpdatedAt)
+		if d.LastOnlineAt != nil {
+			v := util.InTashkent(*d.LastOnlineAt)
+			d.LastOnlineAt = &v
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repo) FindByPhone(ctx context.Context, phone string) (*Dispatcher, error) {
 	const q = `
 SELECT
@@ -45,6 +218,10 @@ LIMIT 1`
 	}
 	return d, nil
 }
+
+// small helpers
+func itoa(n int) string { return strconv.Itoa(n) }
+func sprintf(f string, a ...any) string { return fmt.Sprintf(f, a...) }
 
 func (r *Repo) FindByID(ctx context.Context, id uuid.UUID) (*Dispatcher, error) {
 	const q = `

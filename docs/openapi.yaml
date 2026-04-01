@@ -134,7 +134,12 @@ tags:
   - name: "Drivers / My dispatchers"
     description: |
       **Мои диспетчеры: просмотр и управление.**
-      **Кто вызывает:** Водитель (X-User-Token). GET /v1/driver/dispatchers — список диспетчеров, с которыми связан водитель: фриланс-диспетчер (type=freelance, если водитель принял приглашение) и диспетчеры компании (type=company, company_role), если водитель в компании. DELETE /v1/driver/dispatchers/:dispatcherId — отвязаться от фриланс-диспетчера (только если driver.freelancer_id = dispatcherId). Ответы на 5 языках (X-Language: en, ru, uz, tr, zh).
+      **Кто вызывает:** Водитель (X-User-Token).
+      - GET /v1/driver/dispatchers — список диспетчеров, с которыми связан водитель: фриланс-диспетчер (type=freelance, если водитель принял приглашение) и диспетчеры компании (type=company, company_role), если водитель в компании.
+      - DELETE /v1/driver/dispatchers/:dispatcherId — отвязаться от фриланс-диспетчера (только если driver.freelancer_id = dispatcherId).
+      - GET /v1/driver/dispatchers/catalog — каталог всех фриланс-диспетчеров с пагинацией и фильтрами (password не возвращается).
+      - GET /v1/driver/dispatchers/hint — быстрый hint по номеру (prefix) для автокомплита (password не возвращается).
+      Ответы на 5 языках (X-Language: en, ru, uz, tr, zh).
   - name: "Drivers / Invite dispatcher"
     description: |
       **Водитель приглашает диспетчера.** Водитель отправляет приглашение по номеру телефона диспетчера. GET /v1/driver/dispatcher-invitations — список отправленных приглашений. POST /v1/driver/dispatcher-invitations (body: phone) — создать приглашение. DELETE /v1/driver/dispatcher-invitations/:token — отменить. Диспетчер видит приглашения в GET /v1/dispatchers/invitations-from-drivers и принимает или отказывает.
@@ -4437,6 +4442,88 @@ paths:
                       status: { type: string, example: "unlinked" }
         "400": { description: invalid dispatcher id }
         "403": { description: this dispatcher is not linked to you }
+
+  /v1/driver/dispatchers/catalog:
+    get:
+      tags: ["Drivers / My dispatchers"]
+      summary: "Каталог всех фриланс-диспетчеров (водитель)"
+      description: |
+        **Водитель:** вернуть список всех фриланс-диспетчеров с пагинацией и фильтрами.
+        Фильтры:
+        - `limit` 1..100 (default 20)
+        - `offset` >=0 (default 0)
+        - `q` — поиск по `phone` или `name` (ILIKE)
+        - `phone_hint` — prefix по `phone` (LIKE 'prefix%')
+        - `status` — `account_status`
+        - `work_status` — available/loaded/busy
+        - `has_photo` — true/false
+        - `rating_min`, `rating_max`
+        **Важно:** `password` не возвращается.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, example: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, example: 0 }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, example: "99890" }
+        - name: phone_hint
+          in: query
+          required: false
+          schema: { type: string, example: "+99890" }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: "active" }
+        - name: work_status
+          in: query
+          required: false
+          schema: { type: string, example: "available" }
+        - name: has_photo
+          in: query
+          required: false
+          schema: { type: boolean, example: true }
+        - name: rating_min
+          in: query
+          required: false
+          schema: { type: number, format: float, example: 4.5 }
+        - name: rating_max
+          in: query
+          required: false
+          schema: { type: number, format: float, example: 5 }
+      responses:
+        "200": { description: "data.items + data.total + limit/offset" }
+        "400": { description: invalid payload }
+        "401": { description: unauthorized }
+
+  /v1/driver/dispatchers/hint:
+    get:
+      tags: ["Drivers / My dispatchers"]
+      summary: "Hint по номеру диспетчера (водитель)"
+      description: |
+        **Водитель:** быстрый поиск (typeahead) фриланс-диспетчеров по префиксу номера.
+        Параметры: `phone` (обязательно, prefix), `limit` (1..50, default 10).
+        **Важно:** `password` не возвращается.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: phone
+          in: query
+          required: true
+          schema: { type: string, example: "+99890" }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, example: 10 }
+      responses:
+        "200": { description: "data.items — массив диспетчеров" }
+        "400": { description: phone required / invalid payload }
+        "401": { description: unauthorized }
 
   /v1/driver/dispatcher-invitations:
     get:
