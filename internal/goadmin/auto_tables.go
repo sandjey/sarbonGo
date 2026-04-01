@@ -25,6 +25,7 @@ type columnMeta struct {
 
 var (
 	reNonAlphaNum = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+	autoTableNames []string
 )
 
 // AutoTableGenerators scans Postgres public schema and creates GoAdmin generators
@@ -131,9 +132,15 @@ func AutoTableGenerators(ctx context.Context, databaseURL string, existing map[s
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	_ = keys
+	autoTableNames = keys
 
 	return out, nil
+}
+
+func getAutoTableNames() []string {
+	out := make([]string, len(autoTableNames))
+	copy(out, autoTableNames)
+	return out
 }
 
 func listPublicTables(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
