@@ -71,11 +71,19 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 
 /* === Таблица и Operation — два отдельных блока === */
 .content-wrapper .table-responsive { overflow-x: auto; }
-.content-wrapper .table { table-layout: auto; min-width: 1200px; margin: 0; background: #fff; }
+.content-wrapper .table {
+  table-layout: auto; min-width: 1200px; margin: 0; background: #fff;
+  border-radius: 10px; overflow: hidden; border: 1px solid #e9eef3;
+}
 .content-wrapper .table th,
 .content-wrapper .table td { white-space: nowrap; vertical-align: middle !important; padding: 10px 12px !important; }
-.content-wrapper .table thead th { background: #f8f9fa !important; font-weight: 600; color: #333; border-bottom: 2px solid #dee2e6; }
+.content-wrapper .table thead th {
+  background: linear-gradient(180deg,#f8fafc,#f1f5f9) !important;
+  font-weight: 700; color: #334155; border-bottom: 2px solid #dbe4ee;
+  position: sticky; top: 0; z-index: 3;
+}
 .content-wrapper .table tbody tr:nth-child(even) td:not(:last-child) { background: #fafafa; }
+.content-wrapper .table tbody tr:hover td:not(:last-child) { background: #eef6ff !important; }
 .content-wrapper .table td:first-child,
 .content-wrapper .table th:first-child { min-width: 280px; white-space: normal; word-break: break-all; }
 .content-wrapper .table th { min-width: 80px; }
@@ -126,6 +134,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 /* Тёмная тема */
 .skin-black .content-wrapper .table thead th { background: #2c3b41 !important; color: #ecf0f1; }
 .skin-black .content-wrapper .table tbody tr:nth-child(even) td:not(:last-child) { background: #252d33; }
+.skin-black .content-wrapper .table tbody tr:hover td:not(:last-child) { background: #2b3a41 !important; }
 .skin-black .content-wrapper .table th:last-child,
 .skin-black .content-wrapper .table td:last-child { background: #252d33 !important; border-left-color: #333; }
 .skin-black .content-wrapper .table thead th:last-child { background: #1a2226 !important; color: #ecf0f1; }
@@ -145,8 +154,15 @@ a.admin-dash-card {
   box-shadow: 0 2px 8px rgba(0,0,0,.06); transition: all .25s;
 }
 a.admin-dash-card:hover { border-color: #3498db; box-shadow: 0 4px 16px rgba(52,152,219,.2); transform: translateY(-2px); color: inherit; }
-.admin-dash-card-icon { width: 48px; height: 48px; border-radius: 10px; background: #e8f4fc; color: #3498db; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; font-size: 22px; }
-a.admin-dash-card:hover .admin-dash-card-icon { background: #3498db; color: #fff; }
+.admin-dash-card-icon {
+  width: 48px; height: 48px; border-radius: 12px;
+  background: linear-gradient(135deg,#e0f2fe,#dbeafe);
+  color: #2563eb; display: flex; align-items: center; justify-content: center;
+  margin-bottom: 14px; font-size: 22px;
+}
+a.admin-dash-card:hover .admin-dash-card-icon {
+  background: linear-gradient(135deg,#2563eb,#1d4ed8); color: #fff;
+}
 .admin-dash-card-title { font-size: 16px; font-weight: 600; color: #222; margin-bottom: 4px; }
 .admin-dash-card-desc { font-size: 13px; color: #666; }
 .skin-black a.admin-dash-card { background: #222d32; border-color: #333; }
