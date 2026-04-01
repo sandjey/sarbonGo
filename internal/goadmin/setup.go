@@ -1,6 +1,7 @@
 package goadmin
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/GoAdminGroup/go-admin/engine"
 	"github.com/GoAdminGroup/go-admin/modules/config"
 	"github.com/GoAdminGroup/go-admin/modules/language"
+	"github.com/GoAdminGroup/go-admin/plugins/admin/modules/table"
 	"github.com/GoAdminGroup/themes/adminlte"
 )
 
@@ -219,7 +221,15 @@ func Mount(r *gin.Engine, databaseURL string) error {
 	}
 
 	eng := engine.Default()
-	generators := tableGenerators()
+	// Auto-register ALL public tables with CRUD.
+	generators := map[string]table.Generator{}
+	auto, err := AutoTableGenerators(context.Background(), databaseURL, generators)
+	if err != nil {
+		return err
+	}
+	for k, v := range auto {
+		generators[k] = v
+	}
 	if err := eng.AddConfig(cfg).
 		AddGenerators(generators).
 		AddDisplayFilterXssJsFilter().

@@ -76,6 +76,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	r.Use(goadmin.InjectCSSMiddleware())
 	// Обрезка пробелов в query-параметрах для /admin — иначе UUID с пробелом даёт pq: invalid input syntax for type uuid
 	r.Use(goadmin.TrimAdminQueryMiddleware())
+	// Sanitizes form posts for /admin to avoid uuid="" errors
+	r.Use(goadmin.SanitizeAdminFormMiddleware())
 
 	// GoAdmin panel at /admin (login: admin / admin)
 	if cfg.DatabaseURL != "" {
