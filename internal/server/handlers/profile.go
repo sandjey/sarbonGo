@@ -367,7 +367,10 @@ func (h *ProfileHandler) UploadPhoto(c *gin.Context) {
 		return
 	}
 	if file.Size > maxDriverPhotoSize {
-		resp.ErrorLang(c, http.StatusBadRequest, "file_too_large")
+		resp.ErrorWithDataLang(c, http.StatusBadRequest, "file_too_large", gin.H{
+			"max_size_mb":    10,
+			"max_size_bytes": maxDriverPhotoSize,
+		})
 		return
 	}
 	contentType := file.Header.Get("Content-Type")

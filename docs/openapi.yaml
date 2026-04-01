@@ -57,7 +57,7 @@ tags:
 
       **Кто вызывает:** Водитель (мобильное приложение). Все методы требуют X-User-Token (JWT).
 
-      **Поток и данные:** GET /v1/driver/profile — получить профиль (все поля, в т.ч. has_photo). PATCH /v1/driver/profile/driver — изменить имя, work_status, паспорт. PATCH /v1/driver/profile/power — данные тягача; PATCH /v1/driver/profile/trailer — данные прицепа. PUT /v1/driver/profile/heartbeat — обновить гео. **Фото:** необязательно при регистрации; можно добавить/обновить/удалить когда угодно: POST /v1/driver/profile/photo — загрузить фото (multipart, поле photo, JPEG/PNG, макс. 5 MB); GET /v1/driver/profile/photo — получить фото; DELETE /v1/driver/profile/photo — удалить фото. Смена телефона: .../phone-change/request (new_phone) → OTP; .../phone-change/verify (session_id, otp). DELETE /v1/driver/profile — удалить аккаунт (архивация в deleted_drivers).
+      **Поток и данные:** GET /v1/driver/profile — получить профиль (все поля, в т.ч. has_photo). PATCH /v1/driver/profile/driver — изменить имя, work_status, паспорт. PATCH /v1/driver/profile/power — данные тягача; PATCH /v1/driver/profile/trailer — данные прицепа. PUT /v1/driver/profile/heartbeat — обновить гео. **Фото:** необязательно при регистрации; можно добавить/обновить/удалить когда угодно: POST /v1/driver/profile/photo — загрузить фото (multipart, поле photo, JPEG/PNG, макс. 10 MB); GET /v1/driver/profile/photo — получить фото (ETag/Cache-Control); DELETE /v1/driver/profile/photo — удалить фото. Смена телефона: .../phone-change/request (new_phone) → OTP; .../phone-change/verify (session_id, otp). DELETE /v1/driver/profile — удалить аккаунт (архивация в deleted_drivers).
   - name: Freelance Dispatchers / Auth
     description: |
       **Руководство: Авторизация диспетчеров**
@@ -96,8 +96,8 @@ tags:
       **Поток и данные:**
       - GET /v1/dispatchers/profile — получить текущий профиль (id, name, phone, паспорт, pinfl, work_status, rating, has_photo и т.д.). В ответе data.dispatcher.
       - PATCH /v1/dispatchers/profile — изменить имя, паспорт, pinfl, photo-ссылку (частичное обновление).
-      - POST /v1/dispatchers/profile/photo — загрузить фото (multipart/form-data, поле photo). Фото хранится в БД. Макс. 5 MB, image/jpeg или image/png.
-      - GET /v1/dispatchers/profile/photo — получить фото диспетчера (бинарный ответ с Content-Type). 404 если фото не загружено.
+      - POST /v1/dispatchers/profile/photo — загрузить фото (multipart/form-data, поле photo). Фото хранится в БД. Макс. 10 MB, image/jpeg или image/png.
+      - GET /v1/dispatchers/profile/photo — получить фото диспетчера (бинарный ответ с Content-Type, ETag, Cache-Control). 404 если фото не загружено.
       - DELETE /v1/dispatchers/profile — удалить аккаунт (жёсткое удаление с архивацией в deleted_freelance_dispatchers).
       - PUT /v1/dispatchers/profile/password — сменить пароль (current_password + new_password).
       - POST .../profile/phone-change/request (new_phone) → OTP; .../phone-change/verify (session_id, otp) → телефон обновлён.
@@ -1475,7 +1475,7 @@ paths:
             application/json:
               examples:
                 no_file: { summary: "Нет файла", value: { status: "error", code: 400, description: "Missing or invalid file: use form field 'photo'", data: null } }
-                too_large: { summary: "Файл слишком большой", value: { status: "error", code: 400, description: "File too large (max 5 MB)", data: null } }
+                too_large: { summary: "Файл слишком большой", value: { status: "error", code: 400, description: "File too large (max 10 MB)", data: null } }
                 wrong_type: { summary: "Неверный тип", value: { status: "error", code: 400, description: "Allowed types: image/jpeg, image/png", data: null } }
         "404": { description: "Груз не найден" }
 
@@ -2040,7 +2040,7 @@ paths:
       tags: ["Drivers / Profile"]
       summary: "Загрузить фото водителя"
       description: |
-        **Формат:** multipart/form-data, поле **photo** — файл изображения (image/jpeg или image/png). Макс. размер 5 MB.
+        **Формат:** multipart/form-data, поле **photo** — файл изображения (image/jpeg или image/png). Макс. размер 10 MB.
         Фото необязательно при регистрации; можно добавить или обновить когда угодно. Сохраняется в БД. В профиле (GET /profile) поле has_photo будет true; само изображение — через GET /v1/driver/profile/photo.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
@@ -2054,7 +2054,7 @@ paths:
                 photo:
                   type: string
                   format: binary
-                  description: "Файл изображения (JPEG или PNG, макс. 5 MB)"
+                  description: "Файл изображения (JPEG или PNG, макс. 10 MB)"
       responses:
         "200":
           description: Фото сохранено
@@ -2787,7 +2787,7 @@ paths:
       tags: ["Freelance Dispatchers / Profile"]
       summary: "Загрузить фото диспетчера"
       description: |
-        **Формат:** multipart/form-data, поле **photo** — файл изображения (image/jpeg или image/png). Макс. размер 5 MB.
+        **Формат:** multipart/form-data, поле **photo** — файл изображения (image/jpeg или image/png). Макс. размер 10 MB.
         Фото сохраняется в БД. В профиле (GET /profile) поле has_photo будет true; само изображение отдаётся через GET /v1/dispatchers/profile/photo.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
@@ -2801,7 +2801,7 @@ paths:
                 photo:
                   type: string
                   format: binary
-                  description: "Файл изображения (JPEG или PNG, макс. 5 MB)"
+                  description: "Файл изображения (JPEG или PNG, макс. 10 MB)"
       responses:
         "200":
           description: Фото сохранено

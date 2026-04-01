@@ -254,7 +254,10 @@ func (h *DispatcherProfileHandler) UploadPhoto(c *gin.Context) {
 		return
 	}
 	if file.Size > maxDispatcherPhotoSize {
-		resp.ErrorLang(c, http.StatusBadRequest, "file_too_large")
+		resp.ErrorWithDataLang(c, http.StatusBadRequest, "file_too_large", gin.H{
+			"max_size_mb":    10,
+			"max_size_bytes": maxDispatcherPhotoSize,
+		})
 		return
 	}
 	contentType := file.Header.Get("Content-Type")

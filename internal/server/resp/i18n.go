@@ -591,11 +591,11 @@ var apiMessages = map[string]map[string]string{
 		"zh": "缺少或无效的文件：请使用表单字段“photo”",
 	},
 	"file_too_large": {
-		"en": "File too large (max 5 MB)",
-		"ru": "Файл слишком большой (макс. 5 МБ)",
-		"uz": "Fayl juda katta (maks 5 MB)",
-		"tr": "Dosya çok büyük (maks 5 MB)",
-		"zh": "文件过大（最大5 MB）",
+		"en": "File too large (max 10 MB)",
+		"ru": "Файл слишком большой (макс. 10 МБ)",
+		"uz": "Fayl juda katta (maks 10 MB)",
+		"tr": "Dosya çok büyük (maks 10 MB)",
+		"zh": "文件过大（最大10 MB）",
 	},
 	"allowed_image_types": {
 		"en": "Allowed types: image/jpeg, image/png",

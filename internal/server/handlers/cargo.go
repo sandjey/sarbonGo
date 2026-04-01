@@ -326,6 +326,8 @@ func (h *CargoHandler) Create(c *gin.Context) {
 			data := gin.H{"cargo_id": id.String()}
 			switch {
 			case errors.Is(err, errCargoPhotoTooLarge):
+				data["max_size_mb"] = 10
+				data["max_size_bytes"] = maxCargoPhotoSize
 				resp.ErrorWithDataLang(c, http.StatusBadRequest, "file_too_large", data)
 			case errors.Is(err, errCargoPhotoBadType):
 				resp.ErrorWithDataLang(c, http.StatusBadRequest, "allowed_image_types", data)
@@ -498,7 +500,10 @@ func (h *CargoHandler) UploadPendingCargoPhoto(c *gin.Context) {
 	photoID, err := h.savePendingCargoPhotoFromFileHeader(c.Request.Context(), c, file)
 	if err != nil {
 		if errors.Is(err, errCargoPhotoTooLarge) {
-			resp.ErrorLang(c, http.StatusBadRequest, "file_too_large")
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "file_too_large", gin.H{
+				"max_size_mb":    10,
+				"max_size_bytes": maxCargoPhotoSize,
+			})
 			return
 		}
 		if errors.Is(err, errCargoPhotoBadType) {
@@ -533,6 +538,13 @@ func (h *CargoHandler) GetPendingCargoPhoto(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
 		return
 	}
+	etag := weakETagBytes(data)
+	if inm := strings.TrimSpace(c.GetHeader("If-None-Match")); inm != "" && inm == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	c.Data(http.StatusOK, p.Mime, data)
 }
 
@@ -559,7 +571,10 @@ func (h *CargoHandler) UploadPhoto(c *gin.Context) {
 	photoID, err := h.saveCargoPhotoFromFileHeader(c.Request.Context(), c, cargoID, file)
 	if err != nil {
 		if errors.Is(err, errCargoPhotoTooLarge) {
-			resp.ErrorLang(c, http.StatusBadRequest, "file_too_large")
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "file_too_large", gin.H{
+				"max_size_mb":    10,
+				"max_size_bytes": maxCargoPhotoSize,
+			})
 			return
 		}
 		if errors.Is(err, errCargoPhotoBadType) {
@@ -630,6 +645,13 @@ func (h *CargoHandler) GetPhoto(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
 		return
 	}
+	etag := weakETagBytes(data)
+	if inm := strings.TrimSpace(c.GetHeader("If-None-Match")); inm != "" && inm == etag {
+		c.Status(http.StatusNotModified)
+		return
+	}
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
 	c.Data(http.StatusOK, p.Mime, data)
 }
 
