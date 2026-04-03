@@ -36,6 +36,7 @@ type CatalogFilter struct {
 	HasPhoto   *bool
 	RatingMin  *float64
 	RatingMax  *float64
+	ManagerRole *string // CARGO_MANAGER | DRIVER_MANAGER — фильтр каталога
 	Limit      int
 	Offset     int
 }
@@ -87,6 +88,9 @@ func (r *Repo) ListCatalog(ctx context.Context, f CatalogFilter) (items []Dispat
 	if f.RatingMax != nil {
 		add(`COALESCE(rating,0) <= $`+itoa(argN)+``, *f.RatingMax)
 	}
+	if f.ManagerRole != nil && *f.ManagerRole != "" {
+		add(`manager_role = $`+itoa(argN)+``, *f.ManagerRole)
+	}
 
 	// Add pagination args
 	args = append(args, limit, offset)
@@ -97,6 +101,7 @@ SELECT
   passport_series, passport_number, pinfl,
   cargo_id, driver_id,
   rating, work_status, account_status AS status,
+  manager_role,
   photo_path AS photo,
   (photo_data IS NOT NULL) AS has_photo,
   created_at, updated_at, last_online_at, deleted_at,
@@ -126,6 +131,7 @@ LIMIT $%d OFFSET $%d`
 			&d.PassportSeries, &d.PassportNumber, &d.PINFL,
 			&d.CargoID, &d.DriverID,
 			&d.Rating, &d.WorkStatus, &d.Status,
+			&d.ManagerRole,
 			&d.Photo,
 			&d.HasPhoto,
 			&d.CreatedAt, &d.UpdatedAt, &d.LastOnlineAt, &d.DeletedAt,
@@ -161,6 +167,7 @@ SELECT
   passport_series, passport_number, pinfl,
   cargo_id, driver_id,
   rating, work_status, account_status AS status,
+  manager_role,
   photo_path AS photo,
   (photo_data IS NOT NULL) AS has_photo,
   created_at, updated_at, last_online_at, deleted_at
@@ -181,6 +188,7 @@ LIMIT $2`
 			&d.PassportSeries, &d.PassportNumber, &d.PINFL,
 			&d.CargoID, &d.DriverID,
 			&d.Rating, &d.WorkStatus, &d.Status,
+			&d.ManagerRole,
 			&d.Photo, &d.HasPhoto,
 			&d.CreatedAt, &d.UpdatedAt, &d.LastOnlineAt, &d.DeletedAt,
 		); err != nil {
@@ -206,6 +214,7 @@ SELECT
   passport_series, passport_number, pinfl,
   cargo_id, driver_id,
   rating, work_status, account_status AS status,
+  manager_role,
   photo_path AS photo,
   (photo_data IS NOT NULL) AS has_photo,
   created_at, updated_at, last_online_at, deleted_at
@@ -230,6 +239,7 @@ SELECT
   passport_series, passport_number, pinfl,
   cargo_id, driver_id,
   rating, work_status, account_status AS status,
+  manager_role,
   photo_path AS photo,
   (photo_data IS NOT NULL) AS has_photo,
   created_at, updated_at, last_online_at, deleted_at
@@ -250,6 +260,7 @@ func scanDispatcher(row pgx.Row) (*Dispatcher, error) {
 		&d.PassportSeries, &d.PassportNumber, &d.PINFL,
 		&d.CargoID, &d.DriverID,
 		&d.Rating, &d.WorkStatus, &d.Status,
+		&d.ManagerRole,
 		&d.Photo,
 		&d.HasPhoto,
 		&d.CreatedAt, &d.UpdatedAt, &d.LastOnlineAt, &d.DeletedAt,
@@ -282,6 +293,7 @@ type CreateParams struct {
 	PassportSeries string
 	PassportNumber string
 	PINFL          string
+	ManagerRole    string // CARGO_MANAGER | DRIVER_MANAGER
 }
 
 func (r *Repo) Create(ctx context.Context, p CreateParams) (uuid.UUID, error) {
@@ -289,12 +301,12 @@ func (r *Repo) Create(ctx context.Context, p CreateParams) (uuid.UUID, error) {
 INSERT INTO freelance_dispatchers (
   phone, name, password,
   passport_series, passport_number, pinfl,
-  rating, work_status, account_status,
+  rating, work_status, account_status, manager_role,
   created_at, updated_at, deleted_at
 ) VALUES (
   $1, $2, $3,
   $4, $5, $6,
-  0, 'available', 'active',
+  0, 'available', 'active', $7,
   now(), now(), NULL
 ) RETURNING id`
 
@@ -302,6 +314,7 @@ INSERT INTO freelance_dispatchers (
 	err := r.pg.QueryRow(ctx, q,
 		p.Phone, p.Name, p.PasswordHash,
 		p.PassportSeries, p.PassportNumber, p.PINFL,
+		p.ManagerRole,
 	).Scan(&id)
 	if err != nil {
 		if e, ok := err.(*pgconn.PgError); ok && e.SQLState() == "23505" {
@@ -318,6 +331,7 @@ type UpdateProfileParams struct {
 	PassportNumber *string
 	PINFL          *string
 	Photo          *string
+	ManagerRole    *string // CARGO_MANAGER | DRIVER_MANAGER; nil = не менять
 }
 
 func (r *Repo) UpdateProfile(ctx context.Context, id uuid.UUID, p UpdateProfileParams) error {
@@ -328,9 +342,10 @@ SET name = COALESCE($2, name),
     passport_number = COALESCE($4, passport_number),
     pinfl = COALESCE($5, pinfl),
     photo_path = COALESCE($6, photo_path),
+    manager_role = COALESCE($7, manager_role),
     updated_at = now()
 WHERE id = $1`
-	_, err := r.pg.Exec(ctx, q, id, p.Name, p.PassportSeries, p.PassportNumber, p.PINFL, p.Photo)
+	_, err := r.pg.Exec(ctx, q, id, p.Name, p.PassportSeries, p.PassportNumber, p.PINFL, p.Photo, p.ManagerRole)
 	return err
 }
 

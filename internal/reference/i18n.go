@@ -155,6 +155,8 @@ var refLabels = map[string]map[string]string{
 	"dispatchers.work_status.AVAILABLE": {"ru": "Доступен", "uz": "Mavjud", "en": "Available", "tr": "Müsait", "zh": "可用"},
 	"dispatchers.work_status.BUSY":     {"ru": "Занят", "uz": "Band", "en": "Busy", "tr": "Meşgul", "zh": "忙碌"},
 	"dispatchers.work_status.OFFLINE":  {"ru": "Не в сети", "uz": "Oflayn", "en": "Offline", "tr": "Çevrimdışı", "zh": "离线"},
+	"dispatchers.manager_role.CARGO_MANAGER":  {"ru": "Менеджер по грузам", "uz": "Yuklar bo'yicha menejer", "en": "Cargo manager", "tr": "Yük müdürü", "zh": "货运经理"},
+	"dispatchers.manager_role.DRIVER_MANAGER": {"ru": "Менеджер по водителям", "uz": "Haydovchilar bo'yicha menejer", "en": "Driver manager", "tr": "Sürücü müdürü", "zh": "司机经理"},
 	// --- company ---
 	"company.company_type.CARGO_OWNER": {"ru": "Грузовладелец", "uz": "Yuk egasi", "en": "Cargo owner", "tr": "Yük sahibi", "zh": "货主"},
 	"company.company_type.CARRIER":     {"ru": "Перевозчик", "uz": "Tashuvchi", "en": "Carrier", "tr": "Taşıyıcı", "zh": "承运人"},

@@ -1,9 +1,13 @@
 package handlers
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
+
+// Latin letters and underscore only; length 2–64 (same rules for drivers and freelance dispatchers).
+var validDisplayName = regexp.MustCompile(`^[A-Za-z_]{2,64}$`)
 
 func validateLatLng(lat, lng float64) string {
 	if lat < -90 || lat > 90 {
@@ -15,20 +19,26 @@ func validateLatLng(lat, lng float64) string {
 	return ""
 }
 
+// validateFreelanceDispatcherRole returns i18n key if role is not exactly CARGO_MANAGER or DRIVER_MANAGER (uppercase).
+func validateFreelanceDispatcherRole(role string) string {
+	switch strings.TrimSpace(role) {
+	case "CARGO_MANAGER", "DRIVER_MANAGER":
+		return ""
+	default:
+		return "invalid_freelance_dispatcher_role"
+	}
+}
+
 func validatePersonName(name string) string {
 	name = strings.TrimSpace(name)
-	n := 0
-	for _, r := range name {
-		if r < 0x20 {
-			return "invalid_name"
-		}
-		n++
-		if n > 64 {
-			return "name_too_long"
-		}
-	}
-	if n < 2 {
+	if len(name) < 2 {
 		return "name_too_short"
+	}
+	if len(name) > 64 {
+		return "name_too_long"
+	}
+	if !validDisplayName.MatchString(name) {
+		return "invalid_display_name"
 	}
 	return ""
 }

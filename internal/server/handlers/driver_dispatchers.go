@@ -87,6 +87,9 @@ func dispatcherToItem(d *dispatchers.Dispatcher, linkType string, companyRole *s
 		"has_photo":   d.HasPhoto,
 		"type":        linkType,
 	}
+	if d.ManagerRole != nil && *d.ManagerRole != "" {
+		item["role"] = *d.ManagerRole
+	}
 	if companyRole != nil {
 		item["company_role"] = *companyRole
 	}

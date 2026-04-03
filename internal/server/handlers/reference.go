@@ -57,7 +57,10 @@ type ReferenceAdminResponse struct {
 
 // ReferenceDispatchersResponse — справочник для раздела Freelance Dispatchers. Все value в верхнем регистре.
 type ReferenceDispatchersResponse struct {
-	WorkStatus []ItemWithLabel `json:"work_status"`
+	WorkStatus   []ItemWithLabel `json:"work_status"`
+	ManagerRoles []ItemWithLabel `json:"manager_roles"`
+	// Roles — то же, что manager_roles (допустимые значения JSON-поля role в профиле и регистрации).
+	Roles []ItemWithLabel `json:"roles"`
 }
 
 type ItemWithLabel struct {
@@ -299,12 +302,18 @@ func GetReferenceAdmin(c *gin.Context) {
 // GetReferenceDispatchers возвращает справочник для раздела Freelance Dispatchers. value — верхний регистр, label — по X-Language.
 func GetReferenceDispatchers(c *gin.Context) {
 	lang := refLang(c)
+	managerRoles := []ItemWithLabel{
+		{Value: "CARGO_MANAGER", Label: reference.RefLabel("dispatchers.manager_role", "CARGO_MANAGER", lang)},
+		{Value: "DRIVER_MANAGER", Label: reference.RefLabel("dispatchers.manager_role", "DRIVER_MANAGER", lang)},
+	}
 	out := ReferenceDispatchersResponse{
 		WorkStatus: []ItemWithLabel{
 			{Value: "AVAILABLE", Label: reference.RefLabel("dispatchers.work_status", "AVAILABLE", lang)},
 			{Value: "BUSY", Label: reference.RefLabel("dispatchers.work_status", "BUSY", lang)},
 			{Value: "OFFLINE", Label: reference.RefLabel("dispatchers.work_status", "OFFLINE", lang)},
 		},
+		ManagerRoles: managerRoles,
+		Roles:        managerRoles,
 	}
 	resp.OKLang(c, "ok", out)
 }

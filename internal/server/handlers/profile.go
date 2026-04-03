@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/displaynames"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
@@ -23,16 +24,17 @@ const maxDriverPhotoSize = 10 * 1024 * 1024 // 10 MB
 var allowedDriverPhotoTypes = map[string]bool{"image/jpeg": true, "image/png": true}
 
 type ProfileHandler struct {
-	logger *zap.Logger
-	drivers *drivers.Repo
-	phoneChange *store.PhoneChangeStore
-	tg *telegram.GatewayClient
-	otpTTL time.Duration
-	otpLen int
+	logger          *zap.Logger
+	drivers         *drivers.Repo
+	displayName     *displaynames.Checker
+	phoneChange     *store.PhoneChangeStore
+	tg              *telegram.GatewayClient
+	otpTTL          time.Duration
+	otpLen          int
 }
 
-func NewProfileHandler(logger *zap.Logger, driversRepo *drivers.Repo, phoneChange *store.PhoneChangeStore, tg *telegram.GatewayClient, otpTTL time.Duration, otpLen int) *ProfileHandler {
-	return &ProfileHandler{logger: logger, drivers: driversRepo, phoneChange: phoneChange, tg: tg, otpTTL: otpTTL, otpLen: otpLen}
+func NewProfileHandler(logger *zap.Logger, driversRepo *drivers.Repo, displayName *displaynames.Checker, phoneChange *store.PhoneChangeStore, tg *telegram.GatewayClient, otpTTL time.Duration, otpLen int) *ProfileHandler {
+	return &ProfileHandler{logger: logger, drivers: driversRepo, displayName: displayName, phoneChange: phoneChange, tg: tg, otpTTL: otpTTL, otpLen: otpLen}
 }
 
 // GET /v1/driver/profile
@@ -68,6 +70,16 @@ func (h *ProfileHandler) PatchDriver(c *gin.Context) {
 		v := strings.TrimSpace(*req.Name)
 		if errKey := validatePersonName(v); errKey != "" {
 			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+		taken, err := h.displayName.IsTaken(c.Request.Context(), v, &driverID, nil)
+		if err != nil {
+			h.logger.Error("display name taken check failed", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		if taken {
+			resp.ErrorLang(c, http.StatusConflict, "display_name_taken")
 			return
 		}
 		req.Name = &v

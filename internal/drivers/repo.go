@@ -64,7 +64,8 @@ func (r *Repo) FindByPhoneNormalized(ctx context.Context, phone string) (*Driver
 WHERE replace(replace(replace(trim(d.phone), ' ', ''), '-', ''), '+', '') = $1 LIMIT 1`
 	d, err := scanDriver(r.pg.QueryRow(ctx, q, norm))
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		// scanDriver maps pgx.ErrNoRows to ErrNotFound; callers expect (nil, nil) when no driver.
+		if errors.Is(err, ErrNotFound) {
 			return nil, nil
 		}
 		return nil, err

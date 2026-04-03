@@ -20,6 +20,13 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
 
+// sqlNormPhone matches drivers table lookup: trim, strip spaces, dashes, and plus (see drivers.FindByPhoneNormalized).
+const (
+	sqlNormPhoneCol   = `replace(replace(replace(trim(phone), ' ', ''), '-', ''), '+', '')`
+	sqlNormPhoneArg1  = `replace(replace(replace(trim($1::text), ' ', ''), '-', ''), '+', '')`
+	sqlNormPhoneArg2  = `replace(replace(replace(trim($2::text), ' ', ''), '-', ''), '+', '')`
+)
+
 // Create creates driver invitation by company (company_id set). invitedBy = dispatcher or company user id.
 func (r *Repo) Create(ctx context.Context, companyID uuid.UUID, phone string, invitedBy uuid.UUID, expiresIn time.Duration) (token string, err error) {
 	b := make([]byte, 32)
@@ -55,7 +62,7 @@ func (r *Repo) HasPendingFreelanceInvitation(ctx context.Context, dispatcherID u
 		`SELECT 1 FROM driver_invitations
 		 WHERE expires_at > now() AND company_id IS NULL
 		   AND invited_by_dispatcher_id = $1
-		   AND trim(replace(phone, ' ', '')) = trim(replace($2, ' ', ''))
+		   AND `+sqlNormPhoneCol+` = `+sqlNormPhoneArg2+`
 		 LIMIT 1`,
 		dispatcherID, phone).Scan(&n)
 	if err != nil {
@@ -73,7 +80,7 @@ func (r *Repo) HasPendingCompanyInvitation(ctx context.Context, companyID uuid.U
 	err := r.pg.QueryRow(ctx,
 		`SELECT 1 FROM driver_invitations
 		 WHERE expires_at > now() AND company_id = $1
-		   AND trim(replace(phone, ' ', '')) = trim(replace($2, ' ', ''))
+		   AND `+sqlNormPhoneCol+` = `+sqlNormPhoneArg2+`
 		 LIMIT 1`,
 		companyID, phone).Scan(&n)
 	if err != nil {
@@ -128,7 +135,7 @@ func (r *Repo) Delete(ctx context.Context, token string) error {
 func (r *Repo) ListByPhone(ctx context.Context, phone string) ([]Invitation, error) {
 	rows, err := r.pg.Query(ctx,
 		`SELECT id, token, company_id, phone, invited_by, invited_by_dispatcher_id, expires_at, created_at
-		 FROM driver_invitations WHERE expires_at > now() AND trim(replace(phone, ' ', '')) = trim(replace($1, ' ', ''))
+		 FROM driver_invitations WHERE expires_at > now() AND `+sqlNormPhoneCol+` = `+sqlNormPhoneArg1+`
 		 ORDER BY created_at DESC`,
 		phone)
 	if err != nil {

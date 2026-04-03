@@ -170,6 +170,20 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Dispatcher bulunamadı",
 		"zh": "未找到调度员",
 	},
+	"invalid_freelance_dispatcher_role": {
+		"en": "Role must be exactly CARGO_MANAGER or DRIVER_MANAGER (uppercase)",
+		"ru": "Роль должна быть строго CARGO_MANAGER или DRIVER_MANAGER (заглавные буквы)",
+		"uz": "Rol faqat CARGO_MANAGER yoki DRIVER_MANAGER bo'lishi kerak (katta harflar)",
+		"tr": "Rol tam olarak CARGO_MANAGER veya DRIVER_MANAGER olmalıdır (büyük harf)",
+		"zh": "角色必须为 CARGO_MANAGER 或 DRIVER_MANAGER（大写）",
+	},
+	"freelance_dispatcher_role_required": {
+		"en": "Field role is required (CARGO_MANAGER or DRIVER_MANAGER)",
+		"ru": "Поле role обязательно: CARGO_MANAGER или DRIVER_MANAGER",
+		"uz": "role maydoni majburiy: CARGO_MANAGER yoki DRIVER_MANAGER",
+		"tr": "role alanı zorunludur: CARGO_MANAGER veya DRIVER_MANAGER",
+		"zh": "必须提供 role 字段：CARGO_MANAGER 或 DRIVER_MANAGER",
+	},
 	"already_linked_to_this_dispatcher": {
 		"en": "You are already linked to this dispatcher",
 		"ru": "Вы уже привязаны к этому диспетчеру",
@@ -197,6 +211,20 @@ var apiMessages = map[string]map[string]string{
 		"uz": "Ism noto'g'ri",
 		"tr": "Geçersiz isim",
 		"zh": "姓名无效",
+	},
+	"invalid_display_name": {
+		"en": "Use only Latin letters (A–Z, a–z) and underscore; 2–64 characters. No digits, spaces, or other symbols.",
+		"ru": "Допустимы только латинские буквы (A–Z, a–z) и символ подчёркивания; длина 2–64. Цифры, пробелы и прочие символы недопустимы.",
+		"uz": "Faqat lotin harflari (A–Z, a–z) va pastki chiziq (_) ruxsat etiladi; uzunligi 2–64. Raqam, probel yoki boshqa belgilar mumkin emas.",
+		"tr": "Yalnızca Latin harfleri (A–Z, a–z) ve alt çizgi (_) kullanılabilir; uzunluk 2–64. Rakam, boşluk veya başka simge yok.",
+		"zh": "仅允许拉丁字母（A–Z、a–z）与下划线；长度 2–64。不可使用数字、空格或其他符号。",
+	},
+	"display_name_taken": {
+		"en": "This display name is already taken by another user",
+		"ru": "Это имя уже занято другим пользователем",
+		"uz": "Bu ism boshqa foydalanuvchi tomonidan band qilingan",
+		"tr": "Bu görünen ad başka bir kullanıcı tarafından alınmış",
+		"zh": "该显示名称已被其他用户使用",
 	},
 	"invalid_latitude": {
 		"en": "Invalid latitude",

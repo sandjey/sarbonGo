@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/displaynames"
 	"sarbonNew/internal/domain"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/security"
@@ -18,21 +19,22 @@ import (
 )
 
 type RegistrationHandler struct {
-	logger *zap.Logger
-
-	drivers  *drivers.Repo
-	sessions *store.SessionStore
-	jwtm     *security.JWTManager
-	refresh  *store.RefreshStore
+	logger      *zap.Logger
+	drivers     *drivers.Repo
+	displayName *displaynames.Checker
+	sessions    *store.SessionStore
+	jwtm        *security.JWTManager
+	refresh     *store.RefreshStore
 }
 
-func NewRegistrationHandler(logger *zap.Logger, driversRepo *drivers.Repo, sessions *store.SessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore) *RegistrationHandler {
+func NewRegistrationHandler(logger *zap.Logger, driversRepo *drivers.Repo, displayName *displaynames.Checker, sessions *store.SessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore) *RegistrationHandler {
 	return &RegistrationHandler{
-		logger:  logger,
-		drivers: driversRepo,
-		sessions: sessions,
-		jwtm:    jwtm,
-		refresh: refresh,
+		logger:      logger,
+		drivers:     driversRepo,
+		displayName: displayName,
+		sessions:    sessions,
+		jwtm:        jwtm,
+		refresh:     refresh,
 	}
 }
 
@@ -91,6 +93,17 @@ func (h *RegistrationHandler) Start(c *gin.Context) {
 	if !errors.Is(err, drivers.ErrNotFound) {
 		h.logger.Error("find by phone failed", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+
+	taken, err := h.displayName.IsTaken(c.Request.Context(), name, nil, nil)
+	if err != nil {
+		h.logger.Error("display name taken check failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if taken {
+		resp.ErrorLang(c, http.StatusConflict, "display_name_taken")
 		return
 	}
 

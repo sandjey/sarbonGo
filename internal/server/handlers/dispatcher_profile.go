@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/dispatchers"
+	"sarbonNew/internal/displaynames"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/store"
@@ -25,14 +26,15 @@ var allowedPhotoTypes = map[string]bool{"image/jpeg": true, "image/png": true}
 type DispatcherProfileHandler struct {
 	logger      *zap.Logger
 	repo        *dispatchers.Repo
+	displayName *displaynames.Checker
 	phoneChange *store.DispatcherOTPActionStore
 	tg          *telegram.GatewayClient
 	otpTTL      time.Duration
 	otpLen      int
 }
 
-func NewDispatcherProfileHandler(logger *zap.Logger, repo *dispatchers.Repo, phoneChange *store.DispatcherOTPActionStore, tg *telegram.GatewayClient, otpTTL time.Duration, otpLen int) *DispatcherProfileHandler {
-	return &DispatcherProfileHandler{logger: logger, repo: repo, phoneChange: phoneChange, tg: tg, otpTTL: otpTTL, otpLen: otpLen}
+func NewDispatcherProfileHandler(logger *zap.Logger, repo *dispatchers.Repo, displayName *displaynames.Checker, phoneChange *store.DispatcherOTPActionStore, tg *telegram.GatewayClient, otpTTL time.Duration, otpLen int) *DispatcherProfileHandler {
+	return &DispatcherProfileHandler{logger: logger, repo: repo, displayName: displayName, phoneChange: phoneChange, tg: tg, otpTTL: otpTTL, otpLen: otpLen}
 }
 
 func (h *DispatcherProfileHandler) Get(c *gin.Context) {
@@ -47,6 +49,7 @@ func (h *DispatcherProfileHandler) Get(c *gin.Context) {
 
 type dispPatchReq struct {
 	Name           *string `json:"name,omitempty"`
+	Role           *string `json:"role,omitempty"` // CARGO_MANAGER | DRIVER_MANAGER
 	PassportSeries *string `json:"passport_series,omitempty"`
 	PassportNumber *string `json:"passport_number,omitempty"`
 	PINFL          *string `json:"pinfl,omitempty"`
@@ -72,14 +75,31 @@ func (h *DispatcherProfileHandler) Patch(c *gin.Context) {
 		*p = &v
 	}
 	trim(&req.Name)
+	trim(&req.Role)
 	trim(&req.PassportSeries)
 	trim(&req.PassportNumber)
 	trim(&req.PINFL)
 	trim(&req.Photo)
 
+	if req.Role != nil {
+		if errKey := validateFreelanceDispatcherRole(*req.Role); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
 	if req.Name != nil {
 		if errKey := validatePersonName(*req.Name); errKey != "" {
 			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+		taken, err := h.displayName.IsTaken(c.Request.Context(), *req.Name, nil, &id)
+		if err != nil {
+			h.logger.Error("display name taken check failed", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		if taken {
+			resp.ErrorLang(c, http.StatusConflict, "display_name_taken")
 			return
 		}
 	}
@@ -104,6 +124,7 @@ func (h *DispatcherProfileHandler) Patch(c *gin.Context) {
 
 	if err := h.repo.UpdateProfile(c.Request.Context(), id, dispatchers.UpdateProfileParams{
 		Name: req.Name, PassportSeries: req.PassportSeries, PassportNumber: req.PassportNumber, PINFL: req.PINFL, Photo: req.Photo,
+		ManagerRole: req.Role,
 	}); err != nil {
 		h.logger.Error("dispatcher profile update failed", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")

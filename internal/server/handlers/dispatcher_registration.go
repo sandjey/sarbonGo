@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/dispatchers"
+	"sarbonNew/internal/displaynames"
 	"sarbonNew/internal/security"
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/store"
@@ -17,20 +18,22 @@ import (
 )
 
 type DispatcherRegistrationHandler struct {
-	logger   *zap.Logger
-	repo     *dispatchers.Repo
-	sessions *store.DispatcherSessionStore
-	jwtm     *security.JWTManager
-	refresh  *store.RefreshStore
+	logger      *zap.Logger
+	repo        *dispatchers.Repo
+	displayName *displaynames.Checker
+	sessions    *store.DispatcherSessionStore
+	jwtm        *security.JWTManager
+	refresh     *store.RefreshStore
 }
 
-func NewDispatcherRegistrationHandler(logger *zap.Logger, repo *dispatchers.Repo, sessions *store.DispatcherSessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore) *DispatcherRegistrationHandler {
-	return &DispatcherRegistrationHandler{logger: logger, repo: repo, sessions: sessions, jwtm: jwtm, refresh: refresh}
+func NewDispatcherRegistrationHandler(logger *zap.Logger, repo *dispatchers.Repo, displayName *displaynames.Checker, sessions *store.DispatcherSessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore) *DispatcherRegistrationHandler {
+	return &DispatcherRegistrationHandler{logger: logger, repo: repo, displayName: displayName, sessions: sessions, jwtm: jwtm, refresh: refresh}
 }
 
 type dispCompleteReq struct {
 	SessionID      string `json:"session_id" binding:"required"`
 	Name           string `json:"name" binding:"required"`
+	Role           string `json:"role"` // CARGO_MANAGER | DRIVER_MANAGER (uppercase); обязателен только при создании новой записи
 	Password       string `json:"password" binding:"required"`
 	PassportSeries string `json:"passport_series" binding:"required"`
 	PassportNumber string `json:"passport_number" binding:"required"`
@@ -103,6 +106,26 @@ func (h *DispatcherRegistrationHandler) Complete(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, errKey)
 		return
 	}
+	role := strings.TrimSpace(req.Role)
+	if role == "" {
+		resp.ErrorLang(c, http.StatusBadRequest, "freelance_dispatcher_role_required")
+		return
+	}
+	if errKey := validateFreelanceDispatcherRole(role); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+
+	taken, err := h.displayName.IsTaken(c.Request.Context(), name, nil, nil)
+	if err != nil {
+		h.logger.Error("display name taken check failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if taken {
+		resp.ErrorLang(c, http.StatusConflict, "display_name_taken")
+		return
+	}
 
 	id, err := h.repo.Create(c.Request.Context(), dispatchers.CreateParams{
 		Phone:          phone,
@@ -111,6 +134,7 @@ func (h *DispatcherRegistrationHandler) Complete(c *gin.Context) {
 		PassportSeries: ps,
 		PassportNumber: pn,
 		PINFL:          pinfl,
+		ManagerRole:    role,
 	})
 	if err != nil {
 		if errors.Is(err, dispatchers.ErrPhoneAlreadyRegistered) {

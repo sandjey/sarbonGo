@@ -2,6 +2,12 @@ package dispatchers
 
 import "time"
 
+// Freelance dispatcher roles (API: JSON field "role", DB: manager_role). Uppercase only.
+const (
+	ManagerRoleCargoManager  = "CARGO_MANAGER"
+	ManagerRoleDriverManager = "DRIVER_MANAGER"
+)
+
 // Mirrors DB columns from tables:
 // - freelance_dispatchers
 // - deleted_freelance_dispatchers
@@ -22,6 +28,9 @@ type Dispatcher struct {
 	Rating     *float64 `json:"rating"`
 	WorkStatus *string  `json:"work_status"`
 	Status     *string  `json:"status"`
+
+	// ManagerRole — роль фриланс-диспетчера (грузовой / водительский менеджер). В JSON: "role".
+	ManagerRole *string `json:"role,omitempty"`
 
 	Photo     *string `json:"photo,omitempty"`      // ссылка/путь (устаревшее), для загруженного фото см. has_photo
 	HasPhoto  bool    `json:"has_photo"`             // true если загружено фото в БД (получить через GET /profile/photo)

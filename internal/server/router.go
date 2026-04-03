@@ -27,6 +27,7 @@ import (
 	"sarbonNew/internal/dispatchercompanies"
 	"sarbonNew/internal/dispatcherinvitations"
 	"sarbonNew/internal/dispatchers"
+	"sarbonNew/internal/displaynames"
 	"sarbonNew/internal/driverinvitations"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/drivertodispatcherinvitations"
@@ -92,6 +93,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 
 	driversRepo := drivers.NewRepo(deps.PG)
 	dispatchersRepo := dispatchers.NewRepo(deps.PG)
+	displayNameChecker := displaynames.NewChecker(deps.PG)
 	adminsRepo := admins.NewRepo(deps.PG)
 	companiesRepo := companies.NewRepo(deps.PG)
 	appusersRepo := appusers.NewRepo(deps.PG)
@@ -140,13 +142,13 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispPhoneActions := store.NewDispatcherOTPActionStore(deps.Redis, cfg.JWTSigningKey, "disp_phone", cfg.OTPTTL, cfg.OTPMaxAttempts)
 
 	authH := handlers.NewAuthHandler(logger, driversRepo, otpStore, sessionStore, refreshStore, jwtm, tgClient, cfg.OTPTTL, cfg.OTPLength)
-	regH := handlers.NewRegistrationHandler(logger, driversRepo, sessionStore, jwtm, refreshStore)
+	regH := handlers.NewRegistrationHandler(logger, driversRepo, displayNameChecker, sessionStore, jwtm, refreshStore)
 	kycH := handlers.NewKYCHandler(logger, driversRepo)
-	profileH := handlers.NewProfileHandler(logger, driversRepo, phoneChangeStore, tgClient, cfg.OTPTTL, cfg.OTPLength)
+	profileH := handlers.NewProfileHandler(logger, driversRepo, displayNameChecker, phoneChangeStore, tgClient, cfg.OTPTTL, cfg.OTPLength)
 
 	dispAuthH := handlers.NewDispatcherAuthHandler(logger, dispatchersRepo, otpStore, dispRegSessions, dispResetActions, jwtm, refreshStore, tgClient, cfg.OTPTTL, cfg.OTPLength)
-	dispRegH := handlers.NewDispatcherRegistrationHandler(logger, dispatchersRepo, dispRegSessions, jwtm, refreshStore)
-	dispProfileH := handlers.NewDispatcherProfileHandler(logger, dispatchersRepo, dispPhoneActions, tgClient, cfg.OTPTTL, cfg.OTPLength)
+	dispRegH := handlers.NewDispatcherRegistrationHandler(logger, dispatchersRepo, displayNameChecker, dispRegSessions, jwtm, refreshStore)
+	dispProfileH := handlers.NewDispatcherProfileHandler(logger, dispatchersRepo, displayNameChecker, dispPhoneActions, tgClient, cfg.OTPTTL, cfg.OTPLength)
 	adminAuthH := handlers.NewAdminAuthHandler(logger, adminsRepo, jwtm, refreshStore)
 	adminCompaniesH := handlers.NewAdminCompaniesHandler(logger, companiesRepo, appusersRepo, cfg)
 	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, driversRepo, jwtm, cfg)

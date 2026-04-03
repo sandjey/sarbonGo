@@ -84,7 +84,7 @@ tags:
       **Поток (новый номер телефона):**
       1. POST /v1/dispatchers/auth/phone — отправить OTP.
       2. POST /v1/dispatchers/auth/otp/verify — ввести OTP → в ответе status=register и session_id (JWT пока не выдаётся).
-      3. POST /v1/dispatchers/registration/complete — передать session_id, name, password, passport_series, passport_number, pinfl (обязательно). В ответе — tokens и объект dispatcher; диспетчер считается зарегистрированным.
+      3. POST /v1/dispatchers/registration/complete — передать session_id, name, **role** (CARGO_MANAGER | DRIVER_MANAGER при новой регистрации), password, passport_series, passport_number, pinfl. В ответе — tokens и объект **dispatcher** (в т.ч. **role**); диспетчер считается зарегистрированным.
 
       **Логика:** Без session_id из шага 2 завершить регистрацию нельзя. После complete диспетчер может входить по phone + password или по OTP.
   - name: Freelance Dispatchers / Profile
@@ -94,8 +94,8 @@ tags:
       **Авторизация:** Все методы требуют заголовок X-User-Token (JWT access_token диспетчера).
 
       **Поток и данные:**
-      - GET /v1/dispatchers/profile — получить текущий профиль (id, name, phone, паспорт, pinfl, work_status, rating, has_photo и т.д.). В ответе data.dispatcher.
-      - PATCH /v1/dispatchers/profile — изменить имя, паспорт, pinfl, photo-ссылку (частичное обновление).
+      - GET /v1/dispatchers/profile — получить текущий профиль (id, name, phone, **role** (CARGO_MANAGER | DRIVER_MANAGER), паспорт, pinfl, work_status, rating, has_photo и т.д.). В ответе data.dispatcher.
+      - PATCH /v1/dispatchers/profile — изменить имя, **role** (CARGO_MANAGER | DRIVER_MANAGER), паспорт, pinfl, photo-ссылку (частичное обновление).
       - POST /v1/dispatchers/profile/photo — загрузить фото (multipart/form-data, поле photo). Фото хранится в БД. Макс. 10 MB, image/jpeg или image/png.
       - GET /v1/dispatchers/profile/photo — получить фото диспетчера (бинарный ответ с Content-Type, ETag, Cache-Control). 404 если фото не загружено.
       - DELETE /v1/dispatchers/profile — удалить аккаунт (жёсткое удаление с архивацией в deleted_freelance_dispatchers).
@@ -196,7 +196,7 @@ tags:
     description: |
       **Справочник для раздела Freelance Dispatchers.** Статусы диспетчера.
 
-      **GET /v1/reference/dispatchers** возвращает (все value в верхнем регистре): work_status (AVAILABLE, BUSY, OFFLINE).
+      **GET /v1/reference/dispatchers** возвращает (все value в верхнем регистре): work_status (AVAILABLE, BUSY, OFFLINE); **manager_roles** и дубликат **roles** — допустимые значения поля `role` (CARGO_MANAGER, DRIVER_MANAGER).
 
       **GET /v1/reference/cities** — справочник всех городов мира (tidwall/cities + UZ/AE/TM/KG/TJ); in-memory, быстрый API; коды TAS, SAM, DXB и т.д.; query country_code — фильтр по стране.
   - name: "Cargo — Водитель"
@@ -394,6 +394,16 @@ components:
         refresh_expires_in: { type: integer, example: 604800, description: "Время жизни refresh токена (секунды)" }
         refresh_expires_at: { type: integer, example: 1742205600000, description: "Unix ms — когда истекает refresh токен; JS: new Date(refresh_expires_at)" }
       required: [access_token, refresh_token, expires_in, expires_at]
+    DisplayName:
+      type: string
+      minLength: 2
+      maxLength: 64
+      pattern: '^[A-Za-z_]{2,64}$'
+      description: |
+        Отображаемое имя: только латиница (A–Z, a–z) и символ подчёркивания `_`, длина 2–64.
+        Должно быть уникально среди всех водителей и фриланс-диспетчеров (без учёта регистра).
+        Ключи ошибок в теле ответа: `invalid_display_name` (HTTP 400), `display_name_taken` (HTTP 409).
+      example: "John_Doe"
     Driver:
       type: object
       properties:
@@ -468,6 +478,11 @@ components:
         rating: { type: number, format: double, nullable: true }
         work_status: { type: string, nullable: true, example: "available" }
         status: { type: string, nullable: true, example: "active" }
+        role:
+          allOf:
+            - $ref: "#/components/schemas/FreelanceDispatcherRole"
+          nullable: true
+          description: "Роль менеджера (груз / водители). У старых записей до ввода поля может быть null."
         photo: { type: string, nullable: true, description: "Ссылка/путь (устаревшее); для загруженного фото см. has_photo" }
         has_photo: { type: boolean, description: "true если загружено фото в БД (получить через GET /v1/dispatchers/profile/photo)" }
         last_online_at: { type: string, format: date-time, nullable: true }
@@ -570,6 +585,19 @@ components:
       type: object
       properties:
         work_status: { type: array, items: { $ref: "#/components/schemas/ItemWithLabel" } }
+        manager_roles:
+          type: array
+          items: { $ref: "#/components/schemas/ItemWithLabel" }
+          description: "CARGO_MANAGER, DRIVER_MANAGER — подписи по X-Language"
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/ItemWithLabel" }
+          description: "Дубликат manager_roles — те же значения для поля role в API"
+    FreelanceDispatcherRole:
+      type: string
+      enum: [CARGO_MANAGER, DRIVER_MANAGER]
+      description: "Роль фриланс-диспетчера (регистрация и поле role в объекте dispatcher). Только верхний регистр."
+      example: CARGO_MANAGER
     Cargo:
       type: object
       description: |
@@ -1679,7 +1707,7 @@ paths:
   /v1/reference/dispatchers:
     get:
       tags: ["Reference / Freelance Dispatchers"]
-      summary: "Справочник Freelance Dispatchers — work_status"
+      summary: "Справочник Freelance Dispatchers — work_status, manager_roles, roles"
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       responses:
         "200":
@@ -1910,6 +1938,7 @@ paths:
         **Кто вызывает:** Водитель (мобильное приложение), после otp/verify при status=register.
         **Назначение:** Создание записи в drivers: registration_status=start, registration_step=name-oferta. В ответе — tokens и объект driver; дальше все запросы с X-User-Token.
         **Данные:** session_id (из otp/verify), name, oferta_accepted (обязательно).
+        **Имя (name):** см. схему DisplayName — только латиница и `_`, 2–64 символа; глобально уникально среди водителей и диспетчеров (регистр не важен).
       requestBody:
         required: true
         content:
@@ -1918,7 +1947,7 @@ paths:
               type: object
               properties:
                 session_id: { type: string, format: uuid }
-                name: { type: string, example: "Ali Valiyev" }
+                name: { $ref: "#/components/schemas/DisplayName" }
                 oferta_accepted: { type: boolean, example: true }
               required: [session_id, name, oferta_accepted]
       responses:
@@ -1935,8 +1964,18 @@ paths:
                   registration_status: { type: string, example: "start" }
                   registration_step: { type: string, example: "name-oferta" }
                 required: [status, tokens]
+        "400":
+          description: "Некорректное имя (invalid_display_name, name_too_short, name_too_long)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401":
           description: session_id неверный/истёк
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "409":
+          description: Имя уже занято (display_name_taken)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
@@ -1992,6 +2031,7 @@ paths:
         **Кто вызывает:** Водитель (мобильное приложение). X-User-Token обязателен.
         **Назначение:** Частичное обновление: name, work_status (available/loaded/busy), driver_passport_series, driver_passport_number, driver_pinfl. Остальные поля не меняются.
         **Данные:** В теле только те поля, которые нужно изменить.
+        **name:** схема DisplayName (латиница и `_`, 2–64; уникально среди водителей и диспетчеров, без учёта регистра).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
         required: true
@@ -2000,7 +2040,7 @@ paths:
             schema:
               type: object
               properties:
-                name: { type: string, example: "Ali Valiyev" }
+                name: { $ref: "#/components/schemas/DisplayName" }
                 work_status:
                   type: string
                   enum: ["available","loaded","busy"]
@@ -2011,6 +2051,16 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "400":
+          description: "Некорректное имя (invalid_display_name и др.)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "409":
+          description: Имя занято (display_name_taken)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
@@ -2702,8 +2752,9 @@ paths:
       tags: ["Freelance Dispatchers / Registration"]
       summary: "Шаг 3. Завершить регистрацию (имя, пароль, паспорт)"
       description: |
-        **Поток:** Вызывается после otp/verify, когда получен status=register и session_id. В теле передаёте session_id (обязательно), name, password, passport_series, passport_number, pinfl (все обязательны). Создаётся запись в freelance_dispatchers, в ответе — tokens и объект dispatcher. После этого диспетчер может входить по phone+password или по OTP. Фото загружается отдельно через POST /v1/dispatchers/profile/photo.
-        **Данные:** session_id, name, password, passport_series, passport_number, pinfl.
+        **Поток:** Вызывается после otp/verify, когда получен status=register и session_id. В теле передаёте session_id (обязательно), name, **role** (при **новой** регистрации обязательно: CARGO_MANAGER или DRIVER_MANAGER — только заглавные буквы; если телефон уже зарегистрирован, возвращается status=login и role в теле не проверяется), password, passport_series, passport_number, pinfl. Создаётся запись в freelance_dispatchers, в ответе — tokens и объект dispatcher (в т.ч. поле role). После этого диспетчер может входить по phone+password или по OTP. Фото загружается отдельно через POST /v1/dispatchers/profile/photo.
+        **Данные:** session_id, name, role, password, passport_series, passport_number, pinfl.
+        **name:** схема DisplayName (латиница и `_`, 2–64; уникально среди водителей и диспетчеров).
       requestBody:
         required: true
         content:
@@ -2712,7 +2763,8 @@ paths:
               type: object
               properties:
                 session_id: { type: string, format: uuid }
-                name: { type: string, example: "Dispetcher Name" }
+                name: { $ref: "#/components/schemas/DisplayName" }
+                role: { $ref: "#/components/schemas/FreelanceDispatcherRole" }
                 password: { type: string }
                 passport_series: { type: string, example: "AB" }
                 passport_number: { type: string, example: "1234567" }
@@ -2720,7 +2772,8 @@ paths:
               required: [session_id, name, password, passport_series, passport_number, pinfl]
             example:
               session_id: "d4e5f6a7-b8c9-0123-def0-234567890123"
-              name: "Алексей Диспетчеров"
+              name: "Dispatcher_User"
+              role: CARGO_MANAGER
               password: "SecurePass123!"
               passport_series: "AB"
               passport_number: "1234567"
@@ -2736,15 +2789,24 @@ paths:
                   status: { type: string, example: "registered" }
                   tokens: { $ref: "#/components/schemas/Tokens" }
                   dispatcher: { $ref: "#/components/schemas/Dispatcher" }
+        "400":
+          description: "Некорректные данные (invalid_display_name, freelance_dispatcher_role_required, invalid_freelance_dispatcher_role и др.)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { description: session_id неверный/истёк }
-        "409": { description: Телефон уже зарегистрирован }
+        "409":
+          description: Телефон уже зарегистрирован или имя занято (phone_already_registered / display_name_taken)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
 
   /v1/dispatchers/profile:
     get:
       tags: ["Freelance Dispatchers / Profile"]
       summary: "Получить профиль диспетчера"
       description: |
-        **Поток:** Запрос с заголовком X-User-Token (JWT access_token). В ответе data.dispatcher — объект диспетчера (id, name, phone, паспорт, pinfl, work_status, rating и т.д.).
+        **Поток:** Запрос с заголовком X-User-Token (JWT access_token). В ответе data.dispatcher — объект диспетчера (id, name, phone, **role**, паспорт, pinfl, work_status, rating и т.д.).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       responses:
         "200":
@@ -2756,6 +2818,9 @@ paths:
     patch:
       tags: ["Freelance Dispatchers / Profile"]
       summary: Редактировать профиль диспетчера
+      description: |
+        Частичное обновление. Поле **name** — схема DisplayName (латиница и `_`, 2–64; уникально среди водителей и диспетчеров).
+        Поле **role** — `CARGO_MANAGER` или `DRIVER_MANAGER` (строго верхний регистр). Список допустимых значений с подписями: GET /v1/reference/dispatchers (`roles` / `manager_roles`).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
         content:
@@ -2763,7 +2828,8 @@ paths:
             schema:
               type: object
               properties:
-                name: { type: string }
+                name: { $ref: "#/components/schemas/DisplayName" }
+                role: { $ref: "#/components/schemas/FreelanceDispatcherRole" }
                 passport_series: { type: string }
                 passport_number: { type: string }
                 pinfl: { type: string }
@@ -2774,7 +2840,17 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
+        "400":
+          description: "Некорректные данные (invalid_display_name, invalid_freelance_dispatcher_role и др.)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
         "401": { description: Не авторизован }
+        "409":
+          description: Имя занято (display_name_taken)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
     delete:
       tags: ["Freelance Dispatchers / Profile"]
       summary: Удалить профиль диспетчера (архивация)
@@ -4424,11 +4500,11 @@ paths:
       tags: ["Drivers / My dispatchers"]
       summary: "Список моих диспетчеров (водитель)"
       description: |
-        **Водитель:** диспетчеры, с которыми связан: 1) фриланс-диспетчер (type=freelance), если принял его приглашение; 2) диспетчеры компании (type=company, company_role), если водитель в компании. В ответе data.items: id, name, phone (полный номер), work_status, has_photo, type, company_role (для type=company). Язык ответа по X-Language (en, ru, uz, tr, zh).
+        **Водитель:** диспетчеры, с которыми связан: 1) фриланс-диспетчер (type=freelance, поле **role** — CARGO_MANAGER | DRIVER_MANAGER), если принял его приглашение; 2) диспетчеры компании (type=company, company_role), если водитель в компании. В ответе data.items: id, name, phone (полный номер), work_status, has_photo, type, role (для freelance), company_role (для company). Язык ответа по X-Language (en, ru, uz, tr, zh).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       responses:
         "200":
-          description: "data.items — массив диспетчеров (id, name, phone, work_status, has_photo, type, company_role)"
+          description: "data.items — массив диспетчеров (id, name, phone, work_status, has_photo, type, role для freelance, company_role для company)"
           content:
             application/json:
               schema:
@@ -4449,6 +4525,11 @@ paths:
                             work_status: { type: string }
                             has_photo: { type: boolean }
                             type: { type: string, enum: [freelance, company] }
+                            role:
+                              allOf:
+                                - $ref: "#/components/schemas/FreelanceDispatcherRole"
+                              nullable: true
+                              description: "Только для type=freelance"
                             company_role: { type: string, description: "Только для type=company (owner, dispatcher и т.д.)" }
         "401": { description: driver not found }
   /v1/driver/dispatchers/{dispatcherId}:
@@ -4495,7 +4576,8 @@ paths:
         - `work_status` — available/loaded/busy
         - `has_photo` — true/false
         - `rating_min`, `rating_max`
-        **Важно:** `password` не возвращается.
+        - `role` — фильтр по роли: CARGO_MANAGER или DRIVER_MANAGER (строго верхний регистр)
+        **Важно:** `password` не возвращается. В каждом элементе items есть поле `role` (если задано в БД).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: limit
@@ -4534,9 +4616,14 @@ paths:
           in: query
           required: false
           schema: { type: number, format: float, example: 5 }
+        - name: role
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/FreelanceDispatcherRole" }
+          description: "Фильтр по manager_role (CARGO_MANAGER | DRIVER_MANAGER)"
       responses:
         "200": { description: "data.items + data.total + limit/offset" }
-        "400": { description: invalid payload }
+        "400": { description: "Неверные параметры или role (invalid_freelance_dispatcher_role)" }
         "401": { description: unauthorized }
 
   /v1/driver/dispatchers/hint:

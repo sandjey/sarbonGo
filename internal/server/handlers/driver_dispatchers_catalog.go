@@ -36,6 +36,7 @@ func (h *DriverDispatchersCatalogHandler) ListCatalog(c *gin.Context) {
 	phoneHint := strings.TrimSpace(c.Query("phone_hint"))
 	status := strings.TrimSpace(c.Query("status"))
 	workStatus := strings.TrimSpace(c.Query("work_status"))
+	managerRole := strings.TrimSpace(c.Query("role"))
 
 	var statusPtr *string
 	if status != "" {
@@ -75,16 +76,26 @@ func (h *DriverDispatchersCatalogHandler) ListCatalog(c *gin.Context) {
 		ratingMaxPtr = &f
 	}
 
+	var managerRolePtr *string
+	if managerRole != "" {
+		if errKey := validateFreelanceDispatcherRole(managerRole); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+		managerRolePtr = &managerRole
+	}
+
 	items, total, err := h.disp.ListCatalog(c.Request.Context(), dispatchers.CatalogFilter{
-		Q:          q,
-		PhoneHint:  phoneHint,
-		Status:     statusPtr,
-		WorkStatus: workStatusPtr,
-		HasPhoto:   hasPhotoPtr,
-		RatingMin:  ratingMinPtr,
-		RatingMax:  ratingMaxPtr,
-		Limit:      limit,
-		Offset:     offset,
+		Q:           q,
+		PhoneHint:   phoneHint,
+		Status:      statusPtr,
+		WorkStatus:  workStatusPtr,
+		HasPhoto:    hasPhotoPtr,
+		RatingMin:   ratingMinPtr,
+		RatingMax:   ratingMaxPtr,
+		ManagerRole: managerRolePtr,
+		Limit:       limit,
+		Offset:      offset,
 	})
 	if err != nil {
 		h.logger.Error("driver list dispatchers catalog", zap.Error(err))

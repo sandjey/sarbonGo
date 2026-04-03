@@ -62,6 +62,9 @@ func (h *DriverInvitationsHandler) Create(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
 	}
+	if drv != nil {
+		phone = strings.TrimSpace(drv.Phone)
+	}
 	if drv != nil && drv.CompanyID != nil && *drv.CompanyID == companyID.String() {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_in_company")
 		return
@@ -123,7 +126,8 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "driver_not_found")
 		return
 	}
-	if drv != nil && drv.FreelancerID != nil && *drv.FreelancerID == dispatcherID.String() {
+	phone = strings.TrimSpace(drv.Phone)
+	if drv.FreelancerID != nil && *drv.FreelancerID == dispatcherID.String() {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_accepted_your_invitation")
 		return
 	}
