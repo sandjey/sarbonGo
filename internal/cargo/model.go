@@ -56,7 +56,7 @@ type Cargo struct {
 	Volume       float64
 	// VehiclesAmount — сколько машин требуется для этого груза.
 	VehiclesAmount int
-	// VehiclesLeft — сколько машин ещё нужно (уменьшается при принятии водителя).
+	// VehiclesLeft — сколько машин ещё не вышли на исполнение (уменьшается, когда рейс переходит в LOADING).
 	VehiclesLeft int
 	Packaging        *string
 	Dimensions       *string

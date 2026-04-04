@@ -23,6 +23,16 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
 
+// tripStatusConsumesVehiclesLeft is true when vehicles_left was already decremented (trip reached LOADING or later).
+func tripStatusConsumesVehiclesLeft(status string) bool {
+	switch status {
+	case "LOADING", "EN_ROUTE", "UNLOADING":
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *Repo) CompanyExists(ctx context.Context, companyID uuid.UUID) (bool, error) {
 	var n int
 	err := r.pg.QueryRow(ctx, `SELECT 1 FROM companies WHERE id = $1 AND deleted_at IS NULL`, companyID).Scan(&n)
@@ -1053,22 +1063,31 @@ func (r *Repo) AcceptOffer(ctx context.Context, offerID uuid.UUID) (cargoID, car
 		return uuid.Nil, uuid.Nil, err
 	}
 
-	// Lock cargo row for concurrency correctness (vehicles_left and searching status).
+	// Lock cargo row for concurrency correctness (trip count vs vehicles_amount).
 	var status CargoStatus
-	var vehiclesLeft int
+	var vehiclesAmount int
 	err = tx.QueryRow(ctx,
-		`SELECT status, vehicles_left
+		`SELECT status, vehicles_amount
 		 FROM cargo
 		 WHERE id = $1 AND deleted_at IS NULL
 		 FOR UPDATE`,
-		cargoID).Scan(&status, &vehiclesLeft)
+		cargoID).Scan(&status, &vehiclesAmount)
 	if err != nil {
 		return uuid.Nil, uuid.Nil, err
 	}
 	if !IsSearching(status) {
 		return uuid.Nil, uuid.Nil, ErrCargoNotSearching
 	}
-	if vehiclesLeft <= 0 {
+	// Slots = vehicles_amount: count ACCEPTED offers (not trips). Trips are created after this tx commits,
+	// so counting trips would allow too many accepts in flight; ACCEPTED offers reserve slots correctly.
+	var acceptedCount int
+	err = tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM offers WHERE cargo_id = $1 AND status = 'ACCEPTED'`,
+		cargoID).Scan(&acceptedCount)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	if acceptedCount >= vehiclesAmount {
 		return uuid.Nil, uuid.Nil, ErrCargoSlotsFull
 	}
 
@@ -1084,21 +1103,7 @@ func (r *Repo) AcceptOffer(ctx context.Context, offerID uuid.UUID) (cargoID, car
 		return uuid.Nil, uuid.Nil, err
 	}
 
-	// Decrease vehicles_left by 1, assign cargo only when it reaches 0.
-	var newLeft int
-	err = tx.QueryRow(ctx,
-		`UPDATE cargo
-		 SET vehicles_left = vehicles_left - 1,
-		     status = CASE WHEN vehicles_left - 1 <= 0 THEN $2 ELSE status END,
-		     updated_at = now()
-		 WHERE id = $1 AND deleted_at IS NULL AND vehicles_left > 0
-		 RETURNING vehicles_left`,
-		cargoID, StatusAssigned,
-	).Scan(&newLeft)
-	if err != nil {
-		return uuid.Nil, uuid.Nil, err
-	}
-
+	// vehicles_left is decremented when a trip enters LOADING (see OnTripEnteredLoadingTx), not on offer accept.
 	// Do NOT auto-reject other pending offers: cargo may require multiple vehicles.
 	return cargoID, carrierID, tx.Commit(ctx)
 }
@@ -1223,39 +1228,137 @@ func (r *Repo) MarkDriverCompleted(ctx context.Context, cargoID, driverID uuid.U
 	return err
 }
 
-// MarkDriverCancelled marks driver-cargo link cancelled and returns slot back (vehicles_left++).
-// This makes cargo searchable again if it was fully staffed (ASSIGNED) and a slot was freed.
+// OnTripEnteredLoadingTx decrements vehicles_left and sets cargo to IN_PROGRESS when the first vehicle starts execution.
+func (r *Repo) OnTripEnteredLoadingTx(ctx context.Context, tx pgx.Tx, cargoID uuid.UUID) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE cargo
+		SET vehicles_left = GREATEST(0, vehicles_left - 1),
+		    status = CASE
+		      WHEN status IN ('SEARCHING_ALL', 'SEARCHING_COMPANY') THEN 'IN_PROGRESS'
+		      ELSE status
+		    END,
+		    updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL`,
+		cargoID)
+	return err
+}
+
+// MarkDriverCancelled marks driver-cargo link cancelled; optionally restores vehicles_left if the trip had already reached LOADING.
 func (r *Repo) MarkDriverCancelled(ctx context.Context, cargoID, driverID uuid.UUID) error {
 	tx, err := r.pg.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
+	restore := false
+	var st string
+	err = tx.QueryRow(ctx,
+		`SELECT status FROM trips WHERE cargo_id = $1 AND driver_id = $2 ORDER BY created_at DESC LIMIT 1`,
+		cargoID, driverID).Scan(&st)
+	if err == nil {
+		restore = tripStatusConsumesVehiclesLeft(st)
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		err = nil
+	} else {
+		return err
+	}
+	if err := r.MarkDriverCancelledTx(ctx, tx, cargoID, driverID, restore); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
 
+// MarkDriverCancelledTx is the transactional core for MarkDriverCancelled.
+func (r *Repo) MarkDriverCancelledTx(ctx context.Context, tx pgx.Tx, cargoID, carrierID uuid.UUID, restoreVehiclesLeft bool) error {
 	res, err := tx.Exec(ctx,
 		`UPDATE cargo_drivers
 		 SET status = 'CANCELLED', updated_at = now()
 		 WHERE cargo_id = $1 AND driver_id = $2 AND status = 'ACTIVE'`,
-		cargoID, driverID)
+		cargoID, carrierID)
 	if err != nil {
 		return err
 	}
 	if res.RowsAffected() == 0 {
 		return nil
 	}
-
-	// Return one slot back, but do not exceed vehicles_amount.
+	if !restoreVehiclesLeft {
+		return nil
+	}
 	_, err = tx.Exec(ctx,
 		`UPDATE cargo
 		 SET vehicles_left = LEAST(vehicles_amount, vehicles_left + 1),
-		     status = CASE WHEN status = $2 THEN $3 ELSE status END,
 		     updated_at = now()
 		 WHERE id = $1 AND deleted_at IS NULL`,
-		cargoID, StatusAssigned, StatusSearchingAll)
+		cargoID)
+	return err
+}
+
+// OnTripCancelledTx reverts offer to PENDING and frees the driver slot via offer.carrier_id (same transaction as trip removal).
+func (r *Repo) OnTripCancelledTx(ctx context.Context, tx pgx.Tx, cargoID, offerID uuid.UUID, tripStatus string) error {
+	var carrierID uuid.UUID
+	err := tx.QueryRow(ctx,
+		`SELECT carrier_id FROM offers WHERE id = $1 AND cargo_id = $2`,
+		offerID, cargoID).Scan(&carrierID)
 	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	_, err = tx.Exec(ctx,
+		`UPDATE offers SET status = 'PENDING', rejection_reason = NULL WHERE id = $1 AND cargo_id = $2`,
+		offerID, cargoID)
+	if err != nil {
+		return err
+	}
+	return r.MarkDriverCancelledTx(ctx, tx, cargoID, carrierID, tripStatusConsumesVehiclesLeft(tripStatus))
+}
+
+// ArchiveCompletedCargoTx archives the completed trip; if it was the last open trip for the cargo, archives cargo and deletes it.
+func (r *Repo) ArchiveCompletedCargoTx(ctx context.Context, tx pgx.Tx, cargoID, tripID uuid.UUID, driverID uuid.UUID) error {
+	_, err := tx.Exec(ctx,
+		`UPDATE cargo_drivers
+		 SET status = 'COMPLETED', updated_at = now()
+		 WHERE cargo_id = $1 AND driver_id = $2 AND status = 'ACTIVE'`,
+		cargoID, driverID)
+	if err != nil {
+		return err
+	}
+
+	var tripCount int
+	err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM trips WHERE cargo_id = $1`, cargoID).Scan(&tripCount)
+	if err != nil {
+		return err
+	}
+	lastTrip := tripCount <= 1
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO archived_trips (id, cargo_id, offer_id, driver_id, status, created_at, updated_at, archived_at, cancel_reason, cancelled_by_role)
+		SELECT id, cargo_id, offer_id, driver_id, status, created_at, updated_at, now(), NULL, NULL FROM trips WHERE id = $1`,
+		tripID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM trips WHERE id = $1`, tripID)
+	if err != nil {
+		return err
+	}
+
+	if !lastTrip {
+		return nil
+	}
+
+	_, err = tx.Exec(ctx, `UPDATE cargo SET status = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL AND status <> $1`,
+		StatusCompleted, cargoID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx,
+		`INSERT INTO archived_cargo (id, snapshot, archived_at)
+		 SELECT id, to_jsonb(cargo.*), now() FROM cargo WHERE id = $1`,
+		cargoID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `DELETE FROM cargo WHERE id = $1`, cargoID)
+	return err
 }
 
 // emptyToNil returns nil for empty string (for NULL in DB), else the string.

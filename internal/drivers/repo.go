@@ -207,6 +207,37 @@ LIMIT $3`
 	return list, rows.Err()
 }
 
+// HintByPhonePrefix returns up to limit drivers whose normalized phone starts with the given prefix (typeahead).
+func (r *Repo) HintByPhonePrefix(ctx context.Context, prefix string, limit int) ([]*Driver, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+	term := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(prefix, " ", ""), "-", ""))
+	term = strings.TrimPrefix(term, "+")
+	if term == "" {
+		return []*Driver{}, nil
+	}
+	pattern := term + "%"
+	const q = `SELECT ` + driverSelectCols + driverJoinTables + `
+WHERE replace(replace(replace(trim(d.phone), ' ', ''), '-', ''), '+', '') LIKE $1
+ORDER BY d.last_online_at DESC NULLS LAST, d.created_at DESC
+LIMIT $2`
+	rows, err := r.pg.Query(ctx, q, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []*Driver
+	for rows.Next() {
+		d, err := scanDriver(rows)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, d)
+	}
+	return list, rows.Err()
+}
+
 // ListDriversFilter for GET /v1/dispatchers/drivers (freelance dispatcher's driver list with filters).
 type ListDriversFilter struct {
 	Phone      string // search by phone (partial match)

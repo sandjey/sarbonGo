@@ -24,4 +24,8 @@ type Trip struct {
 	Status    string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Bilateral confirmation for the next transition (pending_confirm_to = target status).
+	PendingConfirmTo      *string
+	DriverConfirmedAt     *time.Time
+	DispatcherConfirmedAt *time.Time
 }

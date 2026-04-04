@@ -35,3 +35,23 @@ func (c *Conversation) PeerID(me uuid.UUID) uuid.UUID {
 	}
 	return c.UserAID
 }
+
+// ConversationListItem is a Telegram-like row for GET /v1/chat/conversations.
+type ConversationListItem struct {
+	Conversation
+	PeerID       uuid.UUID  `json:"peer_id"`
+	PeerName     string     `json:"peer_name"`
+	PeerPhone    string     `json:"peer_phone"`
+	PeerRole     string     `json:"peer_role"` // driver | dispatcher | unknown
+	PeerHasPhoto bool       `json:"peer_has_photo"`
+	PeerPhotoURL *string    `json:"peer_photo_url,omitempty"`
+
+	LastMessageID      *uuid.UUID `json:"last_message_id,omitempty"`
+	LastMessageAt      *time.Time `json:"last_message_at,omitempty"`
+	LastMessageType    *string    `json:"last_message_type,omitempty"`
+	LastMessageBody    *string    `json:"last_message_body,omitempty"`
+	LastMessagePreview string     `json:"last_message_preview,omitempty"`
+	LastMessageFromMe  bool       `json:"last_message_from_me"`
+	UnreadCount        int        `json:"unread_count"`
+	PeerReadMyLast     bool       `json:"peer_read_my_last"` // true if last message is mine and peer has read it
+}

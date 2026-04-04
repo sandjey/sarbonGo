@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -95,6 +96,124 @@ LIMIT $2
 		list = append(list, c)
 	}
 	return list, rows.Err()
+}
+
+// ListConversationsEnriched returns conversations with peer profile, last message, unread count, read receipts.
+func (r *Repo) ListConversationsEnriched(ctx context.Context, userID uuid.UUID, limit int) ([]ConversationListItem, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	const q = `
+SELECT
+  c.id,
+  c.user_a_id,
+  c.user_b_id,
+  c.created_at,
+  CASE WHEN c.user_a_id = $1 THEN c.user_b_id ELSE c.user_a_id END AS peer_id,
+  CASE
+    WHEN d.id IS NOT NULL THEN COALESCE(NULLIF(TRIM(d.name), ''), d.phone, '')
+    WHEN fd.id IS NOT NULL THEN COALESCE(NULLIF(TRIM(fd.name), ''), fd.phone, '')
+    ELSE ''
+  END AS peer_name,
+  COALESCE(d.phone, fd.phone, '') AS peer_phone,
+  CASE WHEN d.id IS NOT NULL THEN 'driver' WHEN fd.id IS NOT NULL THEN 'dispatcher' ELSE 'unknown' END AS peer_role,
+  (d.photo_data IS NOT NULL OR fd.photo_data IS NOT NULL) AS peer_has_photo,
+  lm.last_msg_id,
+  lm.last_sender_id,
+  lm.last_type,
+  lm.last_body,
+  lm.last_created_at,
+  COALESCE(pr.last_read_at, 'epoch'::timestamptz) AS peer_last_read_at,
+  (
+    SELECT COUNT(*)::int FROM chat_messages m2
+    WHERE m2.conversation_id = c.id AND m2.deleted_at IS NULL
+    AND m2.sender_id <> $1
+    AND m2.created_at > COALESCE(mr.last_read_at, 'epoch'::timestamptz)
+  ) AS unread_count
+FROM chat_conversations c
+LEFT JOIN LATERAL (
+  SELECT m.id AS last_msg_id, m.sender_id AS last_sender_id, m.type AS last_type, m.body AS last_body, m.created_at AS last_created_at
+  FROM chat_messages m
+  WHERE m.conversation_id = c.id AND m.deleted_at IS NULL
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT 1
+) lm ON true
+LEFT JOIN chat_conversation_reads mr ON mr.conversation_id = c.id AND mr.user_id = $1
+LEFT JOIN chat_conversation_reads pr ON pr.conversation_id = c.id AND pr.user_id = (CASE WHEN c.user_a_id = $1 THEN c.user_b_id ELSE c.user_a_id END)
+LEFT JOIN drivers d ON d.id = (CASE WHEN c.user_a_id = $1 THEN c.user_b_id ELSE c.user_a_id END)
+LEFT JOIN freelance_dispatchers fd ON fd.id = (CASE WHEN c.user_a_id = $1 THEN c.user_b_id ELSE c.user_a_id END) AND fd.deleted_at IS NULL
+WHERE c.user_a_id = $1 OR c.user_b_id = $1
+ORDER BY COALESCE(lm.last_created_at, c.created_at) DESC
+LIMIT $2`
+	rows, err := r.pg.Query(ctx, q, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ConversationListItem
+	for rows.Next() {
+		var item ConversationListItem
+		var lastMsgID, lastSenderID *uuid.UUID
+		var lastType, lastBody *string
+		var lastCreatedAt *time.Time
+		var peerRead time.Time
+		if err := rows.Scan(
+			&item.ID, &item.UserAID, &item.UserBID, &item.CreatedAt,
+			&item.PeerID,
+			&item.PeerName, &item.PeerPhone, &item.PeerRole, &item.PeerHasPhoto,
+			&lastMsgID, &lastSenderID, &lastType, &lastBody, &lastCreatedAt,
+			&peerRead,
+			&item.UnreadCount,
+		); err != nil {
+			return nil, err
+		}
+		item.LastMessageID = lastMsgID
+		item.LastMessageType = lastType
+		item.LastMessageBody = lastBody
+		item.LastMessageAt = lastCreatedAt
+		if lastSenderID != nil && *lastSenderID == userID {
+			item.LastMessageFromMe = true
+		}
+		if lastMsgID != nil && lastCreatedAt != nil && lastSenderID != nil && *lastSenderID == userID {
+			item.PeerReadMyLast = !peerRead.Before(*lastCreatedAt)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// MarkConversationRead sets the caller's read cursor to the latest message in the conversation.
+func (r *Repo) MarkConversationRead(ctx context.Context, conversationID, userID uuid.UUID) error {
+	tag, err := r.pg.Exec(ctx, `
+INSERT INTO chat_conversation_reads (conversation_id, user_id, last_read_at, updated_at)
+SELECT $1, $2, COALESCE((SELECT MAX(m.created_at) FROM chat_messages m WHERE m.conversation_id = $1 AND m.deleted_at IS NULL), now()), now()
+FROM chat_conversations c
+WHERE c.id = $1 AND (c.user_a_id = $2 OR c.user_b_id = $2)
+ON CONFLICT (conversation_id, user_id) DO UPDATE SET
+  last_read_at = EXCLUDED.last_read_at,
+  updated_at = now()
+`, conversationID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// HasConversationPair returns true if the two users have a chat conversation row.
+func (r *Repo) HasConversationPair(ctx context.Context, userID, peerID uuid.UUID) (bool, error) {
+	u1, u2 := userID, peerID
+	if u1.String() > u2.String() {
+		u1, u2 = u2, u1
+	}
+	var n int
+	err := r.pg.QueryRow(ctx, `SELECT COUNT(*)::int FROM chat_conversations WHERE user_a_id = $1 AND user_b_id = $2`, u1, u2).Scan(&n)
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // GetConversation loads one conversation by ID if user is participant.

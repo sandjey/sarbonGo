@@ -122,11 +122,11 @@ tags:
       **Общий каталог водителей для фриланс-диспетчера.** Просмотр всех водителей в системе (не только «моих») с фильтрами и пагинацией, чтобы найти подходящих кандидатов и затем отправить им приглашение или таклиф.
   - name: Freelance Dispatchers / Trips
     description: |
-      **Назначение водителя на рейс.** PATCH /v1/dispatchers/trips/:id/assign-driver (driver_id). Водитель: POST /v1/driver/trips/:id/confirm или reject. Статусы: PENDING_DRIVER → ASSIGNED → LOADING → EN_ROUTE → UNLOADING → COMPLETED.
+      **Назначение водителя на рейс.** PATCH /v1/dispatchers/trips/:id/assign-driver (driver_id). Каждый переход статуса (кроме отмены) требует подтверждения **и** водителя, **и** диспетчера: POST /v1/driver/trips/:id/confirm-transition и POST /v1/dispatchers/trips/:id/confirm-transition (алиас POST .../confirm для водителя). Отмена рейса без двустороннего согласия: POST /v1/driver/trips/:id/cancel или POST /v1/dispatchers/trips/:id/cancel — рейс архивируется и удаляется из trips, груз остаётся для новой попытки. Состояние: GET .../state. Статусы: PENDING_DRIVER → ASSIGNED → LOADING → EN_ROUTE → UNLOADING → COMPLETED (после COMPLETED груз и рейс архивируются и удаляются из основных таблиц).
   - name: Drivers / Trips
     description: |
       **Рейсы водителя**
-      GET /v1/driver/trips — список рейсов, назначенных текущему водителю. POST /v1/driver/trips/:id/confirm — принять назначение (рейс → ASSIGNED). POST /v1/driver/trips/:id/reject — отклонить (диспетчер может назначить другого). PATCH /v1/driver/trips/:id/status — смена статуса водителем (LOADING, EN_ROUTE, UNLOADING, COMPLETED, CANCELLED). Требуется X-User-Token (driver).
+      GET /v1/driver/trips — список рейсов. POST /v1/driver/trips/:id/confirm (или confirm-transition) — шаг двустороннего подтверждения. POST /v1/driver/trips/:id/reject — отклонить назначение. POST /v1/driver/trips/:id/cancel — отменить рейс. GET /v1/driver/trips/:id/state — статус рейса, ожидание подтверждений, кратко по грузу. Требуется X-User-Token (driver).
   - name: Drivers / Driver invitations
     description: |
       **Приглашения для водителя: получить список, принять или отказать.**
@@ -212,12 +212,12 @@ tags:
 
       Создание грузов, редактирование, смена статусов, просмотр офферов, принятие/отклонение оффера. Заголовки: X-Device-Type, X-Language, X-Client-Token (JWT не обязателен).
 
-        **Поток груза:** Фрилансер создаёт груз (POST /api/cargo) → статус **PENDING_MODERATION**. Админ: GET /v1/admin/cargo/moderation → POST .../accept (тело опционально: search_visibility=all|company → статус **SEARCHING_ALL** или **SEARCHING_COMPANY**) или POST .../reject (статус **REJECTED**, обязательная причина). Для грузов компании админ может выбрать видимость: всем (SEARCHING_ALL) или только водителям компании (SEARCHING_COMPANY). Фриланс-диспетчеру доступен только вариант «всем». После модерации водители видят грузы по правилам видимости. Два варианта: 1) Водитель отправляет оффер → диспетчер принимает (POST /api/offers/:id/accept) или отклоняет (POST /v1/dispatchers/offers/:id/reject, reason необязателен). 2) Диспетчер рекомендует груз водителю (POST /v1/dispatchers/cargo/:id/recommend) → водитель принимает (POST /v1/driver/recommended-cargo/:cargoId/accept) или отказывает (POST .../decline). После принятия оффера создаётся рейс, груз → **ASSIGNED**. Когда рейс переходит в LOADING → груз **IN_PROGRESS**; когда рейс COMPLETED → груз **COMPLETED**.
+        **Поток груза:** Фрилансер создаёт груз (POST /api/cargo) → статус **PENDING_MODERATION**. Админ: GET /v1/admin/cargo/moderation → POST .../accept (тело опционально: search_visibility=all|company → статус **SEARCHING_ALL** или **SEARCHING_COMPANY**) или POST .../reject (статус **REJECTED**, обязательная причина). Для грузов компании админ может выбрать видимость: всем (SEARCHING_ALL) или только водителям компании (SEARCHING_COMPANY). Фриланс-диспетчеру доступен только вариант «всем». После модерации водители видят грузы по правилам видимости. Два варианта: 1) Водитель отправляет оффер → диспетчер принимает (POST /api/offers/:id/accept) или отклоняет (POST /v1/dispatchers/offers/:id/reject, reason необязателен). 2) Диспетчер рекомендует груз водителю (POST /v1/dispatchers/cargo/:id/recommend) → водитель принимает (POST /v1/driver/recommended-cargo/:cargoId/accept) или отказывает (POST .../decline). После принятия оффера создаётся рейс; число рейсов по грузу не больше **vehicles_amount**; груз остаётся в **SEARCHING_*** до исполнения. **vehicles_left** уменьшается, когда рейс переходит в **LOADING**. При первом LOADING груз → **IN_PROGRESS**. Когда завершён **последний** рейс по грузу → груз **COMPLETED** и архивируется.
   - name: Chat
     description: |
       **Универсальный чат (driver ↔ dispatcher и др.)**
       **Кто вызывает:** Водитель, диспетчер или админ (JWT в X-User-Token). Для тестов в Swagger можно передать **X-User-ID** (UUID пользователя) вместо JWT.
-      **Поток:** GET /v1/chat/conversations → POST /v1/chat/conversations (body peer_id) → GET/POST /v1/chat/conversations/:id/messages. PATCH/DELETE /v1/chat/messages/:id. Presence: GET /v1/chat/presence/:user_id. WebSocket: GET /v1/chat/ws?token=JWT.
+      **Поток (как в Telegram):** поиск контакта по телефону — **GET /v1/chat/user-finder** (алиасы **GET /v1/driver/user-finder**, **GET /v1/dispatchers/user-finder** с тем же JWT). Аватар собеседника — **GET /v1/chat/users/{id}/photo**. Список диалогов — **GET /v1/chat/conversations** (peer_name, peer_photo_url, последнее сообщение, unread_count, peer_read_my_last). Открытие чата / прочитано: **POST /v1/chat/conversations/{id}/read** или **GET** сообщений с `mark_read=1`. Далее: POST /v1/chat/conversations (peer_id) → GET/POST /v1/chat/conversations/:id/messages. PATCH/DELETE /v1/chat/messages/:id. Presence: GET /v1/chat/presence/:user_id. WebSocket: GET /v1/chat/ws?token=JWT.
   - name: Calls (Voice)
     description: |
       **Голосовые звонки (как Telegram по архитектуре):** медиа (аудио) идёт по **WebRTC**, а этот раздел отвечает за **создание/статусы звонка** и **signaling** через WebSocket чата.
@@ -614,7 +614,7 @@ components:
         weight: { type: number, example: 20, description: "Вес груза в тоннах (обязательно > 0)" }
         volume: { type: number, example: 82, description: "Объём груза в кубических метрах (м³)" }
         vehicles_amount: { type: integer, example: 1, description: "Количество машин (водителей), требуемых для этого груза" }
-        vehicles_left: { type: integer, example: 1, description: "Сколько машин ещё нужно (уменьшается при принятии оффера/рекомендации). Когда становится 0 — груз переходит в ASSIGNED." }
+        vehicles_left: { type: integer, example: 1, description: "Сколько машин ещё не вышли на исполнение (уменьшается, когда рейс переходит в LOADING). Стартовое значение = vehicles_amount. Когда все рейсы завершены — груз COMPLETED и архивируется. en: remaining slots until trips enter LOADING; uz: LOADING ga o'tganda kamayadi; tr: LOADING'e geçince azalır; zh: 进入装货阶段时递减。" }
         packaging: { type: string, nullable: true, example: "Мешки по 50 кг на паллетах", description: "Упаковка груза" }
         dimensions: { type: string, nullable: true, example: "13.6x2.45x2.7", description: "Габариты груза (ДхШхВ в метрах)" }
         photos: { type: array, items: { type: string }, nullable: true, example: ["https://cdn.example.com/cargo/photo1.jpg", "/api/cargo/photos/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"], description: "Ссылки на фото: CDN URL и/или pending с POST /api/cargo/photos" }
@@ -1323,9 +1323,9 @@ paths:
       summary: "9. Принять оффер"
       description: |
         **Кто вызывает:** Диспетчер, компания, админ. Водитель офферы не принимает.
-        **Назначение:** Принять выбранный оффер. Статус груза → ASSIGNED, у принятого оффера status=ACCEPTED, остальные офферы по этому грузу → REJECTED.
+        **Назначение:** Принять выбранный оффер. У принятого оффера status=ACCEPTED. Груз остаётся в поиске (SEARCHING_*), пока не исчерпан лимит рейсов: число строк в **trips** по этому грузу &lt; **vehicles_amount**. **vehicles_left** на грузе уменьшается не здесь, а когда рейс переходит в LOADING (двустороннее подтверждение).
 
-        **Логика:** id в path — это ID оффера. Проверяется, что оффер существует и имеет status=PENDING. После принятия груз привязан к перевозчику (carrier_id принятого оффера).
+        **Логика:** id в path — это ID оффера. Проверяется, что оффер существует и имеет status=PENDING. После принятия создаётся рейс (см. ответ с trip_id); груз привязан к перевозчику (carrier_id принятого оффера).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       parameters:
         - name: id
@@ -1592,7 +1592,7 @@ paths:
           schema: { type: string, format: uuid, example: "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
       responses:
         "200":
-          description: items — массив рейсов (id, cargo_id, offer_id, driver_id, status, created_at, updated_at)
+          description: items — массив рейсов (id, cargo_id, offer_id, driver_id, status, pending_confirm_to, driver_confirmed_at, dispatcher_confirmed_at, next_status, created_at, updated_at)
   /api/trips/{id}:
     get:
       tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ", "Cargo — Freelance dispatcher", "Cargo — Водитель"]
@@ -1604,7 +1604,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: Рейс (id, cargo_id, offer_id, driver_id, status) }
+        "200": { description: "Рейс (id, cargo_id, offer_id, driver_id, status, pending_confirm_to, driver_confirmed_at, dispatcher_confirmed_at, next_status)" }
         "404": { description: Рейс не найден }
 
   /v1/driver/transport-options:
@@ -3413,7 +3413,7 @@ paths:
     patch:
       tags: ["Freelance Dispatchers / Trips"]
       summary: "Назначить водителя на рейс"
-      description: "Тело: driver_id (UUID). Рейс должен быть в статусе PENDING_DRIVER. Водитель подтверждает через POST /v1/driver/trips/:id/confirm."
+      description: "Тело: driver_id (UUID). Рейс должен быть в статусе PENDING_DRIVER. Далее водитель и диспетчер подтверждают переход в ASSIGNED через POST .../confirm-transition (или водитель: POST .../confirm)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -3434,6 +3434,70 @@ paths:
       responses:
         "200": { description: status PENDING_DRIVER, driver_id }
         "404": { description: trip not found or not PENDING_DRIVER }
+
+  /v1/dispatchers/trips/{id}/confirm-transition:
+    post:
+      tags: ["Freelance Dispatchers / Trips"]
+      summary: "Подтвердить следующий статус рейса (диспетчер)"
+      description: |
+        Двустороннее подтверждение: диспетчер и водитель должны вызвать этот эндпоинт и парный вызов водителя для одного и того же перехода (next_status).
+        **en:** Bilateral confirmation with the driver for the next trip status.
+        **uz:** Keyingi reys holatini haydovchi bilan ikkala tomondan tasdiqlash.
+        **tr:** Bir sonraki sefer durumu için sürücü ile karşılıklı onay.
+        **zh:** 与司机双方确认下一行程状态。
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: data — поля рейса после шага (см. GET /api/trips/:id) }
+        "403": { description: not your cargo }
+        "404": { description: trip not found }
+
+  /v1/dispatchers/trips/{id}/cancel:
+    post:
+      tags: ["Freelance Dispatchers / Trips"]
+      summary: "Отменить рейс (диспетчер)"
+      description: |
+        Отмена без второй стороны: рейс архивируется и удаляется из trips; груз остаётся для новой попытки; оффер возвращается в PENDING.
+        **en:** Cancel trip; trip archived, cargo kept for retry.
+        **uz:** Reysni bekor qilish; yuk qayta urinish uchun qoladi.
+        **tr:** Sefer iptal; yük yeniden deneme için kalır.
+        **zh:** 取消行程；货物保留可重试。
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.status=cancelled, data.cargo_id" }
+        "400": { description: trip already completed }
+        "403": { description: not your cargo }
+        "404": { description: trip not found }
+
+  /v1/dispatchers/trips/{id}/state:
+    get:
+      tags: ["Freelance Dispatchers / Trips"]
+      summary: "Состояние рейса и подтверждений (диспетчер)"
+      description: |
+        Рейс, next_status, pending_confirm_to, метки подтверждений, кратко cargo (id, status).
+        **en:** Trip state and bilateral confirmation progress.
+        **uz:** Reys holati va tasdiqlar.
+        **tr:** Sefer durumu ve onaylar.
+        **zh:** 行程状态与确认进度。
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+        "403": { description: not your cargo }
+        "404": { description: trip not found }
 
   /v1/dispatchers/offers/{id}/reject:
     post:
@@ -3564,7 +3628,7 @@ paths:
       tags: ["Freelance Dispatchers / Добавление груза", "Cargo — Диспетчер, компания, админ"]
       summary: "Убрать водителя с груза (освободить слот)"
       description: |
-        Помечает связь водитель↔груз как CANCELLED и возвращает 1 слот обратно (vehicles_left++).
+        Помечает связь водитель↔груз как CANCELLED. Если рейс уже был в LOADING или позже, возвращает один слот в vehicles_left.
         Доступно только для грузов, созданных текущим фриланс-диспетчером.
         Ответы на 5 языках.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -4368,8 +4432,14 @@ paths:
   /v1/driver/trips/{id}/confirm:
     post:
       tags: ["Drivers / Trips"]
-      summary: "Принять назначение на рейс"
-      description: "Водитель подтверждает рейс; статус рейса → ASSIGNED. Рейс должен быть назначен этому водителю (driver_id = me)."
+      summary: "Подтвердить шаг рейса (водитель, алиас confirm-transition)"
+      description: |
+        Двустороннее подтверждение: один шаг со стороны водителя; диспетчер должен вызвать POST /v1/dispatchers/trips/:id/confirm-transition для того же перехода.
+        После обоих подтверждений статус рейса переходит к next (например PENDING_DRIVER+назначение → ASSIGNED).
+        **en:** Driver side of bilateral confirmation (same as confirm-transition).
+        **uz:** Haydovchi tomonidan ikkala tomonlama tasdiqlash qadami.
+        **tr:** Karşılıklı onayın sürücü tarafı.
+        **zh:** 双方确认之司机侧步骤。
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4377,8 +4447,30 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: status ASSIGNED }
-        "404": { description: trip not found or not assigned to you }
+        "200": { description: поля рейса (status может остаться прежним до подтверждения диспетчером) }
+        "403": { description: trip not assigned to you }
+        "404": { description: trip not found }
+
+  /v1/driver/trips/{id}/confirm-transition:
+    post:
+      tags: ["Drivers / Trips"]
+      summary: "Подтвердить следующий статус рейса (водитель)"
+      description: |
+        См. POST /v1/driver/trips/:id/confirm — та же логика двустороннего подтверждения.
+        **en:** Driver confirms the pending transition (bilateral).
+        **uz:** Haydovchi navbatdagi o'tishni tasdiqlaydi.
+        **tr:** Sürücü bekleyen geçişi onaylar.
+        **zh:** 司机确认待处理的状态转换。
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+        "403": { description: trip not assigned to you }
+        "404": { description: trip not found }
 
   /v1/driver/trips/{id}/reject:
     post:
@@ -4395,30 +4487,48 @@ paths:
         "200": { description: status PENDING_DRIVER }
         "404": { description: trip not found }
 
-  /v1/driver/trips/{id}/status:
-    patch:
+  /v1/driver/trips/{id}/cancel:
+    post:
       tags: ["Drivers / Trips"]
-      summary: "Сменить статус рейса (водитель)"
-      description: "Тело: status (LOADING | EN_ROUTE | UNLOADING | COMPLETED | CANCELLED). Допустимые переходы по ТЗ."
+      summary: "Отменить рейс (водитель)"
+      description: |
+        Отмена без согласия второй стороны: рейс архивируется; груз остаётся.
+        **en:** Driver cancels trip; trip archived.
+        **uz:** Haydovchi reysni bekor qiladi.
+        **tr:** Sürücü seferi iptal eder.
+        **zh:** 司机取消行程。
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
           in: path
           required: true
           schema: { type: string, format: uuid }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                status: { type: string, enum: [LOADING, EN_ROUTE, UNLOADING, COMPLETED, CANCELLED] }
-              required: [status]
       responses:
-        "200": { description: status }
-        "400": { description: invalid status transition }
+        "200": { description: "data.status=cancelled, data.cargo_id" }
+        "400": { description: trip already completed }
         "403": { description: trip not assigned to you }
+        "404": { description: trip not found }
+
+  /v1/driver/trips/{id}/state:
+    get:
+      tags: ["Drivers / Trips"]
+      summary: "Состояние рейса и подтверждений (водитель)"
+      description: |
+        См. GET /v1/dispatchers/trips/:id/state — те же поля для назначенного водителя.
+        **en:** Trip state for assigned driver.
+        **uz:** Haydovchi uchun reys holati.
+        **tr:** Atanmış sürücü için sefer durumu.
+        **zh:** 指派司机的行程状态。
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+        "403": { description: trip not assigned to you }
+        "404": { description: trip not found }
 
   /v1/driver/driver-invitations:
     get:
@@ -4971,11 +5081,47 @@ paths:
         "200": { description: "data.status = REJECTED" }
         "400": { description: reason required, or cargo not pending moderation }
 
+  /v1/chat/user-finder:
+    get:
+      tags: [Chat]
+      summary: "Поиск пользователя по телефону (водитель + фриланс-диспетчер)"
+      description: "Prefix/typeahead по номеру; возвращает смешанный список role=driver|dispatcher. Тот же контракт: GET /v1/driver/user-finder и GET /v1/dispatchers/user-finder (X-User-Token)."
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }, { UserIDHeader: [] }]
+      parameters:
+        - name: phone
+          in: query
+          required: true
+          schema: { type: string, example: "+99890" }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 50 }
+      responses:
+        "200":
+          description: "data.items = [{ role, id, phone, name, has_photo, photo_url? }, ...]"
+        "400": { description: phone empty or invalid limit }
+        "401": { description: unauthorized }
+
+  /v1/chat/users/{id}/photo:
+    get:
+      tags: [Chat]
+      summary: "Аватар пользователя для UI чата"
+      description: "Бинарный ответ (image/*). Доступен при авторизации чата (X-User-Token)."
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }, { UserIDHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: image bytes }
+        "401": { description: unauthorized }
+        "404": { description: no photo }
+
   /v1/chat/conversations:
     get:
       tags: [Chat]
       summary: "Список диалогов"
-      description: "Список диалогов текущего пользователя. Авторизация: X-User-Token (JWT) или X-User-ID (UUID для теста в Swagger)."
+      description: "Список диалогов с полями peer (имя, телефон, роль, фото), последним сообщением, unread_count, peer_read_my_last. Авторизация: X-User-Token (JWT) или X-User-ID (UUID для теста в Swagger)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }, { UserIDHeader: [] }]
       parameters:
         - name: limit
@@ -4983,7 +5129,7 @@ paths:
           schema: { type: integer, default: 50 }
       responses:
         "200":
-          description: "data.conversations = [{ id, peer_id, created_at }, ...]"
+          description: "data.conversations — расширенные объекты (peer_name, peer_photo_url, last_message_*, unread_count, ...)"
         "401": { description: unauthorized }
     post:
       tags: [Chat]
@@ -5001,11 +5147,27 @@ paths:
         "400": { description: invalid peer_id or same user }
         "401": { description: unauthorized }
 
+  /v1/chat/conversations/{id}/read:
+    post:
+      tags: [Chat]
+      summary: "Отметить диалог прочитанным"
+      description: "Устанавливает курсор прочитанного на последнее сообщение (сбрасывает unread для текущего пользователя)."
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }, { UserIDHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.read = true" }
+        "401": { description: unauthorized }
+        "404": { description: conversation not found }
+
   /v1/chat/conversations/{id}/messages:
     get:
       tags: [Chat]
       summary: "История сообщений диалога"
-      description: "Пагинация: cursor = id последнего сообщения из предыдущей страницы, limit (по умолчанию 50)."
+      description: "Пагинация: cursor = id последнего сообщения из предыдущей страницы, limit (по умолчанию 50). Query **mark_read=1** — отметить прочитанным при открытии чата."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }, { UserIDHeader: [] }]
       parameters:
         - name: id
@@ -5018,6 +5180,10 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, default: 50 }
+        - name: mark_read
+          in: query
+          required: false
+          schema: { type: string, example: "1", description: "1 или true — пометить входящие как прочитанные" }
       responses:
         "200":
           description: "data.messages = [Message, ...]"
@@ -5050,9 +5216,9 @@ paths:
       summary: "Отправить медиа (фото/голос/видео/кружок)"
       description: |
         Загружает файл, оптимизирует «как в Telegram» и создаёт сообщение:
-        - **PHOTO** → JPEG (оптимизация/пережатие)
-        - **VOICE** → OGG/Opus (моно, 48kHz, ~32kbps)
-        - **VIDEO** → MP4 (H.264/AAC) + faststart + thumbnail (по возможности)
+        - **PHOTO** → JPEG (оптимизация/пережатие); при ошибке ffmpeg — копия JPEG/PNG/WebP
+        - **VOICE** → если исходник **MP3** (`audio/mpeg`) — сохраняется как MP3; иначе **OGG/Opus** (моно, 48kHz, ~32kbps)
+        - **VIDEO** → если исходник уже **MP4** — быстрый путь (копия); иначе перекодирование в MP4 (H.264/AAC) + faststart + thumbnail; при необходимости пробуется remux `ffmpeg -c copy`
         - **VIDEO_NOTE** → квадратный MP4 (под UI-кружок) + thumbnail
 
         Файл хранится на диске сервера, в БД сохраняются метаданные. В `payload` сообщения возвращается `attachment_id` и `url` для скачивания.

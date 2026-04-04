@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -19,6 +20,8 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/chat"
+	"sarbonNew/internal/dispatchers"
+	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 )
@@ -30,14 +33,16 @@ var upgrader = websocket.Upgrader{
 }
 
 type ChatHandler struct {
-	logger   *zap.Logger
-	repo     *chat.Repo
-	presence *chat.PresenceStore
-	hub      *chat.Hub
+	logger      *zap.Logger
+	repo        *chat.Repo
+	presence    *chat.PresenceStore
+	hub         *chat.Hub
+	drivers     *drivers.Repo
+	dispatchers *dispatchers.Repo
 }
 
-func NewChatHandler(logger *zap.Logger, repo *chat.Repo, presence *chat.PresenceStore, hub *chat.Hub) *ChatHandler {
-	h := &ChatHandler{logger: logger, repo: repo, presence: presence, hub: hub}
+func NewChatHandler(logger *zap.Logger, repo *chat.Repo, presence *chat.PresenceStore, hub *chat.Hub, drv *drivers.Repo, disp *dispatchers.Repo) *ChatHandler {
+	h := &ChatHandler{logger: logger, repo: repo, presence: presence, hub: hub, drivers: drv, dispatchers: disp}
 	hub.SetOnTyping(func(conversationID, fromUserID uuid.UUID) (uuid.UUID, bool) {
 		ctx := context.Background()
 		conv, err := repo.GetConversation(ctx, conversationID, fromUserID)
@@ -59,7 +64,48 @@ func (h *ChatHandler) getUserID(c *gin.Context) (uuid.UUID, bool) {
 	return id, id != uuid.Nil
 }
 
-// ListConversations returns conversations for the current user.
+// currentUserIDForChat resolves user id from chat JWT or driver/dispatcher scoped routes.
+func (h *ChatHandler) currentUserIDForChat(c *gin.Context) (uuid.UUID, bool) {
+	if id, ok := h.getUserID(c); ok {
+		return id, true
+	}
+	if v, ok := c.Get(mw.CtxDriverID); ok {
+		if id, ok := v.(uuid.UUID); ok && id != uuid.Nil {
+			return id, true
+		}
+	}
+	if v, ok := c.Get(mw.CtxDispatcherID); ok {
+		if id, ok := v.(uuid.UUID); ok && id != uuid.Nil {
+			return id, true
+		}
+	}
+	return uuid.Nil, false
+}
+
+func chatLastMessagePreview(msgType string, body *string) string {
+	if body != nil {
+		s := strings.TrimSpace(*body)
+		if s != "" {
+			return s
+		}
+	}
+	switch strings.ToUpper(strings.TrimSpace(msgType)) {
+	case "PHOTO":
+		return "Photo"
+	case "VOICE":
+		return "Voice"
+	case "VIDEO":
+		return "Video"
+	case "VIDEO_NOTE":
+		return "Video message"
+	case "LOCATION":
+		return "Location"
+	default:
+		return ""
+	}
+}
+
+// ListConversations returns Telegram-like rows for the current user (peer profile, last message, unread).
 // GET /v1/chat/conversations
 func (h *ChatHandler) ListConversations(c *gin.Context) {
 	userID, ok := h.getUserID(c)
@@ -68,23 +114,211 @@ func (h *ChatHandler) ListConversations(c *gin.Context) {
 		return
 	}
 	limit := getIntQuery(c, "limit", 50)
-	list, err := h.repo.ListConversations(c.Request.Context(), userID, limit)
+	list, err := h.repo.ListConversationsEnriched(c.Request.Context(), userID, limit)
 	if err != nil {
 		h.logger.Error("chat list conversations", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_conversations")
 		return
 	}
-	// Enrich with peer_id for each
-	out := make([]gin.H, 0, len(list))
-	for _, conv := range list {
-		peerID := conv.PeerID(userID)
-		out = append(out, gin.H{
-			"id":         conv.ID,
-			"peer_id":   peerID,
-			"created_at": conv.CreatedAt,
-		})
+	for i := range list {
+		list[i].LastMessagePreview = chatLastMessagePreview(
+			strings.TrimSpace(chatStrPtr(list[i].LastMessageType)),
+			list[i].LastMessageBody,
+		)
+		if list[i].PeerHasPhoto {
+			u := "/v1/chat/users/" + list[i].PeerID.String() + "/photo"
+			list[i].PeerPhotoURL = &u
+		}
 	}
-	resp.OKLang(c, "ok", gin.H{"conversations": out})
+	resp.OKLang(c, "ok", gin.H{"conversations": list})
+}
+
+func chatStrPtr(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// UserFinder searches drivers and freelance dispatchers by phone prefix (typeahead).
+// GET /v1/chat/user-finder | /v1/driver/user-finder | /v1/dispatchers/user-finder
+func (h *ChatHandler) UserFinder(c *gin.Context) {
+	userID, ok := h.currentUserIDForChat(c)
+	if !ok {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	if h.drivers == nil || h.dispatchers == nil {
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	phone := strings.TrimSpace(c.Query("phone"))
+	if phone == "" {
+		resp.ErrorLang(c, http.StatusBadRequest, "phone_required")
+		return
+	}
+	limit := getIntQuery(c, "limit", 20)
+	if limit < 1 || limit > 50 {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
+		return
+	}
+	half := limit / 2
+	if half < 1 {
+		half = 1
+	}
+	ctx := c.Request.Context()
+	drvList, err := h.drivers.HintByPhonePrefix(ctx, phone, half+limit)
+	if err != nil {
+		h.logger.Error("user finder drivers", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_user_finder")
+		return
+	}
+	dispList, err := h.dispatchers.HintByPhonePrefix(ctx, phone, half+limit)
+	if err != nil {
+		h.logger.Error("user finder dispatchers", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_user_finder")
+		return
+	}
+	seen := map[uuid.UUID]struct{}{userID: {}}
+	items := make([]gin.H, 0, limit)
+	for _, d := range drvList {
+		if d == nil {
+			continue
+		}
+		drvID, err := uuid.Parse(d.ID)
+		if err != nil {
+			continue
+		}
+		if drvID == userID {
+			continue
+		}
+		if _, ok := seen[drvID]; ok {
+			continue
+		}
+		seen[drvID] = struct{}{}
+		name := ""
+		if d.Name != nil {
+			name = strings.TrimSpace(*d.Name)
+		}
+		if name == "" {
+			name = d.Phone
+		}
+		row := gin.H{
+			"role":      "driver",
+			"id":        drvID,
+			"phone":     d.Phone,
+			"name":      name,
+			"has_photo": d.HasPhoto,
+		}
+		if d.HasPhoto {
+			row["photo_url"] = "/v1/chat/users/" + drvID.String() + "/photo"
+		}
+		items = append(items, row)
+		if len(items) >= limit {
+			break
+		}
+	}
+	for _, d := range dispList {
+		if len(items) >= limit {
+			break
+		}
+		dispID, err := uuid.Parse(d.ID)
+		if err != nil {
+			continue
+		}
+		if dispID == userID {
+			continue
+		}
+		if _, ok := seen[dispID]; ok {
+			continue
+		}
+		seen[dispID] = struct{}{}
+		name := ""
+		if d.Name != nil {
+			name = strings.TrimSpace(*d.Name)
+		}
+		if name == "" {
+			name = d.Phone
+		}
+		row := gin.H{
+			"role":      "dispatcher",
+			"id":        dispID,
+			"phone":     d.Phone,
+			"name":      name,
+			"has_photo": d.HasPhoto,
+		}
+		if d.HasPhoto {
+			row["photo_url"] = "/v1/chat/users/" + dispID.String() + "/photo"
+		}
+		items = append(items, row)
+	}
+	resp.OKLang(c, "ok", gin.H{"items": items})
+}
+
+// MarkConversationRead marks all messages in the conversation as read for the current user.
+// POST /v1/chat/conversations/:id/read
+func (h *ChatHandler) MarkConversationRead(c *gin.Context) {
+	userID, ok := h.getUserID(c)
+	if !ok {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_conversation_id")
+		return
+	}
+	if err := h.repo.MarkConversationRead(c.Request.Context(), convID, userID); err != nil {
+		if errors.Is(err, chat.ErrNotFound) {
+			resp.ErrorLang(c, http.StatusNotFound, "conversation_not_found")
+			return
+		}
+		h.logger.Error("chat mark read", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_mark_read")
+		return
+	}
+	resp.OKLang(c, "ok", gin.H{"read": true})
+}
+
+// GetPeerPhoto serves peer avatar for chat UI (authenticated driver/dispatcher).
+// GET /v1/chat/users/:id/photo
+func (h *ChatHandler) GetPeerPhoto(c *gin.Context) {
+	_, ok := h.currentUserIDForChat(c)
+	if !ok {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	if h.drivers == nil || h.dispatchers == nil {
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	peerID, err := uuid.Parse(c.Param("id"))
+	if err != nil || peerID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_user_id")
+		return
+	}
+	ctx := c.Request.Context()
+	data, ct, err := h.drivers.GetPhoto(ctx, peerID)
+	if err == nil && len(data) > 0 {
+		c.Data(http.StatusOK, ct, data)
+		return
+	}
+	if err != nil && !errors.Is(err, drivers.ErrNotFound) {
+		h.logger.Error("chat peer photo driver", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	data, ct, err = h.dispatchers.GetPhoto(ctx, peerID)
+	if err == nil && len(data) > 0 {
+		c.Data(http.StatusOK, ct, data)
+		return
+	}
+	if err != nil && !errors.Is(err, dispatchers.ErrNotFound) {
+		h.logger.Error("chat peer photo dispatcher", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
 }
 
 // GetOrCreateConversation gets or creates a conversation with peer_id.
@@ -152,6 +386,12 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 		h.logger.Error("chat list messages", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_messages")
 		return
+	}
+	mark := strings.TrimSpace(c.Query("mark_read"))
+	if mark == "1" || strings.EqualFold(mark, "true") {
+		if err := h.repo.MarkConversationRead(c.Request.Context(), convID, userID); err != nil && !errors.Is(err, chat.ErrNotFound) {
+			h.logger.Error("chat mark read on list", zap.Error(err))
+		}
 	}
 	resp.OKLang(c, "ok", gin.H{"messages": list})
 }
@@ -245,11 +485,11 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 
 	fh, err := c.FormFile("file")
 	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		resp.ErrorLang(c, http.StatusBadRequest, "chat_media_file_required")
 		return
 	}
 	if fh.Size <= 0 {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		resp.ErrorLang(c, http.StatusBadRequest, "chat_media_file_required")
 		return
 	}
 
@@ -283,13 +523,9 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 	}
 	_ = dst.Close()
 
-	outExt := map[string]string{
-		"PHOTO":      ".jpg",
-		"VOICE":      ".ogg",
-		"VIDEO":      ".mp4",
-		"VIDEO_NOTE": ".mp4",
-	}[msgType]
-	outPath := filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
+	contentType := fh.Header.Get("Content-Type")
+	var outExt string
+	outPath := ""
 	thumbPath := ""
 
 	var durationMs *int
@@ -298,20 +534,43 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 
 	switch msgType {
 	case "VOICE":
-		if err := ffmpegVoiceToOggOpus(inPath, outPath); err != nil {
-			h.logger.Error("ffmpeg voice", zap.Error(err))
-			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
-			return
+		if chatMediaLikelyMP3(fh.Filename, contentType) {
+			outExt = ".mp3"
+			outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
+			if err := chatCopyFile(inPath, outPath); err != nil {
+				h.logger.Error("chat voice mp3 copy", zap.Error(err))
+				resp.ErrorLang(c, http.StatusBadRequest, "chat_media_processing_failed")
+				return
+			}
+			mime = "audio/mpeg"
+		} else {
+			outExt = ".ogg"
+			outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
+			if err := ffmpegVoiceToOggOpus(inPath, outPath); err != nil {
+				h.logger.Error("ffmpeg voice", zap.Error(err))
+				resp.ErrorLang(c, http.StatusBadRequest, "chat_media_processing_failed")
+				return
+			}
+			mime = "audio/ogg"
 		}
-		mime = "audio/ogg"
 		if ms, _ := ffprobeDurationMs(outPath); ms != nil {
 			durationMs = ms
 		}
 	case "VIDEO":
-		if err := ffmpegVideoToMp4(inPath, outPath, false); err != nil {
-			h.logger.Error("ffmpeg video", zap.Error(err))
-			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
-			return
+		outExt = ".mp4"
+		outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
+		if chatMediaLikelyMP4(fh.Filename, contentType) {
+			if err := chatCopyFile(inPath, outPath); err != nil {
+				h.logger.Error("chat video mp4 copy", zap.Error(err))
+				resp.ErrorLang(c, http.StatusBadRequest, "chat_media_processing_failed")
+				return
+			}
+		} else if err := ffmpegVideoRemuxCopy(inPath, outPath); err != nil {
+			if err := ffmpegVideoToMp4(inPath, outPath, false); err != nil {
+				h.logger.Error("ffmpeg video", zap.Error(err))
+				resp.ErrorLang(c, http.StatusBadRequest, "chat_media_processing_failed")
+				return
+			}
 		}
 		mime = "video/mp4"
 		if ms, _ := ffprobeDurationMs(outPath); ms != nil {
@@ -320,9 +579,11 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		thumbPath = filepath.Join(baseDir, "thumb_"+uuid.New().String()+".jpg")
 		_ = ffmpegThumbnail(outPath, thumbPath)
 	case "VIDEO_NOTE":
+		outExt = ".mp4"
+		outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
 		if err := ffmpegVideoToMp4(inPath, outPath, true); err != nil {
 			h.logger.Error("ffmpeg video_note", zap.Error(err))
-			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			resp.ErrorLang(c, http.StatusBadRequest, "chat_media_processing_failed")
 			return
 		}
 		mime = "video/mp4"
@@ -332,12 +593,28 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		thumbPath = filepath.Join(baseDir, "thumb_"+uuid.New().String()+".jpg")
 		_ = ffmpegThumbnail(outPath, thumbPath)
 	case "PHOTO":
+		outExt = ".jpg"
+		outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
 		if err := ffmpegImageToJpeg(inPath, outPath); err != nil {
-			h.logger.Error("ffmpeg photo", zap.Error(err))
-			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
-			return
+			if chatMediaLikelyRasterImage(fh.Filename, contentType) {
+				if err := chatCopyFile(inPath, outPath); err != nil {
+					h.logger.Error("chat photo copy fallback", zap.Error(err))
+					resp.ErrorLang(c, http.StatusBadRequest, "chat_media_processing_failed")
+					return
+				}
+				if strings.ToLower(filepath.Ext(fh.Filename)) == ".png" || strings.Contains(strings.ToLower(contentType), "png") {
+					mime = "image/png"
+				} else {
+					mime = "image/jpeg"
+				}
+			} else {
+				h.logger.Error("ffmpeg photo", zap.Error(err))
+				resp.ErrorLang(c, http.StatusBadRequest, "chat_media_processing_failed")
+				return
+			}
+		} else {
+			mime = "image/jpeg"
 		}
-		mime = "image/jpeg"
 	}
 
 	stat, err := os.Stat(outPath)
@@ -493,6 +770,54 @@ func (h *ChatHandler) GetFile(c *gin.Context) {
 
 	// Fallback: serve from Go (slower than Nginx for large video).
 	c.File(path)
+}
+
+func chatCopyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func chatMediaLikelyMP3(filename, contentType string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	ct := strings.ToLower(contentType)
+	return ext == ".mp3" || strings.Contains(ct, "audio/mpeg") || strings.Contains(ct, "mp3")
+}
+
+func chatMediaLikelyMP4(filename, contentType string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	ct := strings.ToLower(contentType)
+	return ext == ".mp4" || ext == ".m4v" || strings.Contains(ct, "video/mp4")
+}
+
+func chatMediaLikelyRasterImage(filename, contentType string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	ct := strings.ToLower(contentType)
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".heic", ".heif":
+		return true
+	default:
+		return strings.Contains(ct, "image/jpeg") || strings.Contains(ct, "image/png") ||
+			strings.Contains(ct, "image/webp") || strings.Contains(ct, "image/gif")
+	}
+}
+
+func ffmpegVideoRemuxCopy(inPath, outPath string) error {
+	cmd := exec.Command("ffmpeg", "-y", "-i", inPath, "-c", "copy", "-movflags", "+faststart", outPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ffmpeg remux: %w: %s", err, string(out))
+	}
+	return nil
 }
 
 func ffmpegVoiceToOggOpus(inPath, outPath string) error {
