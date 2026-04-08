@@ -898,6 +898,13 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Red nedeni zorunludur",
 		"zh": "必须填写拒绝原因",
 	},
+	"rejection_reason_too_short": {
+		"en": "Rejection reason must contain at least one word of 3 letters",
+		"ru": "Причина отказа должна содержать минимум одно слово из 3 букв",
+		"uz": "Rad etish sababi kamida 3 harfli bitta so'z bo'lishi kerak",
+		"tr": "Red nedeni en az 3 harfli bir kelime içermelidir",
+		"zh": "拒绝原因至少应包含一个3个字母的单词",
+	},
 	"offer_not_found": {
 		"en": "Offer not found",
 		"ru": "Оффер не найден",
@@ -1016,6 +1023,27 @@ var apiMessages = map[string]map[string]string{
 		"uz": "Yuk bo'yicha takliflarni yuklashda xato",
 		"tr": "Yük teklifleri listelenemedi",
 		"zh": "无法加载货运报价列表",
+	},
+	"sent_offers_listed": {
+		"en": "Sent offers list",
+		"ru": "Список отправленных офферов",
+		"uz": "Yuborilgan takliflar ro'yxati",
+		"tr": "Gönderilen teklifler listesi",
+		"zh": "已发送报价列表",
+	},
+	"failed_to_list_sent_offers": {
+		"en": "Failed to list sent offers",
+		"ru": "Не удалось загрузить отправленные офферы",
+		"uz": "Yuborilgan takliflarni yuklab bo'lmadi",
+		"tr": "Gönderilen teklifler listelenemedi",
+		"zh": "无法加载已发送报价",
+	},
+	"dispatcher_offer_already_exists": {
+		"en": "Offer for this cargo and driver was already sent",
+		"ru": "Оффер по этому грузу этому водителю уже отправлен",
+		"uz": "Bu yuk va haydovchi uchun taklif allaqachon yuborilgan",
+		"tr": "Bu yük ve sürücü için teklif zaten gönderildi",
+		"zh": "该货物给该司机的报价已发送",
 	},
 	"invalid_cargo_offer_bucket": {
 		"en": "Invalid bucket for cargo offers",

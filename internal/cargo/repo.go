@@ -437,6 +437,7 @@ var ErrOfferNotFoundOrNotPending = errors.New("cargo: offer not found or not pen
 var ErrCargoNotFound = errors.New("cargo: cargo not found")
 var ErrCargoNotSearching = errors.New("cargo: cargo not searching")
 var ErrCargoSlotsFull = errors.New("cargo: cargo has no vehicles_left")
+var ErrDispatcherOfferAlreadyExists = errors.New("cargo: dispatcher offer already exists for this cargo and driver")
 var ErrDriverBusy = errors.New("cargo: driver already has active cargo")
 
 // buildCargoListWhereAndOrder строит WHERE (без префикса), аргументы и ORDER BY для списка грузов.
@@ -1138,12 +1139,138 @@ WHERE id = $1 AND deleted_at IS NULL`, cargoID).Scan(&status, &vehiclesLeft); er
 	if vehiclesLeft <= 0 {
 		return uuid.Nil, ErrCargoSlotsFull
 	}
+	if proposedBy == OfferProposedByDispatcher {
+		var alreadyExists bool
+		if err := r.pg.QueryRow(ctx, `
+SELECT EXISTS(
+  SELECT 1
+  FROM offers
+  WHERE cargo_id = $1 AND carrier_id = $2 AND COALESCE(proposed_by, 'DRIVER') = 'DISPATCHER'
+)`, cargoID, carrierID).Scan(&alreadyExists); err != nil {
+			return uuid.Nil, err
+		}
+		if alreadyExists {
+			return uuid.Nil, ErrDispatcherOfferAlreadyExists
+		}
+	}
 	var id uuid.UUID
 	err := r.pg.QueryRow(ctx, `
 INSERT INTO offers (cargo_id, carrier_id, price, currency, comment, status, proposed_by, created_at)
 VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, now()) RETURNING id`,
 		cargoID, carrierID, price, currency, nullStr(comment), proposedBy).Scan(&id)
 	return id, err
+}
+
+func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status string) (int, error) {
+	where := "o.proposed_by = 'DISPATCHER' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+	args := []any{dispatcherID}
+	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
+		where += " AND o.status = $2"
+		args = append(args, s)
+	}
+	var total int
+	err := r.pg.QueryRow(ctx, `SELECT COUNT(*) FROM offers o INNER JOIN cargo c ON c.id = o.cargo_id WHERE `+where, args...).Scan(&total)
+	return total, err
+}
+
+func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status string, limit, offset int) ([]DispatcherSentOffer, error) {
+	if limit < 1 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	where := "o.proposed_by = 'DISPATCHER' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+	args := []any{dispatcherID}
+	argN := 2
+	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
+		where += " AND o.status = $" + strconv.Itoa(argN)
+		args = append(args, s)
+		argN++
+	}
+	q := `
+SELECT
+  o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DISPATCHER'), o.status, COALESCE(o.rejection_reason, ''), o.created_at,
+  c.status, c.name, c.vehicles_amount, COALESCE(c.vehicles_left, 0),
+  (
+    SELECT rp.city_code FROM route_points rp
+    WHERE rp.cargo_id = c.id AND rp.is_main_load = true
+    ORDER BY rp.point_order LIMIT 1
+  ) AS from_city_code,
+  (
+    SELECT rp.city_code FROM route_points rp
+    WHERE rp.cargo_id = c.id AND rp.is_main_unload = true
+    ORDER BY rp.point_order LIMIT 1
+  ) AS to_city_code,
+  p.total_amount, p.total_currency,
+  t.id, t.status
+FROM offers o
+INNER JOIN cargo c ON c.id = o.cargo_id
+LEFT JOIN payments p ON p.cargo_id = c.id
+LEFT JOIN trips t ON t.offer_id = o.id
+WHERE ` + where + `
+ORDER BY o.created_at DESC
+LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
+	args = append(args, limit, offset)
+	rows, err := r.pg.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []DispatcherSentOffer
+	for rows.Next() {
+		var row DispatcherSentOffer
+		var rejReason string
+		var cargoName sql.NullString
+		var fromCity sql.NullString
+		var toCity sql.NullString
+		var curPrice sql.NullFloat64
+		var curCurrency sql.NullString
+		var tripID *uuid.UUID
+		var tripStatus sql.NullString
+		if err := rows.Scan(
+			&row.ID, &row.CargoID, &row.CarrierID, &row.Price, &row.Currency, &row.Comment, &row.ProposedBy, &row.Status, &rejReason, &row.CreatedAt,
+			&row.CargoStatus, &cargoName, &row.CargoVehiclesAmount, &row.CargoVehiclesLeft,
+			&fromCity, &toCity,
+			&curPrice, &curCurrency,
+			&tripID, &tripStatus,
+		); err != nil {
+			return nil, err
+		}
+		if rejReason != "" {
+			row.RejectionReason = &rejReason
+		}
+		if cargoName.Valid {
+			v := cargoName.String
+			row.CargoName = &v
+		}
+		if fromCity.Valid {
+			v := fromCity.String
+			row.CargoFromCityCode = &v
+		}
+		if toCity.Valid {
+			v := toCity.String
+			row.CargoToCityCode = &v
+		}
+		if curPrice.Valid {
+			v := curPrice.Float64
+			row.CargoCurrentPrice = &v
+		}
+		if curCurrency.Valid {
+			v := curCurrency.String
+			row.CargoCurrentCurrency = &v
+		}
+		row.TripID = tripID
+		if tripStatus.Valid {
+			v := tripStatus.String
+			row.TripStatus = &v
+		}
+		list = append(list, row)
+	}
+	return list, rows.Err()
 }
 
 func nullStr(s string) *string {

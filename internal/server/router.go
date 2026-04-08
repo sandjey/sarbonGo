@@ -403,6 +403,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.GET("/trips/:id/state", tripsH.TripStateDispatcher)
 	dispAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
+	dispAuthed.GET("/offers/sent", cargoH.ListSentOffersForDispatcher)
 	dispAuthed.GET("/cargo/mine", cargoH.ListMyCargoForDispatcher)
 	dispAuthed.GET("/cargo/all", cargoH.ListAllCargoForDispatcher)
 	dispAuthed.GET("/cargo/:id/negotiation", cargoH.ListCargoNegotiation)

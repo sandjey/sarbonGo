@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -998,6 +999,10 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 			return
 		}
+		if err == cargo.ErrDispatcherOfferAlreadyExists {
+			resp.ErrorLang(c, http.StatusConflict, "dispatcher_offer_already_exists")
+			return
+		}
 		if err == cargo.ErrCargoSlotsFull {
 			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{
 				"cargo_id":       id.String(),
@@ -1016,6 +1021,77 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 		return
 	}
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"id": offerID.String()})
+}
+
+// ListSentOffersForDispatcher GET /v1/dispatchers/offers/sent
+func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	page := getIntQuery(c, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	limit := getIntQuery(c, "limit", 30)
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+	status := strings.ToUpper(strings.TrimSpace(c.Query("status")))
+
+	total, err := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status)
+	if err != nil {
+		h.logger.Error("dispatcher sent offers count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
+		return
+	}
+	rows, err := h.repo.ListDispatcherSentOffers(c.Request.Context(), dispatcherID, status, limit, offset)
+	if err != nil {
+		h.logger.Error("dispatcher sent offers list", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
+		return
+	}
+	items := make([]gin.H, 0, len(rows))
+	for _, row := range rows {
+		item := gin.H{
+			"cargo_id": row.CargoID.String(),
+			"cargo": gin.H{
+				"id":                     row.CargoID.String(),
+				"name":                   row.CargoName,
+				"status":                 row.CargoStatus,
+				"from_city_code":         row.CargoFromCityCode,
+				"to_city_code":           row.CargoToCityCode,
+				"vehicles_amount":        row.CargoVehiclesAmount,
+				"vehicles_left":          row.CargoVehiclesLeft,
+				"current_price":          row.CargoCurrentPrice,
+				"current_price_currency": row.CargoCurrentCurrency,
+			},
+			"offer": gin.H{
+				"id":               row.ID.String(),
+				"proposed_by":      row.ProposedBy,
+				"price":            row.Price,
+				"invitation_price": row.Price,
+				"currency":         row.Currency,
+				"comment":          row.Comment,
+				"created_at":       row.CreatedAt,
+				"rejection_reason": row.RejectionReason,
+				"status":           row.Status,
+				"source_role":      "CARGO_MANAGER",
+				"source_id":        dispatcherID.String(),
+			},
+		}
+		if row.TripID != nil {
+			item["trip"] = gin.H{"id": row.TripID.String(), "status": row.TripStatus}
+		} else {
+			item["trip"] = nil
+		}
+		items = append(items, item)
+	}
+	resp.OKLang(c, "sent_offers_listed", gin.H{
+		"items":  items,
+		"total":  total,
+		"page":   page,
+		"limit":  limit,
+		"status": status,
+	})
 }
 
 // DriverCreateOffer POST /v1/driver/cargo/:id/offers — водитель предлагает свою цену (proposed_by=DRIVER).
@@ -1340,6 +1416,16 @@ type RejectOfferReq struct {
 	Reason string `json:"reason" binding:"required"`
 }
 
+var reasonMinWordRe = regexp.MustCompile(`\pL{3,}`)
+
+func isValidRejectReason(s string) bool {
+	trimmed := strings.TrimSpace(s)
+	if len(trimmed) < 3 {
+		return false
+	}
+	return reasonMinWordRe.MatchString(trimmed)
+}
+
 // RejectOfferDispatcher rejects an offer (cargo manager / company dispatcher). Reason required.
 func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
@@ -1377,6 +1463,10 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
 		return
 	}
+	if !isValidRejectReason(req.Reason) {
+		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_too_short")
+		return
+	}
 	if err := h.repo.RejectOffer(c.Request.Context(), offerID, req.Reason); err != nil {
 		if errors.Is(err, cargo.ErrRejectionReasonRequired) {
 			resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
@@ -1408,6 +1498,10 @@ func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 	var req RejectOfferReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
+		return
+	}
+	if !isValidRejectReason(req.Reason) {
+		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_too_short")
 		return
 	}
 	if err := h.repo.RejectOffer(c.Request.Context(), offerID, req.Reason); err != nil {

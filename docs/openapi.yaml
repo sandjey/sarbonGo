@@ -69,12 +69,10 @@ tags:
     description: "Профиль диспетчера: просмотр, изменение, фото, пароль, смена телефона."
   - name: "Cargo Manager / Cargo CRUD"
     description: "Создание, получение, обновление, удаление и статусы грузов, включая фото груза."
-  - name: "Cargo Manager / Offers and Negotiation"
-    description: "Офферы по грузам, принятие/отклонение, переговоры и связанные ценовые договоренности."
-  - name: "Cargo Manager / Trips"
-    description: "Рейсы по грузам Cargo Manager: назначение, подтверждения, отмена, состояние, управление водителями в грузе."
-  - name: "Cargo Manager / Discovery and Export"
-    description: "Каталог активных грузов, рекомендации водителям, избранное и экспорт грузов."
+  - name: "Cargo Manager / View Cargo"
+    description: "Просмотр всех грузов Cargo Manager."
+  - name: "Cargo Manager / Offers"
+    description: "Офферы Cargo Manager: отправить оффер и посмотреть мои офферы."
   - name: "Driver Manager"
     description: |
       Роль Driver Manager: добавление/ведение водителей, поиск грузов для своих водителей, приглашения и рекомендации.
@@ -93,6 +91,10 @@ tags:
     description: |
       **Рейсы водителя**
       GET /v1/driver/trips — список рейсов. POST /v1/driver/trips/:id/confirm (или confirm-transition) — шаг двустороннего подтверждения. POST /v1/driver/trips/:id/reject — отклонить назначение. POST /v1/driver/trips/:id/cancel — отменить рейс. GET /v1/driver/trips/:id/state — статус рейса, ожидание подтверждений, кратко по грузу. Требуется X-User-Token (driver).
+  - name: Drivers / Cargo Market
+    description: "Каталог грузов для водителя: active/nearby/matching, избранные грузы."
+  - name: Drivers / Offers
+    description: "Офферы водителя: отправить оффер, посмотреть мои офферы, принять/отклонить приглашение."
   - name: Drivers / Driver invitations
     description: |
       **Приглашения для водителя: получить список, принять или отказать.**
@@ -1292,7 +1294,7 @@ paths:
           description: "Переход недопустим (например delivered → searching)"
   /api/cargo/{id}/offers:
     get:
-      tags: ["Cargo Manager / Offers and Negotiation", "Drivers / Trips"]
+      tags: ["Cargo Manager / Offers"]
       summary: "7. Список офферов по грузу"
       description: |
         **Кто вызывает:** Диспетчер, компания, админ (перед принятием оффера). Водитель может смотреть свои офферы через список грузов или отдельный экран.
@@ -1321,7 +1323,7 @@ paths:
                         properties:
                           items: { type: array, items: { $ref: "#/components/schemas/Offer" } }
     post:
-      tags: ["Cargo Manager / Offers and Negotiation", "Drivers / Trips"]
+      tags: ["Cargo Manager / Offers"]
       summary: "8. Создать оффер (водитель или диспетчер)"
       description: |
         **Назначение:** Предложить **цену** по грузу (переговоры). В теле: carrier_id (водитель-исполнитель), price, currency, comment.
@@ -1358,9 +1360,11 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
+        "409":
+          description: "dispatcher_offer_already_exists / cargo_slots_full"
   /api/offers/{id}/accept:
     post:
-      tags: ["Cargo Manager / Offers and Negotiation", "Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "9. Принять оффер (согласовать цену)"
       description: |
         **Обязательно:** заголовок **X-User-Token** (JWT).
@@ -3461,7 +3465,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/assign-driver:
     patch:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Назначить водителя на рейс"
       description: "Тело: driver_id (UUID). Рейс должен быть в статусе IN_PROGRESS и без driver_id. После назначения водитель подтверждает/ведёт рейс по статусам IN_PROGRESS → IN_TRANSIT → DELIVERED → COMPLETED."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -3487,7 +3491,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/confirm-transition:
     post:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Подтвердить следующий статус рейса (диспетчер)"
       description: |
         Двустороннее подтверждение: диспетчер и водитель должны вызвать этот эндпоинт и парный вызов водителя для одного и того же перехода (next_status).
@@ -3508,7 +3512,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/cancel:
     post:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Отменить рейс (диспетчер)"
       description: |
         Отмена без второй стороны: рейс архивируется и удаляется из trips; груз остаётся для новой попытки; оффер возвращается в PENDING.
@@ -3530,7 +3534,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/state:
     get:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Состояние рейса и подтверждений (диспетчер)"
       description: |
         Рейс, next_status, pending_confirm_to, метки подтверждений, кратко cargo (id, status).
@@ -3551,7 +3555,7 @@ paths:
 
   /v1/dispatchers/offers/{id}/accept:
     post:
-      tags: ["Cargo Manager / Offers and Negotiation"]
+      tags: ["Cargo Manager / Offers"]
       summary: "Принять оффер водителя (его цену)"
       description: |
         Для офферов с **proposed_by=DRIVER**. Подтверждаете предложенную водителем цену; создаётся рейс с договорной ценой на рейсе; **payments** груза не меняются. Эквивалентно `POST /api/offers/{id}/accept` с JWT диспетчера-владельца груза.
@@ -3567,7 +3571,7 @@ paths:
 
   /v1/dispatchers/offers/{id}/reject:
     post:
-      tags: ["Cargo Manager / Offers and Negotiation"]
+      tags: ["Cargo Manager / Offers"]
       summary: "Отклонить оффер водителя (диспетчер)"
       description: |
         Отклоняет оффер с **proposed_by=DRIVER** по своему грузу (включая груз компании). **reason обязателен** (текст причины отказа).
@@ -3586,15 +3590,42 @@ paths:
               type: object
               required: [reason]
               properties:
-                reason: { type: string, minLength: 1, description: "Причина отказа (обязательно)" }
+                reason: { type: string, minLength: 3, description: "Причина отказа: минимум 1 слово и минимум 3 буквы" }
       responses:
         "200": { description: "data.status = rejected" }
+        "400": { description: rejection_reason_required / rejection_reason_too_short }
         "403": { description: not your cargo }
         "404": { description: offer not found }
 
+  /v1/dispatchers/offers/sent:
+    get:
+      tags: ["Cargo Manager / Offers"]
+      summary: "Все отправленные приглашения (офферы) Cargo Manager"
+      description: |
+        Список всех офферов, отправленных текущим Cargo Manager водителям (`proposed_by=DISPATCHER`).
+        Структура элемента: блоки `cargo`, `offer`, `trip` (если уже создан рейс).
+        Поддерживает фильтр `status` (PENDING, ACCEPTED, REJECTED), пагинацию.
+        Ответы на 5 языках (X-Language: ru, uz, en, tr, zh).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: "PENDING" }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.items, data.total, data.page, data.limit" }
+        "401": { description: unauthorized }
+        "500": { description: failed_to_list_sent_offers }
+
   /v1/dispatchers/cargo/mine:
     get:
-      tags: ["Cargo Manager / Cargo CRUD"]
+      tags: ["Cargo Manager / View Cargo"]
       summary: "Мои грузы (только созданные мной) — фильтры/сортировка/пагинация + от/до город"
       description: |
         Возвращает **только грузы**, созданные текущим Cargo Manager (created_by_type=DISPATCHER, created_by_id=me).
@@ -3654,7 +3685,7 @@ paths:
 
   /v1/dispatchers/cargo/all:
     get:
-      tags: ["Cargo Manager / Discovery and Export"]
+      tags: ["Cargo Manager / View Cargo"]
       summary: "Все грузы (каталог) — фильтры/сортировка/пагинация + от/до город"
       description: |
         Каталог **всех грузов** в системе для Cargo Manager.
@@ -3712,7 +3743,7 @@ paths:
 
   /v1/dispatchers/cargo/{id}/negotiation:
     get:
-      tags: ["Cargo Manager / Offers and Negotiation"]
+      tags: ["Legacy / Deprecated"]
       summary: "Переговоры по грузу (офферы + рейсы)"
       description: |
         Все офферы по грузу: **proposed_by**, **status**, **price**, **waits_accept_from** (DRIVER | DISPATCHER для PENDING).
@@ -3731,7 +3762,7 @@ paths:
 
   /v1/dispatchers/cargo/{id}/drivers:
     get:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Список водителей по грузу (multi-vehicle)"
       description: |
         Возвращает связи водитель↔груз из `cargo_drivers` для указанного груза.
@@ -3755,7 +3786,7 @@ paths:
 
   /v1/dispatchers/cargo/{id}/drivers/remove:
     post:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Убрать водителя с груза (освободить слот)"
       description: |
         Помечает связь водитель↔груз как CANCELLED. Если рейс уже был в LOADING или позже, возвращает один слот в vehicles_left.
@@ -3785,7 +3816,7 @@ paths:
 
   /v1/dispatchers/cargo/export.xlsx:
     get:
-      tags: ["Cargo Manager / Discovery and Export"]
+      tags: ["Legacy / Deprecated"]
       summary: "Экспорт моих грузов в Excel (.xlsx)"
       description: |
         **Назначение:** скачать все грузы, созданные текущим диспетчером (`created_by_type=DISPATCHER`, `created_by_id` = JWT), в одном файле Microsoft Excel.
@@ -3864,7 +3895,7 @@ paths:
 
   /v1/driver/favorite-cargo:
     get:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Cargo Market"]
       summary: "Избранные грузы"
       description: |
         Список грузов, добавленных текущим водителем в избранное.
@@ -3921,7 +3952,7 @@ paths:
                 tr: { summary: "Türkçe", value: { status: "error", code: 500, description: "Favoriler listelenemedi", data: null } }
                 zh: { summary: "中文", value: { status: "error", code: 500, description: "获取收藏失败", data: null } }
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Cargo Market"]
       summary: "Добавить груз в избранное"
       description: |
         Добавляет `cargo_id` в избранное текущего водителя.
@@ -3968,7 +3999,7 @@ paths:
 
   /v1/driver/favorite-cargo/{cargoId}:
     delete:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Cargo Market"]
       summary: "Удалить груз из избранного"
       description: |
         Удаляет `cargoId` из избранного текущего водителя.
@@ -3998,7 +4029,7 @@ paths:
 
   /v1/dispatchers/favorite-cargo:
     get:
-      tags: ["Cargo Manager / Discovery and Export", "Driver Manager"]
+      tags: ["Driver Manager"]
       summary: "Избранные грузы"
       description: |
         Список грузов, добавленных текущим фриланс-диспетчером в избранное.
@@ -4067,7 +4098,7 @@ paths:
                 zh: { summary: "中文", value: { status: "error", code: 500, description: "获取收藏失败", data: null } }
 
     post:
-      tags: ["Cargo Manager / Discovery and Export", "Driver Manager"]
+      tags: ["Driver Manager"]
       summary: "Добавить груз в избранное"
       description: |
         Добавляет `cargo_id` в избранное текущего фриланс-диспетчера.
@@ -4114,7 +4145,7 @@ paths:
 
   /v1/dispatchers/favorite-cargo/{cargoId}:
     delete:
-      tags: ["Cargo Manager / Discovery and Export", "Driver Manager / Favorites"]
+      tags: ["Driver Manager / Favorites"]
       summary: "Удалить груз из избранного"
       description: |
         Удаляет `cargoId` из избранного текущего фриланс-диспетчера.
@@ -4279,15 +4310,15 @@ paths:
 
   /v1/driver/cargo-offers:
     get:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Offers"]
       summary: "Мои офферы по грузам"
       description: |
         Список офферов (запросов на перевозку), которые отправил текущий водитель.
         Фильтр по вкладкам через `bucket`:
-        - `sent` = офферы со статусом PENDING
-        - `accepted` = офферы со статусом ACCEPTED, но груз ещё НЕ COMPLETED
-        - `completed` = офферы со статусом ACCEPTED и груз COMPLETED
-        - `rejected` = офферы со статусом REJECTED
+        - `sent` = отправленные/ожидающие ответа
+        - `accepted` = согласованные (рабочие)
+        - `completed` = завершённые
+        - `rejected` = отклонённые
         Структура элемента разделена на 2 блока: `cargo` и `offer`.
         В `cargo` дополнительно возвращаются: `from_city_code`, `to_city_code`, `vehicles_amount`, `vehicles_left`.
 
@@ -4312,6 +4343,7 @@ paths:
           in: query
           required: false
           schema: { type: string, enum: [sent, accepted, completed, rejected], default: sent }
+          description: "Логические вкладки UI (без показа внутренних статусов таблицы offers)"
         - name: page
           in: query
           schema: { type: integer, default: 1, minimum: 1 }
@@ -4330,7 +4362,7 @@ paths:
 
   /v1/driver/cargo/{id}/offers:
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Offers"]
       summary: "Оффер по грузу со своей ценой"
       description: |
         Водитель отправляет запрос на перевозку с **предложенной ценой** (`proposed_by=DRIVER`). Диспетчер подтверждает через `POST /v1/dispatchers/offers/{id}/accept` или `POST /api/offers/{id}/accept` (JWT диспетчера). После принятия цена в `payment` груза обновляется.
@@ -4360,7 +4392,7 @@ paths:
 
   /v1/driver/offers/{id}/accept:
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Offers"]
       summary: "Принять цену от диспетчера"
       description: |
         Для офферов с **proposed_by=DISPATCHER** (диспетчер указал цену вам). Тот же обработчик, что `POST /api/offers/{id}/accept` с JWT водителя.
@@ -4376,7 +4408,7 @@ paths:
 
   /v1/driver/offers/{id}/reject:
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Offers"]
       summary: "Отклонить приглашение диспетчера (своё предложение DISPATCHER)"
       description: |
         Для офферов **proposed_by=DISPATCHER** на вас (**carrier_id**). **reason обязателен.**
@@ -4395,15 +4427,15 @@ paths:
               type: object
               required: [reason]
               properties:
-                reason: { type: string, minLength: 1 }
+                reason: { type: string, minLength: 3, description: "Причина отказа: минимум 1 слово и минимум 3 буквы" }
       responses:
         "200": { description: status rejected }
-        "400": { description: rejection_reason_required }
+        "400": { description: rejection_reason_required / rejection_reason_too_short }
         "403": { description: not_your_offer }
 
   /v1/driver/cargo-invitation-stats:
     get:
-      tags: ["Drivers / Trips"]
+      tags: ["Drivers / Offers"]
       summary: "Счётчики приглашений/офферов по всем грузам (водитель)"
       description: |
         Сводка по офферам текущего водителя: сколько **получено** приглашений от диспетчеров (DISPATCHER) и сколько **отправлено** водителем (DRIVER), всего и в статусе PENDING.
@@ -4415,7 +4447,7 @@ paths:
 
   /v1/driver/active-cargo:
     get:
-      tags: ["Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Мой активный груз"
       description: |
         Возвращает текущий активный груз водителя (если водитель уже привязан к грузу как ACTIVE).
@@ -4437,7 +4469,7 @@ paths:
 
   /v1/driver/cargo/active:
     get:
-      tags: ["Drivers / Profile"]
+      tags: ["Drivers / Cargo Market"]
       summary: "Активные грузы в поиске (каталог / маркетплейс для водителя)"
       description: |
         **Назначение:** список **активных** грузов в базе, по которым можно откликаться (по умолчанию статусы поиска: `SEARCHING_ALL`; для водителя компании дополнительно видны грузы `SEARCHING_COMPANY` своей компании по тем же правилам, что и `GET /api/cargo`).
@@ -4516,7 +4548,7 @@ paths:
 
   /v1/driver/nearby-cargo:
     get:
-      tags: ["Drivers / Profile"]
+      tags: ["Drivers / Cargo Market"]
       summary: "Ближайшие грузы по координатам водителя"
       description: |
         Возвращает грузы, отсортированные по расстоянию от точки (lat, lng) водителя до **точки погрузки** груза (route_point с is_main_load=true).
@@ -4554,7 +4586,7 @@ paths:
 
   /v1/driver/matching-cargo:
     get:
-      tags: ["Drivers / Profile"]
+      tags: ["Drivers / Cargo Market"]
       summary: "Грузы, подходящие по типу транспорта водителя"
       description: |
         Возвращает грузы, у которых truck_type соответствует типу прицепа/полуприцепа водителя (trailer_plate_type из driver_trailers).
@@ -4583,7 +4615,7 @@ paths:
 
   /v1/driver/trips:
     get:
-      tags: ["Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Список моих рейсов"
       description: "Рейсы, назначенные текущему водителю. Требуется X-User-Token (driver). Опционально limit."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -4596,7 +4628,7 @@ paths:
 
   /v1/driver/trips/{id}/confirm:
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Подтвердить шаг рейса (водитель, алиас confirm-transition)"
       description: |
         Двустороннее подтверждение: один шаг со стороны водителя; диспетчер должен вызвать POST /v1/dispatchers/trips/:id/confirm-transition для того же перехода.
@@ -4618,7 +4650,7 @@ paths:
 
   /v1/driver/trips/{id}/confirm-transition:
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Подтвердить следующий статус рейса (водитель)"
       description: |
         См. POST /v1/driver/trips/:id/confirm — та же логика двустороннего подтверждения.
@@ -4639,7 +4671,7 @@ paths:
 
   /v1/driver/trips/{id}/reject:
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Отклонить назначение на рейс"
       description: "Снимает водителя с рейса; диспетчер может назначить другого."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -4654,7 +4686,7 @@ paths:
 
   /v1/driver/trips/{id}/cancel:
     post:
-      tags: ["Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Отменить рейс (водитель)"
       description: |
         Отмена без согласия второй стороны: рейс архивируется; груз остаётся.
@@ -4676,7 +4708,7 @@ paths:
 
   /v1/driver/trips/{id}/state:
     get:
-      tags: ["Drivers / Trips"]
+      tags: ["Legacy / Deprecated"]
       summary: "Состояние рейса и подтверждений (водитель)"
       description: |
         См. GET /v1/dispatchers/trips/:id/state — те же поля для назначенного водителя.
@@ -4777,7 +4809,7 @@ paths:
 
   /v1/driver/dispatchers:
     get:
-      tags: ["Drivers / My dispatchers"]
+      tags: ["Legacy / Deprecated"]
       summary: "Список моих диспетчеров (водитель)"
       description: |
         **Водитель:** диспетчеры, с которыми связан: 1) фриланс-диспетчер (type=freelance, поле **role** — CARGO_MANAGER | DRIVER_MANAGER), если принял его приглашение; 2) диспетчеры компании (type=company, company_role), если водитель в компании. В ответе data.items: id, name, phone (полный номер), work_status, has_photo, type, role (для freelance), company_role (для company). Язык ответа по X-Language (en, ru, uz, tr, zh).
@@ -4814,7 +4846,7 @@ paths:
         "401": { description: driver not found }
   /v1/driver/dispatchers/{dispatcherId}:
     delete:
-      tags: ["Drivers / My dispatchers"]
+      tags: ["Legacy / Deprecated"]
       summary: "Отвязаться от фриланс-диспетчера (водитель)"
       description: |
         **Водитель:** отвязаться от диспетчера (прекратить сотрудничество). Разрешено только если текущий водитель привязан к этому диспетчеру (driver.freelancer_id = dispatcherId). После успеха freelancer_id = null. Для диспетчеров компании отвязка через этот метод недоступна. Ответы на 5 языках (X-Language).
@@ -4843,7 +4875,7 @@ paths:
 
   /v1/driver/dispatchers/catalog:
     get:
-      tags: ["Drivers / My dispatchers"]
+      tags: ["Legacy / Deprecated"]
       summary: "Каталог всех фриланс-диспетчеров (водитель)"
       description: |
         **Водитель:** вернуть список всех фриланс-диспетчеров с пагинацией и фильтрами.
@@ -4908,7 +4940,7 @@ paths:
 
   /v1/driver/dispatchers/hint:
     get:
-      tags: ["Drivers / My dispatchers"]
+      tags: ["Legacy / Deprecated"]
       summary: "Hint по номеру диспетчера (водитель)"
       description: |
         **Водитель:** быстрый поиск (typeahead) фриланс-диспетчеров по префиксу номера.
@@ -4961,7 +4993,7 @@ paths:
         "409": { description: already linked to this dispatcher }
   /v1/driver/dispatcher-invitations/{token}:
     delete:
-      tags: ["Drivers / Invite dispatcher"]
+      tags: ["Legacy / Deprecated"]
       summary: "Отменить приглашение диспетчеру (водитель)"
       description: "Водитель отменяет отправленное приглашение. Только своё приглашение."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]

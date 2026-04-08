@@ -202,6 +202,21 @@ type DriverCargoOffer struct {
 	TripStatus *string
 }
 
+// DispatcherSentOffer is one sent offer (proposed_by=DISPATCHER) with cargo/trip context.
+type DispatcherSentOffer struct {
+	Offer
+	CargoStatus          CargoStatus
+	CargoName            *string
+	CargoFromCityCode    *string
+	CargoToCityCode      *string
+	CargoVehiclesAmount  int
+	CargoVehiclesLeft    int
+	CargoCurrentPrice    *float64
+	CargoCurrentCurrency *string
+	TripID               *uuid.UUID
+	TripStatus           *string
+}
+
 // CargoPhoto is metadata for a cargo photo stored on disk.
 type CargoPhoto struct {
 	ID        uuid.UUID
