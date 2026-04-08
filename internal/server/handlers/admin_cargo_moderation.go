@@ -115,5 +115,5 @@ func (h *AdminCargoModerationHandler) Reject(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "cargo_not_pending_moderation")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"status": cargo.StatusRejected})
+	resp.OKLang(c, "ok", gin.H{"status": cargo.StatusCancelled})
 }

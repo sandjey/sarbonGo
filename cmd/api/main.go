@@ -4,29 +4,30 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/golang-migrate/migrate/v4"
-	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	pgxmigrate "github.com/golang-migrate/migrate/v4/database/pgx/v5"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/chat"
-	"sarbonNew/internal/config"
 	"sarbonNew/internal/calls"
+	"sarbonNew/internal/config"
 	"sarbonNew/internal/infra"
 	"sarbonNew/internal/logger"
 	"sarbonNew/internal/server"
+	"sarbonNew/migrations"
 )
 
 func main() {
@@ -58,10 +59,14 @@ func main() {
 		zap.Duration("otp_send_window", cfg.OTPSendWindow),
 	)
 
-	// Авто-миграции при старте API.
-	// Это заменяет ручной запуск `cmd/migrate` в dev/stage окружениях.
-	if err := runMigrationsUp(cfg.DatabaseURL); err != nil {
-		log.Fatal("migrations up failed", zap.Error(err))
+	// Авто-миграции при старте API (встроенные SQL из пакета migrations — работает из любой cwd).
+	// Отключить: SKIP_MIGRATIONS=1
+	if strings.TrimSpace(os.Getenv("SKIP_MIGRATIONS")) != "1" {
+		if err := runMigrationsUp(log, cfg.DatabaseURL); err != nil {
+			log.Fatal("migrations up failed", zap.Error(err))
+		}
+	} else {
+		log.Warn("SKIP_MIGRATIONS=1 — миграции пропущены")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -189,89 +194,59 @@ func startChatMediaGC(ctx context.Context, log *zap.Logger, deps *infra.Infra) {
 	}()
 }
 
-func runMigrationsUp(dbURL string) error {
+func runMigrationsUp(log *zap.Logger, dbURL string) error {
 	if strings.TrimSpace(dbURL) == "" {
 		return fmt.Errorf("DATABASE_URL is empty")
 	}
-	// golang-migrate pgx/v5 driver registers as "pgx5".
-	if strings.HasPrefix(dbURL, "postgres://") {
-		dbURL = "pgx5://" + strings.TrimPrefix(dbURL, "postgres://")
-	}
-	if strings.HasPrefix(dbURL, "pgx://") {
-		dbURL = "pgx5://" + strings.TrimPrefix(dbURL, "pgx://")
-	}
 
-	sourceURL, err := findMigrationsSourceURL()
+	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
-		return err
+		return fmt.Errorf("sql open for migrate: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if err := db.PingContext(context.Background()); err != nil {
+		return fmt.Errorf("database ping before migrate: %w", err)
 	}
 
-	m, err := migrate.New(sourceURL, dbURL)
+	src, err := iofs.New(migrations.FS, ".")
 	if err != nil {
-		return fmt.Errorf("migrate init error: %w", err)
+		return fmt.Errorf("migrate iofs source: %w", err)
 	}
-	defer func() {
-		_, _ = m.Close()
-	}()
 
-	if err := m.Up(); err != nil && err != migrate.ErrNoChange {
-		// Если миграция прервалась (Dirty database version N), сбрасываем на N-1 и повторяем Up
-		if strings.Contains(err.Error(), "Dirty database") {
-			prevVersion := parseDirtyVersion(err.Error())
+	dbDriver, err := pgxmigrate.WithInstance(db, &pgxmigrate.Config{})
+	if err != nil {
+		return fmt.Errorf("migrate pgx driver: %w", err)
+	}
+
+	m, err := migrate.NewWithInstance("iofs", src, "pgx5", dbDriver)
+	if err != nil {
+		return fmt.Errorf("migrate init: %w", err)
+	}
+	defer func() { _, _ = m.Close() }()
+
+	upErr := m.Up()
+	if upErr != nil && upErr != migrate.ErrNoChange {
+		if strings.Contains(upErr.Error(), "Dirty database") {
+			prevVersion := parseDirtyVersion(upErr.Error())
 			if forceErr := m.Force(prevVersion); forceErr != nil {
 				return fmt.Errorf("force version after dirty failed: %w", forceErr)
 			}
-			if retryErr := m.Up(); retryErr != nil && retryErr != migrate.ErrNoChange {
+			retryErr := m.Up()
+			if retryErr != nil && retryErr != migrate.ErrNoChange {
 				return retryErr
 			}
+			log.Info("migrations applied after dirty recovery")
 			return nil
 		}
-		return err
+		return upErr
+	}
+	if upErr == migrate.ErrNoChange {
+		log.Info("database migrations: no change")
+	} else {
+		log.Info("database migrations applied")
 	}
 	return nil
-}
-
-func findMigrationsSourceURL() (string, error) {
-	// 1) Ищем migrations от текущей рабочей директории (go run . из корня или из cmd/api)
-	wd, err := os.Getwd()
-	if err != nil {
-		return "", err
-	}
-	if u, err := findMigrationsInDir(wd); err == nil {
-		return u, nil
-	}
-	// 2) Fallback: ищем от директории main.go (чтобы работало при запуске из любой папки)
-	if _, file, _, ok := runtime.Caller(0); ok {
-		dir := filepath.Dir(file)
-		if u, err := findMigrationsInDir(dir); err == nil {
-			return u, nil
-		}
-	}
-	return "", fmt.Errorf("migrations directory not found (cwd: %s)", wd)
-}
-
-// findMigrationsInDir ищет папку migrations в dir или выше по дереву.
-func findMigrationsInDir(start string) (string, error) {
-	dir := start
-	for i := 0; i < 12; i++ {
-		migDir := filepath.Join(dir, "migrations")
-		if st, err := os.Stat(migDir); err == nil && st.IsDir() {
-			// Windows path compatibility for golang-migrate:
-			// file://C:\path\to\dir is parsed as host "C" with invalid port.
-			// Correct URI for this driver is typically file:C:/path/to/dir.
-			migDir = filepath.ToSlash(migDir)
-			if runtime.GOOS == "windows" {
-				return "file:" + migDir, nil
-			}
-			return "file://" + migDir, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return "", fmt.Errorf("not found from %s", start)
 }
 
 // parseDirtyVersion извлекает номер версии из сообщения "Dirty database version N" и возвращает N-1 для force.

@@ -75,8 +75,12 @@ ALTER TABLE cargo
   ADD COLUMN IF NOT EXISTS cargo_type_id UUID NULL,
   ADD COLUMN IF NOT EXISTS capacity_required DOUBLE PRECISION NULL,
   ADD COLUMN IF NOT EXISTS packaging VARCHAR(500) NULL,
+  ADD COLUMN IF NOT EXISTS packaging_amount INTEGER NULL,
   ADD COLUMN IF NOT EXISTS dimensions VARCHAR(500) NULL,
-  ADD COLUMN IF NOT EXISTS photo_urls TEXT[] NULL;
+  ADD COLUMN IF NOT EXISTS photo_urls TEXT[] NULL,
+  ADD COLUMN IF NOT EXISTS way_points JSONB NULL,
+  ADD COLUMN IF NOT EXISTS unloading_types TEXT[] NULL,
+  ADD COLUMN IF NOT EXISTS is_two_drivers_required BOOLEAN NOT NULL DEFAULT false;
 `)
 	if err != nil {
 		return err
@@ -168,10 +172,18 @@ CREATE TABLE IF NOT EXISTS payments (
   prepayment_type VARCHAR NULL,
   remaining_amount DOUBLE PRECISION NULL,
   remaining_currency VARCHAR NULL,
-  remaining_type VARCHAR NULL
+  remaining_type VARCHAR NULL,
+  payment_note VARCHAR(500) NULL,
+  payment_terms_note TEXT NULL
 );
 `)
 	if err != nil {
+		return err
+	}
+	if _, err := pg.Exec(ctx, `ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_note VARCHAR(500) NULL;`); err != nil {
+		return err
+	}
+	if _, err := pg.Exec(ctx, `ALTER TABLE payments ADD COLUMN IF NOT EXISTS payment_terms_note TEXT NULL;`); err != nil {
 		return err
 	}
 	_, err = pg.Exec(ctx, `
@@ -315,6 +327,32 @@ CREATE TABLE IF NOT EXISTS cargo_pending_photos (
 		return err
 	}
 	_, err = pg.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_cargo_pending_photos_created ON cargo_pending_photos (created_at DESC)`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pg.Exec(ctx, `
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'offers' AND column_name = 'proposed_by'
+  ) THEN
+    ALTER TABLE offers ADD COLUMN proposed_by VARCHAR(20) NOT NULL DEFAULT 'DRIVER';
+  END IF;
+END$$;
+`)
+	if err != nil {
+		return err
+	}
+	_, err = pg.Exec(ctx, `
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offers_proposed_by_check') THEN
+    ALTER TABLE offers ADD CONSTRAINT offers_proposed_by_check CHECK (proposed_by IN ('DRIVER', 'DISPATCHER'));
+  END IF;
+END$$;
+`)
 	if err != nil {
 		return err
 	}

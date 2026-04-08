@@ -211,7 +211,7 @@ func (h *CargoRecommendationsHandler) AcceptRecommendation(c *gin.Context) {
 		price = *pay.TotalAmount
 		currency = *pay.TotalCurrency
 	}
-	offerID, err := h.cargoRepo.CreateOffer(c.Request.Context(), cargoID, driverID, price, currency, "")
+	offerID, err := h.cargoRepo.CreateOffer(c.Request.Context(), cargoID, driverID, price, currency, "", cargo.OfferProposedByDriver)
 	if err != nil {
 		h.logger.Error("cargo recommend accept create offer", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
@@ -233,7 +233,7 @@ func (h *CargoRecommendationsHandler) AcceptRecommendation(c *gin.Context) {
 	}
 	_, _ = h.recRepo.Accept(c.Request.Context(), cargoID, driverID)
 	if h.tripsRepo != nil {
-		tripID, _ := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID)
+		tripID, _ := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, price, currency)
 		if tripID != uuid.Nil {
 			_ = h.tripsRepo.AssignDriver(c.Request.Context(), tripID, carrierID)
 			resp.SuccessLang(c, http.StatusOK, "accepted", gin.H{"cargo_id": cargoID.String(), "trip_id": tripID.String(), "driver_id": carrierID.String()})

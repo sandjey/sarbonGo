@@ -3,7 +3,7 @@ package trips
 import (
 	"context"
 	"errors"
-	"time"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,27 +15,21 @@ var ErrInvalidTransition = errors.New("invalid status transition")
 var ErrForbiddenRole = errors.New("trip: not allowed for this role")
 
 var allowedTransitions = map[string][]string{
-	StatusPendingDriver: {StatusAssigned, StatusCancelled},
-	StatusAssigned:      {StatusLoading, StatusCancelled},
-	StatusLoading:       {StatusEnRoute, StatusCancelled},
-	StatusEnRoute:       {StatusUnloading},
-	StatusUnloading:     {StatusCompleted},
-	StatusCompleted:     nil,
-	StatusCancelled:     nil,
+	StatusInProgress: {StatusInTransit, StatusCancelled},
+	StatusInTransit:  {StatusDelivered, StatusCancelled},
+	StatusDelivered:  {StatusCompleted, StatusCancelled},
+	StatusCompleted:  nil,
+	StatusCancelled:  nil,
 }
 
-// NextStatus is the next operational status after bilateral confirmation (no cancel).
+// NextStatus is the next operational status (single-step).
 func NextStatus(current string) string {
-	switch current {
-	case StatusPendingDriver:
-		return StatusAssigned
-	case StatusAssigned:
-		return StatusLoading
-	case StatusLoading:
-		return StatusEnRoute
-	case StatusEnRoute:
-		return StatusUnloading
-	case StatusUnloading:
+	switch strings.ToUpper(strings.TrimSpace(current)) {
+	case StatusInProgress:
+		return StatusInTransit
+	case StatusInTransit:
+		return StatusDelivered
+	case StatusDelivered:
 		return StatusCompleted
 	default:
 		return ""
@@ -54,18 +48,24 @@ func (r *Repo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 	return r.pg.Begin(ctx)
 }
 
-// Create creates trip with status pending_driver (after offer accepted).
-func (r *Repo) Create(ctx context.Context, cargoID, offerID uuid.UUID) (uuid.UUID, error) {
+// Create creates trip with status IN_PROGRESS (after offer accepted). agreedPrice/currency — договор с этим водителем.
+func (r *Repo) Create(ctx context.Context, cargoID, offerID uuid.UUID, agreedPrice float64, agreedCurrency string) (uuid.UUID, error) {
+	cur := strings.ToUpper(strings.TrimSpace(agreedCurrency))
+	if cur == "" {
+		cur = "UZS"
+	}
 	var id uuid.UUID
 	err := r.pg.QueryRow(ctx,
-		`INSERT INTO trips (cargo_id, offer_id, status) VALUES ($1, $2, $3) RETURNING id`,
-		cargoID, offerID, StatusPendingDriver).Scan(&id)
+		`INSERT INTO trips (cargo_id, offer_id, status, agreed_price, agreed_currency) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		cargoID, offerID, StatusInProgress, agreedPrice, cur).Scan(&id)
 	return id, err
 }
 
 func scanTrip(row pgx.Row) (*Trip, error) {
 	var t Trip
-	err := row.Scan(&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status, &t.CreatedAt, &t.UpdatedAt,
+	err := row.Scan(&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status,
+		&t.AgreedPrice, &t.AgreedCurrency,
+		&t.CreatedAt, &t.UpdatedAt,
 		&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt)
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func scanTrip(row pgx.Row) (*Trip, error) {
 	return &t, nil
 }
 
-const tripSelect = `SELECT id, cargo_id, offer_id, driver_id, status, created_at, updated_at,
+const tripSelect = `SELECT id, cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency, created_at, updated_at,
   pending_confirm_to, driver_confirmed_at, dispatcher_confirmed_at FROM trips `
 
 // GetByID returns trip by id.
@@ -121,7 +121,17 @@ func (r *Repo) GetByOfferID(ctx context.Context, offerID uuid.UUID) (*Trip, erro
 	return t, nil
 }
 
-// GetByCargoID returns trip for cargo (at most one active).
+// ListByCargoID returns all trips for a cargo (multiple vehicles / drivers).
+func (r *Repo) ListByCargoID(ctx context.Context, cargoID uuid.UUID) ([]Trip, error) {
+	rows, err := r.pg.Query(ctx, tripSelect+`WHERE cargo_id = $1 ORDER BY created_at ASC`, cargoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTripRows(rows)
+}
+
+// GetByCargoID returns the latest trip for cargo (legacy; prefer ListByCargoID).
 func (r *Repo) GetByCargoID(ctx context.Context, cargoID uuid.UUID) (*Trip, error) {
 	t, err := scanTrip(r.pg.QueryRow(ctx, tripSelect+`WHERE cargo_id = $1 ORDER BY created_at DESC LIMIT 1`, cargoID))
 	if err != nil {
@@ -142,13 +152,13 @@ func (r *Repo) HasActiveTripForCargo(ctx context.Context, cargoID uuid.UUID) (bo
 	return n > 0, err
 }
 
-// AssignDriver sets driver_id (dispatcher assigns driver). Trip must be pending_driver.
+// AssignDriver sets driver_id (dispatcher assigns driver). Trip must be in_progress without driver.
 func (r *Repo) AssignDriver(ctx context.Context, tripID, driverID uuid.UUID) error {
 	res, err := r.pg.Exec(ctx,
 		`UPDATE trips SET driver_id = $2,
 			pending_confirm_to = NULL, driver_confirmed_at = NULL, dispatcher_confirmed_at = NULL,
-			updated_at = now() WHERE id = $1 AND status = $3`,
-		tripID, driverID, StatusPendingDriver)
+			updated_at = now() WHERE id = $1 AND status = $3 AND driver_id IS NULL`,
+		tripID, driverID, StatusInProgress)
 	if err != nil {
 		return err
 	}
@@ -165,7 +175,7 @@ func (r *Repo) DriverReject(ctx context.Context, tripID, driverID uuid.UUID) err
 			pending_confirm_to = NULL, driver_confirmed_at = NULL, dispatcher_confirmed_at = NULL,
 			updated_at = now()
 		 WHERE id = $1 AND driver_id = $2 AND status = $3`,
-		tripID, driverID, StatusPendingDriver)
+		tripID, driverID, StatusInProgress)
 	if err != nil {
 		return err
 	}
@@ -175,8 +185,7 @@ func (r *Repo) DriverReject(ctx context.Context, tripID, driverID uuid.UUID) err
 	return nil
 }
 
-// ConfirmTransitionTx applies bilateral confirmation for the next status. Non-dispatcher callers must pass driverID (trip.driver_id).
-// When the transition reaches COMPLETED, status is updated in-tx; caller must run cargo ArchiveCompletedCargoTx in the same transaction.
+// ConfirmTransitionTx advances trip one step (unilateral: driver or dispatcher may call).
 func (r *Repo) ConfirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.UUID, driverID uuid.UUID, asDispatcher bool) (*Trip, error) {
 	return r.confirmTransitionTx(ctx, tx, tripID, driverID, asDispatcher)
 }
@@ -188,6 +197,9 @@ func (r *Repo) confirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.U
 			return nil, ErrNotFound
 		}
 		return nil, err
+	}
+	if t == nil {
+		return nil, ErrNotFound
 	}
 	if t.Status == StatusCompleted || t.Status == StatusCancelled {
 		return nil, ErrInvalidTransition
@@ -201,7 +213,7 @@ func (r *Repo) confirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.U
 	if next == "" {
 		return nil, ErrInvalidTransition
 	}
-	if t.Status == StatusPendingDriver && t.DriverID == nil {
+	if t.Status == StatusInProgress && t.DriverID == nil {
 		return nil, ErrInvalidTransition
 	}
 	allowed := allowedTransitions[t.Status]
@@ -214,51 +226,6 @@ func (r *Repo) confirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.U
 	}
 	if !ok {
 		return nil, ErrInvalidTransition
-	}
-
-	pendingTo := t.PendingConfirmTo
-	drvAt := t.DriverConfirmedAt
-	dispAt := t.DispatcherConfirmedAt
-
-	if pendingTo == nil || (pendingTo != nil && *pendingTo != next) {
-		pendingTo = &next
-		drvAt, dispAt = nil, nil
-		now := time.Now()
-		if asDispatcher {
-			dispAt = &now
-		} else {
-			drvAt = &now
-		}
-	} else {
-		if asDispatcher {
-			if dispAt != nil {
-				return r.GetByIDTx(ctx, tx, tripID)
-			}
-			now := time.Now()
-			dispAt = &now
-		} else {
-			if drvAt != nil {
-				return r.GetByIDTx(ctx, tx, tripID)
-			}
-			now := time.Now()
-			drvAt = &now
-		}
-	}
-
-	ready := drvAt != nil && dispAt != nil
-	if !ready {
-		_, err := tx.Exec(ctx, `
-			UPDATE trips SET
-			  pending_confirm_to = $2,
-			  driver_confirmed_at = $3,
-			  dispatcher_confirmed_at = $4,
-			  updated_at = now()
-			WHERE id = $1`,
-			tripID, pendingTo, drvAt, dispAt)
-		if err != nil {
-			return nil, err
-		}
-		return r.GetByIDTx(ctx, tx, tripID)
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -276,7 +243,7 @@ func (r *Repo) confirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.U
 	return r.GetByIDTx(ctx, tx, tripID)
 }
 
-// SetStatus updates trip status without bilateral checks (internal / legacy). Prefer ConfirmTransition.
+// SetStatus updates trip status without checks (internal / tests).
 func (r *Repo) SetStatus(ctx context.Context, tripID uuid.UUID, newStatus string) error {
 	t, err := r.GetByID(ctx, tripID)
 	if err != nil {
@@ -298,11 +265,11 @@ func (r *Repo) SetStatus(ctx context.Context, tripID uuid.UUID, newStatus string
 	return ErrInvalidTransition
 }
 
-// ArchiveTripAndDeleteTx inserts into archived_trips and deletes the trip row (caller handles cargo/offer/driver follow-up in the same transaction).
+// ArchiveTripAndDeleteTx inserts into archived_trips and deletes the trip row (cancellation).
 func (r *Repo) ArchiveTripAndDeleteTx(ctx context.Context, tx pgx.Tx, tripID uuid.UUID, cancelledByRole string) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO archived_trips (id, cargo_id, offer_id, driver_id, status, created_at, updated_at, archived_at, cancel_reason, cancelled_by_role)
-		SELECT id, cargo_id, offer_id, driver_id, status, created_at, updated_at, now(), 'CANCELLED', $2
+		INSERT INTO archived_trips (id, cargo_id, offer_id, driver_id, status, created_at, updated_at, archived_at, cancel_reason, cancelled_by_role, agreed_price, agreed_currency)
+		SELECT id, cargo_id, offer_id, driver_id, status, created_at, updated_at, now(), 'CANCELLED', $2, agreed_price, agreed_currency
 		FROM trips WHERE id = $1`,
 		tripID, cancelledByRole)
 	if err != nil {
@@ -352,7 +319,9 @@ func scanTripRows(rows pgx.Rows) ([]Trip, error) {
 	var list []Trip
 	for rows.Next() {
 		var t Trip
-		err := rows.Scan(&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status, &t.CreatedAt, &t.UpdatedAt,
+		err := rows.Scan(&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status,
+			&t.AgreedPrice, &t.AgreedCurrency,
+			&t.CreatedAt, &t.UpdatedAt,
 			&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt)
 		if err != nil {
 			return nil, err

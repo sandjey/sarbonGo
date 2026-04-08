@@ -1,4 +1,4 @@
-// Интеграционные тесты потока груз/рейс: vehicles_left при LOADING, лимит AcceptOffer, архивация COMPLETED.
+// Интеграционные тесты потока груз/рейс: vehicles_left при IN_TRANSIT, лимит AcceptOffer, завершение груза.
 // Запуск: задать TEST_DATABASE_URL или DATABASE_URL (как в companies/repo_test.go).
 package cargo
 
@@ -9,6 +9,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"sarbonNew/internal/infra"
 )
 
 func testIntegrationPool(t *testing.T) *pgxpool.Pool {
@@ -28,6 +30,14 @@ func testIntegrationPool(t *testing.T) *pgxpool.Pool {
 	if err := pool.Ping(ctx); err != nil {
 		pool.Close()
 		t.Fatalf("pool.Ping: %v", err)
+	}
+	if err := infra.EnsureCargoTables(ctx, pool); err != nil {
+		pool.Close()
+		t.Fatalf("EnsureCargoTables: %v", err)
+	}
+	if err := infra.EnsureTripAgreedPriceColumns(ctx, pool); err != nil {
+		pool.Close()
+		t.Fatalf("EnsureTripAgreedPriceColumns: %v", err)
 	}
 	return pool
 }
@@ -84,8 +94,8 @@ func archivedTripsTableExists(ctx context.Context, pool *pgxpool.Pool) bool {
 	return err == nil && n > 0
 }
 
-// TestOnTripEnteredLoadingTx_DecrementsVehiclesLeft проверяет: при первом LOADING vehicles_left−1 и статус IN_PROGRESS.
-func TestOnTripEnteredLoadingTx_DecrementsVehiclesLeft(t *testing.T) {
+// TestOnTripEnteredInTransitTx_DecrementsVehiclesLeft — при первом IN_TRANSIT vehicles_left−1; статус груза остаётся SEARCHING_*.
+func TestOnTripEnteredInTransitTx_DecrementsVehiclesLeft(t *testing.T) {
 	pool := testIntegrationPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -106,9 +116,9 @@ func TestOnTripEnteredLoadingTx_DecrementsVehiclesLeft(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := repo.OnTripEnteredLoadingTx(ctx, tx, cargoID); err != nil {
+	if err := repo.OnTripEnteredInTransitTx(ctx, tx, cargoID); err != nil {
 		_ = tx.Rollback(ctx)
-		t.Fatalf("OnTripEnteredLoadingTx: %v", err)
+		t.Fatalf("OnTripEnteredInTransitTx: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -121,8 +131,8 @@ func TestOnTripEnteredLoadingTx_DecrementsVehiclesLeft(t *testing.T) {
 	if c1.VehiclesLeft != 9 {
 		t.Errorf("vehicles_left want 9, got %d", c1.VehiclesLeft)
 	}
-	if c1.Status != StatusInProgress {
-		t.Errorf("cargo status want IN_PROGRESS, got %s", c1.Status)
+	if c1.Status != StatusSearchingAll {
+		t.Errorf("cargo status want SEARCHING_ALL, got %s", c1.Status)
 	}
 }
 
@@ -137,15 +147,15 @@ func TestAcceptOffer_AcceptedSlotsLimit(t *testing.T) {
 	defer itestDeleteCargo(t, pool, cargoID)
 
 	d1, d2, d3 := itestInsertDriver(t, pool), itestInsertDriver(t, pool), itestInsertDriver(t, pool)
-	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "")
+	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer1: %v", err)
 	}
-	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "")
+	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer2: %v", err)
 	}
-	o3, err := repo.CreateOffer(ctx, cargoID, d3, 100, "USD", "")
+	o3, err := repo.CreateOffer(ctx, cargoID, d3, 100, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer3: %v", err)
 	}
@@ -162,8 +172,8 @@ func TestAcceptOffer_AcceptedSlotsLimit(t *testing.T) {
 	}
 }
 
-// TestArchiveCompletedCargoTx_LastTripDeletesCargo — один рейс: после архива груза нет.
-func TestArchiveCompletedCargoTx_LastTripDeletesCargo(t *testing.T) {
+// TestArchiveCompletedCargoTx_LastTripSetsCargoCompleted — один рейс: груз остаётся в таблице со статусом COMPLETED.
+func TestArchiveCompletedCargoTx_LastTripSetsCargoCompleted(t *testing.T) {
 	pool := testIntegrationPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -173,8 +183,9 @@ func TestArchiveCompletedCargoTx_LastTripDeletesCargo(t *testing.T) {
 	repo := NewRepo(pool)
 
 	cargoID := itestCreateCargo(t, repo, 1)
+	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
-	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 100, "USD", "")
+	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 100, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer: %v", err)
 	}
@@ -184,22 +195,19 @@ func TestArchiveCompletedCargoTx_LastTripDeletesCargo(t *testing.T) {
 
 	tripID := uuid.New()
 	_, err = pool.Exec(ctx, `
-		INSERT INTO trips (id, cargo_id, offer_id, driver_id, status)
-		VALUES ($1, $2, $3, $4, 'COMPLETED')`,
+		INSERT INTO trips (id, cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency)
+		VALUES ($1, $2, $3, $4, 'IN_PROGRESS', 100, 'USD')`,
 		tripID, cargoID, offerID, driverID)
 	if err != nil {
-		itestDeleteCargo(t, pool, cargoID)
 		t.Fatalf("insert trip: %v", err)
 	}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		itestDeleteCargo(t, pool, cargoID)
 		t.Fatalf("begin: %v", err)
 	}
 	if err := repo.ArchiveCompletedCargoTx(ctx, tx, cargoID, tripID, driverID); err != nil {
 		_ = tx.Rollback(ctx)
-		itestDeleteCargo(t, pool, cargoID)
 		t.Fatalf("ArchiveCompletedCargoTx: %v", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -207,14 +215,19 @@ func TestArchiveCompletedCargoTx_LastTripDeletesCargo(t *testing.T) {
 	}
 
 	var n int
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM cargo WHERE id = $1`, cargoID).Scan(&n)
-	if n != 0 {
-		t.Errorf("cargo should be deleted, count=%d", n)
+	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM cargo WHERE id = $1 AND status = 'COMPLETED'`, cargoID).Scan(&n)
+	if n != 1 {
+		t.Errorf("cargo should be COMPLETED, count=%d", n)
+	}
+	var tripSt string
+	_ = pool.QueryRow(ctx, `SELECT status FROM trips WHERE id = $1`, tripID).Scan(&tripSt)
+	if tripSt != "COMPLETED" {
+		t.Errorf("trip status want COMPLETED, got %s", tripSt)
 	}
 }
 
-// TestArchiveCompletedCargoTx_MultiTripKeepsCargo — два рейса: завершение одного не удаляет груз.
-func TestArchiveCompletedCargoTx_MultiTripKeepsCargo(t *testing.T) {
+// TestArchiveCompletedCargoTx_MultiTripKeepsCargoSearching — два рейса: завершение одного не завершает груз.
+func TestArchiveCompletedCargoTx_MultiTripKeepsCargoSearching(t *testing.T) {
 	pool := testIntegrationPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -227,11 +240,11 @@ func TestArchiveCompletedCargoTx_MultiTripKeepsCargo(t *testing.T) {
 	defer itestDeleteCargo(t, pool, cargoID)
 
 	d1, d2 := itestInsertDriver(t, pool), itestInsertDriver(t, pool)
-	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "")
+	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer1: %v", err)
 	}
-	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "")
+	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer2: %v", err)
 	}
@@ -245,9 +258,9 @@ func TestArchiveCompletedCargoTx_MultiTripKeepsCargo(t *testing.T) {
 	trip1 := uuid.New()
 	trip2 := uuid.New()
 	_, err = pool.Exec(ctx, `
-		INSERT INTO trips (id, cargo_id, offer_id, driver_id, status) VALUES
-		($1, $2, $3, $4, 'COMPLETED'),
-		($5, $2, $6, $7, 'LOADING')`,
+		INSERT INTO trips (id, cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency) VALUES
+		($1, $2, $3, $4, 'IN_PROGRESS', 100, 'USD'),
+		($5, $2, $6, $7, 'IN_PROGRESS', 100, 'USD')`,
 		trip1, cargoID, o1, d1, trip2, o2, d2)
 	if err != nil {
 		t.Fatalf("insert trips: %v", err)
@@ -265,20 +278,22 @@ func TestArchiveCompletedCargoTx_MultiTripKeepsCargo(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	var nCargo int
-	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM cargo WHERE id = $1`, cargoID).Scan(&nCargo)
-	if nCargo != 1 {
-		t.Fatalf("cargo should exist, count=%d", nCargo)
+	cargoRow, _ := repo.GetByID(ctx, cargoID, false)
+	if cargoRow == nil {
+		t.Fatal("cargo missing")
+	}
+	if cargoRow.Status != StatusSearchingAll {
+		t.Errorf("cargo should stay SEARCHING_ALL, got %s", cargoRow.Status)
 	}
 	var nTrips int
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM trips WHERE cargo_id = $1`, cargoID).Scan(&nTrips)
-	if nTrips != 1 {
-		t.Errorf("want 1 trip left, got %d", nTrips)
+	if nTrips != 2 {
+		t.Errorf("want 2 trip rows, got %d", nTrips)
 	}
 }
 
-// TestOnTripCancelledTx_RestoresVehiclesLeftWhenLoading — отмена после LOADING возвращает vehicles_left.
-func TestOnTripCancelledTx_RestoresVehiclesLeftWhenLoading(t *testing.T) {
+// TestOnTripCancelledTx_RestoresVehiclesLeftWhenInTransit — отмена после IN_TRANSIT возвращает vehicles_left.
+func TestOnTripCancelledTx_RestoresVehiclesLeftWhenInTransit(t *testing.T) {
 	pool := testIntegrationPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -287,7 +302,7 @@ func TestOnTripCancelledTx_RestoresVehiclesLeftWhenLoading(t *testing.T) {
 	cargoID := itestCreateCargo(t, repo, 5)
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
-	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "")
+	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer: %v", err)
 	}
@@ -299,9 +314,9 @@ func TestOnTripCancelledTx_RestoresVehiclesLeftWhenLoading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := repo.OnTripEnteredLoadingTx(ctx, tx0, cargoID); err != nil {
+	if err := repo.OnTripEnteredInTransitTx(ctx, tx0, cargoID); err != nil {
 		_ = tx0.Rollback(ctx)
-		t.Fatalf("OnTripEnteredLoadingTx: %v", err)
+		t.Fatalf("OnTripEnteredInTransitTx: %v", err)
 	}
 	if err := tx0.Commit(ctx); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -316,7 +331,7 @@ func TestOnTripCancelledTx_RestoresVehiclesLeftWhenLoading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin2: %v", err)
 	}
-	if err := repo.OnTripCancelledTx(ctx, tx, cargoID, offerID, "LOADING"); err != nil {
+	if err := repo.OnTripCancelledTx(ctx, tx, cargoID, offerID, "IN_TRANSIT"); err != nil {
 		_ = tx.Rollback(ctx)
 		t.Fatalf("OnTripCancelledTx: %v", err)
 	}
@@ -333,8 +348,8 @@ func TestOnTripCancelledTx_RestoresVehiclesLeftWhenLoading(t *testing.T) {
 	}
 }
 
-// TestOnTripCancelledTx_NoRestoreBeforeLoading — отмена до LOADING не трогает vehicles_left.
-func TestOnTripCancelledTx_NoRestoreBeforeLoading(t *testing.T) {
+// TestOnTripCancelledTx_NoRestoreBeforeInTransit — отмена до IN_TRANSIT не трогает vehicles_left.
+func TestOnTripCancelledTx_NoRestoreBeforeInTransit(t *testing.T) {
 	pool := testIntegrationPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -343,7 +358,7 @@ func TestOnTripCancelledTx_NoRestoreBeforeLoading(t *testing.T) {
 	cargoID := itestCreateCargo(t, repo, 3)
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
-	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "")
+	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "", OfferProposedByDriver)
 	if err != nil {
 		t.Fatalf("CreateOffer: %v", err)
 	}
@@ -355,7 +370,7 @@ func TestOnTripCancelledTx_NoRestoreBeforeLoading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := repo.OnTripCancelledTx(ctx, tx, cargoID, offerID, "ASSIGNED"); err != nil {
+	if err := repo.OnTripCancelledTx(ctx, tx, cargoID, offerID, "IN_PROGRESS"); err != nil {
 		_ = tx.Rollback(ctx)
 		t.Fatalf("OnTripCancelledTx: %v", err)
 	}

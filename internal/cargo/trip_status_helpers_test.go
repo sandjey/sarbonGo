@@ -7,12 +7,14 @@ func TestTripStatusConsumesVehiclesLeft(t *testing.T) {
 		status string
 		want   bool
 	}{
+		{"IN_TRANSIT", true},
+		{"DELIVERED", true},
+		{"COMPLETED", true},
+		{"IN_PROGRESS", false},
 		{"LOADING", true},
 		{"EN_ROUTE", true},
 		{"UNLOADING", true},
 		{"PENDING_DRIVER", false},
-		{"ASSIGNED", false},
-		{"COMPLETED", false},
 		{"CANCELLED", false},
 	}
 	for _, tc := range cases {

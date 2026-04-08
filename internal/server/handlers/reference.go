@@ -170,15 +170,9 @@ func GetReferenceCargo(c *gin.Context) {
 	lang := refLang(c)
 	out := ReferenceCargoResponse{
 		CargoStatus: []ItemWithLabelAndDescription{
-			{Value: "CREATED", Label: reference.RefLabel("cargo.cargo_status", "CREATED", lang), Description: reference.CargoStatusDescription("CREATED", lang)},
 			{Value: "PENDING_MODERATION", Label: reference.RefLabel("cargo.cargo_status", "PENDING_MODERATION", lang), Description: reference.CargoStatusDescription("PENDING_MODERATION", lang)},
 			{Value: "SEARCHING_ALL", Label: reference.RefLabel("cargo.cargo_status", "SEARCHING_ALL", lang), Description: reference.CargoStatusDescription("SEARCHING_ALL", lang)},
 			{Value: "SEARCHING_COMPANY", Label: reference.RefLabel("cargo.cargo_status", "SEARCHING_COMPANY", lang), Description: reference.CargoStatusDescription("SEARCHING_COMPANY", lang)},
-			{Value: "REJECTED", Label: reference.RefLabel("cargo.cargo_status", "REJECTED", lang), Description: reference.CargoStatusDescription("REJECTED", lang)},
-			{Value: "ASSIGNED", Label: reference.RefLabel("cargo.cargo_status", "ASSIGNED", lang), Description: reference.CargoStatusDescription("ASSIGNED", lang)},
-			{Value: "IN_PROGRESS", Label: reference.RefLabel("cargo.cargo_status", "IN_PROGRESS", lang), Description: reference.CargoStatusDescription("IN_PROGRESS", lang)},
-			{Value: "IN_TRANSIT", Label: reference.RefLabel("cargo.cargo_status", "IN_TRANSIT", lang), Description: reference.CargoStatusDescription("IN_TRANSIT", lang)},
-			{Value: "DELIVERED", Label: reference.RefLabel("cargo.cargo_status", "DELIVERED", lang), Description: reference.CargoStatusDescription("DELIVERED", lang)},
 			{Value: "COMPLETED", Label: reference.RefLabel("cargo.cargo_status", "COMPLETED", lang), Description: reference.CargoStatusDescription("COMPLETED", lang)},
 			{Value: "CANCELLED", Label: reference.RefLabel("cargo.cargo_status", "CANCELLED", lang), Description: reference.CargoStatusDescription("CANCELLED", lang)},
 		},
@@ -206,11 +200,9 @@ func GetReferenceCargo(c *gin.Context) {
 			{Value: "OTHER", Label: reference.RefLabel("cargo.truck_type", "OTHER", lang)},
 		},
 		TripStatus: []ItemWithLabel{
-			{Value: "PENDING_DRIVER", Label: reference.RefLabel("cargo.trip_status", "PENDING_DRIVER", lang)},
-			{Value: "ASSIGNED", Label: reference.RefLabel("cargo.trip_status", "ASSIGNED", lang)},
-			{Value: "LOADING", Label: reference.RefLabel("cargo.trip_status", "LOADING", lang)},
-			{Value: "EN_ROUTE", Label: reference.RefLabel("cargo.trip_status", "EN_ROUTE", lang)},
-			{Value: "UNLOADING", Label: reference.RefLabel("cargo.trip_status", "UNLOADING", lang)},
+			{Value: "IN_PROGRESS", Label: reference.RefLabel("cargo.trip_status", "IN_PROGRESS", lang)},
+			{Value: "IN_TRANSIT", Label: reference.RefLabel("cargo.trip_status", "IN_TRANSIT", lang)},
+			{Value: "DELIVERED", Label: reference.RefLabel("cargo.trip_status", "DELIVERED", lang)},
 			{Value: "COMPLETED", Label: reference.RefLabel("cargo.trip_status", "COMPLETED", lang)},
 			{Value: "CANCELLED", Label: reference.RefLabel("cargo.trip_status", "CANCELLED", lang)},
 		},

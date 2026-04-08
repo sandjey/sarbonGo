@@ -19,15 +19,9 @@ type CargoStatus string
 
 // CargoStatus values (UPPERCASE everywhere in API and DB).
 const (
-	StatusCreated           CargoStatus = "CREATED"
 	StatusPendingModeration CargoStatus = "PENDING_MODERATION"
 	StatusSearchingAll      CargoStatus = "SEARCHING_ALL"     // visible to all drivers
 	StatusSearchingCompany  CargoStatus = "SEARCHING_COMPANY" // visible only to company drivers
-	StatusRejected          CargoStatus = "REJECTED"
-	StatusAssigned          CargoStatus = "ASSIGNED"
-	StatusInProgress        CargoStatus = "IN_PROGRESS"
-	StatusInTransit         CargoStatus = "IN_TRANSIT"
-	StatusDelivered         CargoStatus = "DELIVERED"
 	StatusCompleted         CargoStatus = "COMPLETED"
 	StatusCancelled         CargoStatus = "CANCELLED"
 )
@@ -35,6 +29,16 @@ const (
 // IsSearching returns true if status is one of the "searching" variants (cargo visible for offers).
 func IsSearching(status CargoStatus) bool {
 	return status == StatusSearchingAll || status == StatusSearchingCompany
+}
+
+// CanEditCargoRoutePayment returns true while route/payment may still be replaced (not completed / in-flight).
+func CanEditCargoRoutePayment(status CargoStatus) bool {
+	switch status {
+	case StatusPendingModeration, StatusSearchingAll, StatusSearchingCompany:
+		return true
+	default:
+		return false
+	}
 }
 
 // Documents is the JSON object for cargo.documents (TIR, T1, CMR, etc.).
@@ -48,6 +52,20 @@ type Documents struct {
 	Permit  bool `json:"Permit,omitempty"`
 }
 
+// WayPoint is an optional intermediate point for route hints ("drive via"/customs).
+type WayPoint struct {
+	Type        string  `json:"type"` // TRANSIT | CUSTOMS
+	CountryCode string  `json:"country_code,omitempty"`
+	CityCode    string  `json:"city_code,omitempty"`
+	RegionCode  string  `json:"region_code,omitempty"`
+	Address     string  `json:"address,omitempty"`
+	Orientir    string  `json:"orientir,omitempty"`
+	Lat         float64 `json:"lat,omitempty"`
+	Lng         float64 `json:"lng,omitempty"`
+	PlaceID     *string `json:"place_id,omitempty"`
+	Comment     *string `json:"comment,omitempty"`
+}
+
 // Cargo model (table cargo).
 type Cargo struct {
 	ID           uuid.UUID
@@ -56,11 +74,13 @@ type Cargo struct {
 	Volume       float64
 	// VehiclesAmount — сколько машин требуется для этого груза.
 	VehiclesAmount int
-	// VehiclesLeft — сколько машин ещё не вышли на исполнение (уменьшается, когда рейс переходит в LOADING).
+	// VehiclesLeft — сколько машин ещё не «вышли в путь» (уменьшается при переходе рейса в IN_TRANSIT).
 	VehiclesLeft int
 	Packaging        *string
+	PackagingAmount  *int
 	Dimensions       *string
 	PhotoURLs        []string
+	WayPoints        []WayPoint
 	ReadyEnabled bool
 	ReadyAt      *time.Time
 	Comment      *string
@@ -72,6 +92,8 @@ type Cargo struct {
 	ADREnabled   bool
 	ADRClass     *string
 	LoadingTypes []string
+	UnloadingTypes []string
+	IsTwoDriversRequired bool
 	ShipmentType *ShipmentType
 	BeltsCount   *int
 	Documents    *Documents
@@ -134,7 +156,15 @@ type Payment struct {
 	RemainingAmount   *float64
 	RemainingCurrency *string
 	RemainingType     *string
+	PaymentNote       *string
+	PaymentTermsNote  *string
 }
+
+// ProposedBy — кто задал цену в оффере (кто должен принять другую сторону).
+const (
+	OfferProposedByDriver      = "DRIVER"      // водитель предложил цену → принимает диспетчер
+	OfferProposedByDispatcher  = "DISPATCHER"  // диспетчер предложил цену → принимает водитель
+)
 
 // Offer model (table offers).
 type Offer struct {
@@ -144,6 +174,7 @@ type Offer struct {
 	Price          float64
 	Currency       string
 	Comment        *string
+	ProposedBy     string // DRIVER | DISPATCHER
 	Status         string // PENDING, ACCEPTED, REJECTED
 	RejectionReason *string // optional, when dispatcher rejects
 	CreatedAt      time.Time
@@ -153,12 +184,19 @@ type Offer struct {
 // Used by GET /v1/driver/cargo-offers.
 type DriverCargoOffer struct {
 	Offer
-	CargoStatus    CargoStatus
-	CargoName      *string
-	CargoWeight    float64
-	CargoVolume    float64
-	CargoTruckType string
-	CargoVehiclesLeft int
+	CargoStatus         CargoStatus
+	CargoName           *string
+	CargoWeight         float64
+	CargoVolume         float64
+	CargoTruckType      string
+	CargoVehiclesAmount int
+	CargoVehiclesLeft   int
+	CargoFromCityCode   *string
+	CargoToCityCode     *string
+	CargoCurrentPrice    *float64
+	CargoCurrentCurrency *string
+	CargoCreatedByType   *string
+	CargoCreatedByID     *uuid.UUID
 
 	TripID     *uuid.UUID
 	TripStatus *string

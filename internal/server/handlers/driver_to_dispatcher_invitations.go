@@ -83,12 +83,20 @@ func (h *DriverToDispatcherInvitationsHandler) ListSentByDriver(c *gin.Context) 
 	}
 	items := make([]gin.H, 0, len(list))
 	for _, inv := range list {
-		items = append(items, gin.H{
-			"token":             inv.Token,
-			"dispatcher_phone":  inv.DispatcherPhone,
-			"expires_at":       inv.ExpiresAt,
-			"created_at":       inv.CreatedAt,
-		})
+		st := drivertodispatcherinvitations.EffectiveStatus(inv)
+		item := gin.H{
+			"token":              inv.Token,
+			"dispatcher_phone":   inv.DispatcherPhone,
+			"to_dispatcher_phone": inv.DispatcherPhone,
+			"driver_id":          inv.DriverID.String(),
+			"expires_at":         inv.ExpiresAt,
+			"created_at":         inv.CreatedAt,
+			"status":             st,
+		}
+		if inv.RespondedAt != nil {
+			item["responded_at"] = inv.RespondedAt
+		}
+		items = append(items, item)
 	}
 	resp.OKLang(c, "ok", gin.H{"items": items})
 }
@@ -101,7 +109,7 @@ func (h *DriverToDispatcherInvitationsHandler) CancelByDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "token_required")
 		return
 	}
-	inv, err := h.repo.GetByToken(c.Request.Context(), token)
+	inv, err := h.repo.GetPendingByToken(c.Request.Context(), token)
 	if err != nil || inv == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "invitation_not_found_or_expired")
 		return
@@ -110,9 +118,14 @@ func (h *DriverToDispatcherInvitationsHandler) CancelByDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_invitation")
 		return
 	}
-	if err := h.repo.Delete(c.Request.Context(), token); err != nil {
+	ok, err := h.repo.SetStatusIfPending(c.Request.Context(), token, drivertodispatcherinvitations.StatusCancelled)
+	if err != nil {
 		h.logger.Error("driver to dispatcher invitation cancel", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_cancel_invitation")
+		return
+	}
+	if !ok {
+		resp.ErrorLang(c, http.StatusNotFound, "invitation_not_found_or_expired")
 		return
 	}
 	resp.OKLang(c, "ok", nil)
@@ -137,12 +150,18 @@ func (h *DriverToDispatcherInvitationsHandler) ListReceivedByDispatcher(c *gin.C
 	}
 	items := make([]gin.H, 0, len(list))
 	for _, inv := range list {
+		st := drivertodispatcherinvitations.EffectiveStatus(inv)
 		item := gin.H{
-			"token":             inv.Token,
-			"driver_id":        inv.DriverID.String(),
-			"dispatcher_phone": inv.DispatcherPhone,
-			"expires_at":       inv.ExpiresAt,
-			"created_at":       inv.CreatedAt,
+			"token":              inv.Token,
+			"driver_id":          inv.DriverID.String(),
+			"dispatcher_phone":   inv.DispatcherPhone,
+			"from_driver_id":     inv.DriverID.String(),
+			"expires_at":         inv.ExpiresAt,
+			"created_at":         inv.CreatedAt,
+			"status":             st,
+		}
+		if inv.RespondedAt != nil {
+			item["responded_at"] = inv.RespondedAt
 		}
 		drv, _ := h.drv.FindByID(c.Request.Context(), inv.DriverID)
 		if drv != nil {
@@ -173,7 +192,7 @@ func (h *DriverToDispatcherInvitationsHandler) AcceptByDispatcher(c *gin.Context
 		return
 	}
 	token := strings.TrimSpace(req.Token)
-	inv, err := h.repo.GetByToken(c.Request.Context(), token)
+	inv, err := h.repo.GetPendingByToken(c.Request.Context(), token)
 	if err != nil || inv == nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
 		return
@@ -182,12 +201,17 @@ func (h *DriverToDispatcherInvitationsHandler) AcceptByDispatcher(c *gin.Context
 		resp.ErrorLang(c, http.StatusForbidden, "invitation_sent_to_another_phone")
 		return
 	}
+	ok, err := h.repo.SetStatusIfPending(c.Request.Context(), token, drivertodispatcherinvitations.StatusAccepted)
+	if err != nil || !ok {
+		resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
+		return
+	}
 	if err := h.drv.SetFreelancerID(c.Request.Context(), inv.DriverID, dispatcherID); err != nil {
+		_ = h.repo.RevertToPending(c.Request.Context(), token)
 		h.logger.Error("dispatcher accept driver invitation", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
 		return
 	}
-	_ = h.repo.Delete(c.Request.Context(), token)
 	resp.SuccessLang(c, http.StatusOK, "accepted", gin.H{"driver_id": inv.DriverID.String()})
 }
 
@@ -210,7 +234,7 @@ func (h *DriverToDispatcherInvitationsHandler) DeclineByDispatcher(c *gin.Contex
 		return
 	}
 	token := strings.TrimSpace(req.Token)
-	inv, err := h.repo.GetByToken(c.Request.Context(), token)
+	inv, err := h.repo.GetPendingByToken(c.Request.Context(), token)
 	if err != nil || inv == nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
 		return
@@ -219,6 +243,15 @@ func (h *DriverToDispatcherInvitationsHandler) DeclineByDispatcher(c *gin.Contex
 		resp.ErrorLang(c, http.StatusForbidden, "invitation_sent_to_another_phone")
 		return
 	}
-	_ = h.repo.Delete(c.Request.Context(), token)
+	ok, err := h.repo.SetStatusIfPending(c.Request.Context(), token, drivertodispatcherinvitations.StatusDeclined)
+	if err != nil {
+		h.logger.Error("dispatcher decline driver invitation", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if !ok {
+		resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
+		return
+	}
 	resp.OKLang(c, "declined", gin.H{"status": "declined"})
 }

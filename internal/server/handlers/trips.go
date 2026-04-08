@@ -65,12 +65,17 @@ func (h *TripsHandler) List(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_cargo_id")
 		return
 	}
-	t, err := h.repo.GetByCargoID(c.Request.Context(), cargoID)
-	if err != nil || t == nil {
-		resp.OKLang(c, "ok", gin.H{"items": []interface{}{}})
+	list, err := h.repo.ListByCargoID(c.Request.Context(), cargoID)
+	if err != nil {
+		h.logger.Error("trips list by cargo", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"items": []interface{}{toTripResp(t)}})
+	out := make([]interface{}, 0, len(list))
+	for i := range list {
+		out = append(out, toTripResp(&list[i]))
+	}
+	resp.OKLang(c, "ok", gin.H{"items": out})
 }
 
 // ListMy for GET /v1/driver/trips (driver): returns trips assigned to current driver.
@@ -132,7 +137,7 @@ func (h *TripsHandler) AssignDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"status": trips.StatusPendingDriver, "driver_id": driverID.String()})
+	resp.OKLang(c, "ok", gin.H{"status": trips.StatusInProgress, "driver_id": driverID.String()})
 }
 
 func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
@@ -189,9 +194,9 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		}
 		return
 	}
-	if tr.Status == trips.StatusLoading {
-		if err := h.cargoRepo.OnTripEnteredLoadingTx(ctx, tx, tr.CargoID); err != nil {
-			h.logger.Error("on trip loading", zap.Error(err))
+	if tr.Status == trips.StatusInTransit {
+		if err := h.cargoRepo.OnTripEnteredInTransitTx(ctx, tx, tr.CargoID); err != nil {
+			h.logger.Error("on trip in transit", zap.Error(err))
 			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 			return
 		}
@@ -246,7 +251,7 @@ func (h *TripsHandler) DriverReject(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"status": trips.StatusPendingDriver})
+	resp.OKLang(c, "ok", gin.H{"status": trips.StatusInProgress})
 }
 
 func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool) {
@@ -394,12 +399,14 @@ func (h *TripsHandler) TripStateDispatcher(c *gin.Context) {
 
 func toTripResp(t *trips.Trip) gin.H {
 	res := gin.H{
-		"id":         t.ID.String(),
-		"cargo_id":   t.CargoID.String(),
-		"offer_id":   t.OfferID.String(),
-		"status":     t.Status,
-		"created_at": t.CreatedAt,
-		"updated_at": t.UpdatedAt,
+		"id":               t.ID.String(),
+		"cargo_id":         t.CargoID.String(),
+		"offer_id":         t.OfferID.String(),
+		"status":           t.Status,
+		"agreed_price":     t.AgreedPrice,
+		"agreed_currency":  t.AgreedCurrency,
+		"created_at":       t.CreatedAt,
+		"updated_at":       t.UpdatedAt,
 	}
 	if t.DriverID != nil {
 		res["driver_id"] = t.DriverID.String()

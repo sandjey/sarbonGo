@@ -18,7 +18,6 @@ import (
 	"sarbonNew/internal/calls"
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/cargodrivers"
-	"sarbonNew/internal/cargorecommendations"
 	"sarbonNew/internal/chat"
 	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/companies"
@@ -162,8 +161,6 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	d2dInvRepo := drivertodispatcherinvitations.NewRepo(deps.PG)
 	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo)
 	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo)
-	cargoRecRepo := cargorecommendations.NewRepo(deps.PG)
-	cargoRecH := handlers.NewCargoRecommendationsHandler(logger, cargoRecRepo, cargoRepo, tripsRepo)
 
 	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo)
 
@@ -358,14 +355,15 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/favorite-cargo", favH.AddDriverFavoriteCargo)
 	driverAuthed.DELETE("/favorite-cargo/:cargoId", favH.DeleteDriverFavoriteCargo)
 	driverAuthed.GET("/favorite-cargo", favH.ListDriverFavoriteCargo)
-	driverAuthed.GET("/recommended-cargo", cargoRecH.ListRecommendedForDriver)
-	driverAuthed.POST("/recommended-cargo/:cargoId/accept", cargoRecH.AcceptRecommendation)
-	driverAuthed.POST("/recommended-cargo/:cargoId/decline", cargoRecH.DeclineRecommendation)
 	driverAuthed.GET("/nearby-cargo", driverCargoSearchH.NearbyCargoForDriver)
 	driverAuthed.GET("/matching-cargo", driverCargoSearchH.MatchingCargoForDriver)
 	driverAuthed.GET("/cargo/active", cargoH.ListActiveCargoForDriver)
 	driverAuthed.GET("/active-cargo", cargoDriversH.GetMyActiveCargo)
 	driverAuthed.GET("/cargo-offers", cargoH.ListMyCargoOffers)
+	driverAuthed.GET("/cargo-invitation-stats", cargoH.GetDriverOfferInvitationStats)
+	driverAuthed.POST("/cargo/:id/offers", cargoH.DriverCreateOffer)
+	driverAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
+	driverAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDriver)
 
 	// Dispatchers: только API диспетчера
 	dispAuthed := v1.Group("/dispatchers")
@@ -403,12 +401,14 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.POST("/trips/:id/confirm-transition", tripsH.ConfirmTransitionDispatcher)
 	dispAuthed.POST("/trips/:id/cancel", tripsH.CancelTripDispatcher)
 	dispAuthed.GET("/trips/:id/state", tripsH.TripStateDispatcher)
+	dispAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
-	dispAuthed.GET("/cargo/active", cargoH.ListActiveCargoForDispatcher)
+	dispAuthed.GET("/cargo/mine", cargoH.ListMyCargoForDispatcher)
+	dispAuthed.GET("/cargo/all", cargoH.ListAllCargoForDispatcher)
+	dispAuthed.GET("/cargo/:id/negotiation", cargoH.ListCargoNegotiation)
 	dispAuthed.GET("/cargo/:id/drivers", cargoDriversH.ListByCargo)
 	dispAuthed.POST("/cargo/:id/drivers/remove", cargoDriversH.RemoveFromCargo)
 	dispAuthed.GET("/cargo/export.xlsx", dispCargoExportH.ExportMyCargoExcel)
-	dispAuthed.POST("/cargo/:id/recommend", cargoRecH.Recommend)
 	dispAuthed.POST("/favorite-cargo", favH.AddDispatcherFavoriteCargo)
 	dispAuthed.DELETE("/favorite-cargo/:cargoId", favH.DeleteDispatcherFavoriteCargo)
 	dispAuthed.GET("/favorite-cargo", favH.ListDispatcherFavoriteCargo)

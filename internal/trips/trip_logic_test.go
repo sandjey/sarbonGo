@@ -7,11 +7,9 @@ func TestNextStatus(t *testing.T) {
 		current  string
 		expected string
 	}{
-		{StatusPendingDriver, StatusAssigned},
-		{StatusAssigned, StatusLoading},
-		{StatusLoading, StatusEnRoute},
-		{StatusEnRoute, StatusUnloading},
-		{StatusUnloading, StatusCompleted},
+		{StatusInProgress, StatusInTransit},
+		{StatusInTransit, StatusDelivered},
+		{StatusDelivered, StatusCompleted},
 		{StatusCompleted, ""},
 		{StatusCancelled, ""},
 		{"UNKNOWN", ""},

@@ -49,16 +49,10 @@ func CargoStatusDescription(value, lang string) string {
 }
 
 var refLabels = map[string]map[string]string{
-	"cargo.cargo_status.CREATED":             {"ru": "Создан", "uz": "Yaratilgan", "en": "Created", "tr": "Oluşturuldu", "zh": "已创建"},
 	"cargo.cargo_status.PENDING_MODERATION":   {"ru": "На модерации", "uz": "Moderatsiyada", "en": "Pending moderation", "tr": "Moderasyonda", "zh": "待审核"},
 	"cargo.cargo_status.SEARCHING":           {"ru": "В поиске перевозчика", "uz": "Tashuvchi qidirilmoqda", "en": "Searching for carrier", "tr": "Taşıyıcı aranıyor", "zh": "寻找承运人"},
 	"cargo.cargo_status.SEARCHING_ALL":       {"ru": "В поиске (всем)", "uz": "Qidirilmoqda (hamma)", "en": "Searching (all drivers)", "tr": "Aranıyor (tüm sürücüler)", "zh": "寻找中（所有司机）"},
 	"cargo.cargo_status.SEARCHING_COMPANY":   {"ru": "В поиске (только компания)", "uz": "Qidirilmoqda (faqat kompaniya)", "en": "Searching (company only)", "tr": "Aranıyor (sadece şirket)", "zh": "寻找中（仅公司）"},
-	"cargo.cargo_status.REJECTED":             {"ru": "Отклонён", "uz": "Rad etilgan", "en": "Rejected", "tr": "Reddedildi", "zh": "已拒绝"},
-	"cargo.cargo_status.ASSIGNED":             {"ru": "Назначен", "uz": "Tayinlangan", "en": "Assigned", "tr": "Atandı", "zh": "已分配"},
-	"cargo.cargo_status.IN_PROGRESS":         {"ru": "Выполняется", "uz": "Bajarilmoqda", "en": "In progress", "tr": "Yürütülüyor", "zh": "进行中"},
-	"cargo.cargo_status.IN_TRANSIT":          {"ru": "В пути", "uz": "Yo'lda", "en": "In transit", "tr": "Yolda", "zh": "运输中"},
-	"cargo.cargo_status.DELIVERED":           {"ru": "Доставлен", "uz": "Yetkazib berilgan", "en": "Delivered", "tr": "Teslim edildi", "zh": "已送达"},
 	"cargo.cargo_status.COMPLETED":           {"ru": "Завершён", "uz": "Tugallangan", "en": "Completed", "tr": "Tamamlandı", "zh": "已完成"},
 	"cargo.cargo_status.CANCELLED":           {"ru": "Отменён", "uz": "Bekor qilindi", "en": "Cancelled", "tr": "İptal edildi", "zh": "已取消"},
 	"cargo.route_point_type.LOAD":    {"ru": "Погрузка", "uz": "Yuklash", "en": "Load", "tr": "Yükleme", "zh": "装货"},
@@ -76,11 +70,9 @@ var refLabels = map[string]map[string]string{
 	"cargo.truck_type.FLATBED":      {"ru": "Борт", "uz": "Bort", "en": "Flatbed", "tr": "Düz platform", "zh": "平板"},
 	"cargo.truck_type.TANKER":       {"ru": "Цистерна", "uz": "Sisterna", "en": "Tanker", "tr": "Tanker", "zh": "罐车"},
 	"cargo.truck_type.OTHER":        {"ru": "Другое", "uz": "Boshqa", "en": "Other", "tr": "Diğer", "zh": "其他"},
-	"cargo.trip_status.PENDING_DRIVER": {"ru": "Ожидание водителя", "uz": "Haydovchi kutilmoqda", "en": "Pending driver", "tr": "Sürücü bekleniyor", "zh": "等待司机"},
-	"cargo.trip_status.ASSIGNED":    {"ru": "Назначен", "uz": "Tayinlangan", "en": "Assigned", "tr": "Atandı", "zh": "已分配"},
-	"cargo.trip_status.LOADING":     {"ru": "Погрузка", "uz": "Yuklash", "en": "Loading", "tr": "Yükleme", "zh": "装货"},
-	"cargo.trip_status.EN_ROUTE":    {"ru": "В пути", "uz": "Yo'lda", "en": "En route", "tr": "Yolda", "zh": "运输中"},
-	"cargo.trip_status.UNLOADING":   {"ru": "Выгрузка", "uz": "Tushirish", "en": "Unloading", "tr": "Boşaltma", "zh": "卸货"},
+	"cargo.trip_status.IN_PROGRESS": {"ru": "В работе", "uz": "Jarayonda", "en": "In progress", "tr": "Devam ediyor", "zh": "进行中"},
+	"cargo.trip_status.IN_TRANSIT":  {"ru": "В пути", "uz": "Yo'lda", "en": "In transit", "tr": "Yolda", "zh": "运输中"},
+	"cargo.trip_status.DELIVERED":   {"ru": "Доставлено получателю", "uz": "Qabul qiluvchiga yetkazildi", "en": "Delivered", "tr": "Teslim edildi", "zh": "已送达"},
 	"cargo.trip_status.COMPLETED":   {"ru": "Завершён", "uz": "Tugallangan", "en": "Completed", "tr": "Tamamlandı", "zh": "已完成"},
 	"cargo.trip_status.CANCELLED":   {"ru": "Отменён", "uz": "Bekor qilindi", "en": "Cancelled", "tr": "İptal edildi", "zh": "已取消"},
 	"cargo.shipment_type.FTL":     {"ru": "Полная загрузка (FTL)", "uz": "To'liq yuk (FTL)", "en": "Full truck load (FTL)", "tr": "Tam yük (FTL)", "zh": "整车 (FTL)"},
@@ -192,16 +184,10 @@ var refLabels = map[string]map[string]string{
 
 func init() {
 	descs := map[string]map[string]string{
-		"cargo.cargo_status_desc.CREATED":             {"ru": "Груз создан.", "uz": "Yuk yaratilgan.", "en": "Cargo created.", "tr": "Kargo oluşturuldu.", "zh": "货物已创建。"},
-		"cargo.cargo_status_desc.PENDING_MODERATION":  {"ru": "На модерации; админ примет (searching) или отклонит (rejected).", "uz": "Moderatsiyada; admin qabul (searching) yoki rad (rejected) qiladi.", "en": "Pending moderation; admin will accept (searching) or reject (rejected).", "tr": "Moderasyonda; admin kabul (searching) veya red (rejected) eder.", "zh": "待审核；管理员通过(searching)或拒绝(rejected)。"},
+		"cargo.cargo_status_desc.PENDING_MODERATION":  {"ru": "На модерации; админ примет (searching) или отклонит (cancelled) с причиной.", "uz": "Moderatsiyada; admin qabul (searching) yoki sabab bilan bekor (cancelled) qiladi.", "en": "Pending moderation; admin will accept (searching) or cancel with a reason.", "tr": "Moderasyonda; admin kabul (searching) veya gerekçeyle iptal eder.", "zh": "待审核；管理员通过(searching)或填写原因取消(cancelled)。"},
 		"cargo.cargo_status_desc.SEARCHING":           {"ru": "Груз виден водителям; принимаются офферы.", "uz": "Yuk haydovchilarga ko'rinadi; takliflar qabul qilinadi.", "en": "Cargo visible to drivers; offers accepted.", "tr": "Yük sürücülere görünür; teklifler kabul edilir.", "zh": "货物对司机可见；接受报价。"},
 		"cargo.cargo_status_desc.SEARCHING_ALL":      {"ru": "Груз виден всем водителям; принимаются офферы.", "uz": "Yuk barcha haydovchilarga ko'rinadi; takliflar qabul qilinadi.", "en": "Cargo visible to all drivers; offers accepted.", "tr": "Yük tüm sürücülere görünür; teklifler kabul edilir.", "zh": "货物对所有司机可见；接受报价。"},
 		"cargo.cargo_status_desc.SEARCHING_COMPANY":  {"ru": "Груз виден только водителям компании; принимаются офферы.", "uz": "Yuk faqat kompaniya haydovchilariga ko'rinadi; takliflar qabul qilinadi.", "en": "Cargo visible only to company drivers; offers accepted.", "tr": "Yük yalnızca şirket sürücülerine görünür; teklifler kabul edilir.", "zh": "货物仅对公司司机可见；接受报价。"},
-		"cargo.cargo_status_desc.REJECTED":           {"ru": "Отклонён модерацией; указана причина.", "uz": "Moderatsiya tomonidan rad etilgan; sabab ko'rsatilgan.", "en": "Rejected by moderation; reason provided.", "tr": "Moderasyon tarafından reddedildi; neden belirtildi.", "zh": "审核拒绝；已提供原因。"},
-		"cargo.cargo_status_desc.ASSIGNED":            {"ru": "Перевозчик выбран; ожидается погрузка.", "uz": "Tashuvchi tanlandi; yuklash kutilmoqda.", "en": "Carrier selected; loading expected.", "tr": "Taşıyıcı seçildi; yükleme bekleniyor.", "zh": "已选承运人；等待装货。"},
-		"cargo.cargo_status_desc.IN_PROGRESS":         {"ru": "Выполняется; водитель в пути или грузит.", "uz": "Bajarilmoqda; haydovchi yo'lda yoki yuklayapti.", "en": "In progress; driver en route or loading.", "tr": "Yürütülüyor; sürücü yolda veya yüklüyor.", "zh": "进行中；司机在途或装货。"},
-		"cargo.cargo_status_desc.IN_TRANSIT":         {"ru": "Груз в перевозке.", "uz": "Yuk tashilmoqda.", "en": "Cargo in transit.", "tr": "Yük taşınıyor.", "zh": "货物运输中。"},
-		"cargo.cargo_status_desc.DELIVERED":          {"ru": "Доставлен.", "uz": "Yetkazib berildi.", "en": "Delivered.", "tr": "Teslim edildi.", "zh": "已送达。"},
 		"cargo.cargo_status_desc.COMPLETED":          {"ru": "Перевозка завершена.", "uz": "Tashish tugallandi.", "en": "Shipment completed.", "tr": "Taşıma tamamlandı.", "zh": "运输已完成。"},
 		"cargo.cargo_status_desc.CANCELLED":          {"ru": "Груз отменён.", "uz": "Yuk bekor qilindi.", "en": "Cargo cancelled.", "tr": "Yük iptal edildi.", "zh": "货物已取消。"},
 	}

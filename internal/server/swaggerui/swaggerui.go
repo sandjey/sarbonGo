@@ -341,14 +341,14 @@ const swaggerHTML = `<!doctype html>
   </head>
   <body>
     <div class="sarbon-docs-hint" id="sarbon-docs-hint">
-      Заголовки задаются в кнопке <b>Authorize</b>: X-Device-Type (web / ios / android), X-Language (ru / uz / en / tr / zh), X-Client-Token. Один раз выбранные значения действуют для <b>всех разделов</b> (Drivers, Freelance Dispatchers, Admin, Cargo, Chat, Company). Можно выбрать любой язык и любой тип устройства.
+      Заголовки задаются в кнопке <b>Authorize</b>: X-Device-Type (web / ios / android), X-Language (ru / uz / en / tr / zh), X-Client-Token. Один раз выбранные значения действуют для <b>всех разделов</b> (Drivers, Cargo Manager, Driver Manager, Admin, Chat, Company). Можно выбрать любой язык и любой тип устройства.
     </div>
     <div class="sarbon-topmenu" role="navigation" aria-label="API groups">
       <div class="brand">Sarbon API</div>
       <button class="btn" data-group="drivers">Drivers Mobile</button>
-      <button class="btn" data-group="dispatchers">Freelance Dispatchers</button>
+      <button class="btn" data-group="dispatchers">Driver Manager</button>
       <button class="btn" data-group="admin">Admin</button>
-      <button class="btn" data-group="cargo">Cargo API</button>
+      <button class="btn" data-group="cargo">Cargo Manager</button>
       <button class="btn" data-group="chat">Chat</button>
       <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">&#9889; WS Test</a>
       <a class="btn" href="/calls-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#7c3aed;color:#fff;border-color:#7c3aed">&#128222; Calls Test Lab</a>
@@ -500,13 +500,26 @@ const swaggerHTML = `<!doctype html>
           'Drivers / Registration',
           'Drivers / KYC',
           'Drivers / Profile',
-          'Freelance Dispatchers / Auth',
-          'Freelance Dispatchers / Registration',
-          'Freelance Dispatchers / Profile',
+          'Drivers / Trips',
+          'Drivers / Driver invitations',
+          'Drivers / My dispatchers',
+          'Drivers / Invite dispatcher',
+          'Cargo Manager',
+          'Cargo Manager / Auth',
+          'Cargo Manager / Registration',
+          'Cargo Manager / Profile',
+          'Cargo Manager / Cargo CRUD',
+          'Cargo Manager / Offers and Negotiation',
+          'Cargo Manager / Trips',
+          'Cargo Manager / Discovery and Export',
+          'Driver Manager',
+          'Driver Manager / Invitations',
+          'Driver Manager / My drivers',
+          'Driver Manager / Drivers catalog',
+          'Driver Manager / Favorites',
           'Admin / Auth',
           'Admin / Companies',
-          'Cargo — Водитель',
-          'Cargo — Диспетчер, компания, админ',
+          'Company / Dispatcher (приглашённый)',
           'Chat',
           'Calls (Voice)',
           'Calls (Voice) / Test Lab',
@@ -516,7 +529,7 @@ const swaggerHTML = `<!doctype html>
           'Reference / Cargo',
           'Reference / Company',
           'Reference / Admin',
-          'Reference / Freelance Dispatchers',
+          'Reference / Dispatchers',
         ];
         function tagIndex(t) {
           const n = tagName(t);
@@ -544,9 +557,9 @@ const swaggerHTML = `<!doctype html>
           var t = (typeof tag === 'string' ? tag : '').trim();
           var tLower = t.toLowerCase();
           if (group === 'drivers') return t.startsWith('Drivers /');
-          if (group === 'dispatchers') return t.startsWith('Freelance Dispatchers /');
+          if (group === 'dispatchers') return t === 'Driver Manager' || t.startsWith('Driver Manager /');
           if (group === 'admin') return t.startsWith('Admin /');
-          if (group === 'cargo') return t.startsWith('Cargo —');
+          if (group === 'cargo') return t === 'Cargo Manager' || t.startsWith('Cargo Manager /');
           if (group === 'chat') return t.startsWith('Chat') || t.startsWith('Calls');
           if (group === 'company') return t.startsWith('Company') || tLower === 'company' || tLower.startsWith('company ');
           if (group === 'reference') return t.startsWith('Reference');
