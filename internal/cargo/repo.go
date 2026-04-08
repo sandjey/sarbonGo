@@ -1161,19 +1161,30 @@ VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, now()) RETURNING id`,
 	return id, err
 }
 
-func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status string) (int, error) {
-	where := "o.proposed_by = 'DISPATCHER' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
+	proposedBy := "DISPATCHER"
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "incoming", "to_me", "received":
+		proposedBy = "DRIVER"
+	}
+	where := "o.proposed_by = '" + proposedBy + "' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
 	args := []any{dispatcherID}
+	argN := 2
 	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
-		where += " AND o.status = $2"
+		where += " AND o.status = $" + strconv.Itoa(argN)
 		args = append(args, s)
+		argN++
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		where += " AND o.carrier_id = $" + strconv.Itoa(argN)
+		args = append(args, *counterpartyID)
 	}
 	var total int
 	err := r.pg.QueryRow(ctx, `SELECT COUNT(*) FROM offers o INNER JOIN cargo c ON c.id = o.cargo_id WHERE `+where, args...).Scan(&total)
 	return total, err
 }
 
-func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status string, limit, offset int) ([]DispatcherSentOffer, error) {
+func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID, limit, offset int) ([]DispatcherSentOffer, error) {
 	if limit < 1 {
 		limit = 30
 	}
@@ -1183,12 +1194,22 @@ func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.U
 	if offset < 0 {
 		offset = 0
 	}
-	where := "o.proposed_by = 'DISPATCHER' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+	proposedBy := "DISPATCHER"
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "incoming", "to_me", "received":
+		proposedBy = "DRIVER"
+	}
+	where := "o.proposed_by = '" + proposedBy + "' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
 	args := []any{dispatcherID}
 	argN := 2
 	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
 		where += " AND o.status = $" + strconv.Itoa(argN)
 		args = append(args, s)
+		argN++
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		where += " AND o.carrier_id = $" + strconv.Itoa(argN)
+		args = append(args, *counterpartyID)
 		argN++
 	}
 	q := `

@@ -3600,14 +3600,38 @@ paths:
   /v1/dispatchers/offers/sent:
     get:
       tags: ["Cargo Manager / Offers"]
-      summary: "Все отправленные приглашения (офферы) Cargo Manager"
+      summary: "Офферы Cargo Manager: отправленные мной или отправленные мне"
       description: |
-        Список всех офферов, отправленных текущим Cargo Manager водителям (`proposed_by=DISPATCHER`).
+        Единый список офферов для Cargo Manager с переключением направления:
+        - `direction=outgoing` — офферы, **отправленные мной** водителям (`proposed_by=DISPATCHER`)
+        - `direction=incoming` — офферы, **отправленные мне** водителями (`proposed_by=DRIVER`)
+
         Структура элемента: блоки `cargo`, `offer`, `trip` (если уже создан рейс).
         Поддерживает фильтр `status` (PENDING, ACCEPTED, REJECTED), пагинацию.
+        Допустимые алиасы `direction`: outgoing/from_me/sent/by и incoming/to_me/received.
         Ответы на 5 языках (X-Language: ru, uz, en, tr, zh).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
+        - name: direction
+          in: query
+          required: false
+          description: "Направление офферов: outgoing (по умолчанию) или incoming"
+          schema: { type: string, example: "outgoing" }
+        - name: counterparty_id
+          in: query
+          required: false
+          description: "Фильтр по контрагенту (driver_id). Для outgoing = на кого отправлено, для incoming = от кого отправлено."
+          schema: { type: string, format: uuid }
+        - name: to_driver_id
+          in: query
+          required: false
+          description: "Алиас для outgoing: на какого водителя отправлено."
+          schema: { type: string, format: uuid }
+        - name: from_driver_id
+          in: query
+          required: false
+          description: "Алиас для incoming: от какого водителя получено."
+          schema: { type: string, format: uuid }
         - name: status
           in: query
           required: false
@@ -3619,7 +3643,8 @@ paths:
           in: query
           schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
       responses:
-        "200": { description: "data.items, data.total, data.page, data.limit" }
+        "200": { description: "data.items, data.total, data.page, data.limit, data.direction, data.counterparty_id" }
+        "400": { description: invalid_payload_detail }
         "401": { description: unauthorized }
         "500": { description: failed_to_list_sent_offers }
 

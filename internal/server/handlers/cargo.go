@@ -1036,14 +1036,41 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 	status := strings.ToUpper(strings.TrimSpace(c.Query("status")))
+	direction := strings.ToLower(strings.TrimSpace(c.DefaultQuery("direction", "outgoing")))
+	switch direction {
+	case "outgoing", "from_me", "sent", "by":
+		direction = "outgoing"
+	case "incoming", "to_me", "received":
+		direction = "incoming"
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	var counterpartyID *uuid.UUID
+	rawCounterparty := strings.TrimSpace(c.Query("counterparty_id"))
+	if rawCounterparty == "" {
+		if direction == "outgoing" {
+			rawCounterparty = strings.TrimSpace(c.Query("to_driver_id"))
+		} else {
+			rawCounterparty = strings.TrimSpace(c.Query("from_driver_id"))
+		}
+	}
+	if rawCounterparty != "" {
+		id, err := uuid.Parse(rawCounterparty)
+		if err != nil || id == uuid.Nil {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+			return
+		}
+		counterpartyID = &id
+	}
 
-	total, err := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status)
+	total, err := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, direction, counterpartyID)
 	if err != nil {
 		h.logger.Error("dispatcher sent offers count", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
 		return
 	}
-	rows, err := h.repo.ListDispatcherSentOffers(c.Request.Context(), dispatcherID, status, limit, offset)
+	rows, err := h.repo.ListDispatcherSentOffers(c.Request.Context(), dispatcherID, status, direction, counterpartyID, limit, offset)
 	if err != nil {
 		h.logger.Error("dispatcher sent offers list", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
@@ -1051,6 +1078,12 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 	}
 	items := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
+		sourceRole := "CARGO_MANAGER"
+		sourceID := dispatcherID.String()
+		if direction == "incoming" {
+			sourceRole = "DRIVER"
+			sourceID = row.CarrierID.String()
+		}
 		item := gin.H{
 			"cargo_id": row.CargoID.String(),
 			"cargo": gin.H{
@@ -1074,8 +1107,8 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 				"created_at":       row.CreatedAt,
 				"rejection_reason": row.RejectionReason,
 				"status":           row.Status,
-				"source_role":      "CARGO_MANAGER",
-				"source_id":        dispatcherID.String(),
+				"source_role":      sourceRole,
+				"source_id":        sourceID,
 			},
 		}
 		if row.TripID != nil {
@@ -1091,6 +1124,8 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		"page":   page,
 		"limit":  limit,
 		"status": status,
+		"direction": direction,
+		"counterparty_id": counterpartyID,
 	})
 }
 
