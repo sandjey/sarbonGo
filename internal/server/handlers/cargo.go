@@ -1628,6 +1628,7 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	if proposedBy == "" {
 		proposedBy = cargo.OfferProposedByDriver
 	}
+	proposedBy = strings.ToUpper(strings.TrimSpace(proposedBy))
 	cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
 	if cargoObj == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
@@ -1653,6 +1654,10 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			return
 		}
 	default:
+		h.logger.Error("accept offer invalid proposed_by",
+			zap.String("offer_id", offerID.String()),
+			zap.String("proposed_by", offer.ProposedBy),
+		)
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
