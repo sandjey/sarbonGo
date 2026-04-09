@@ -68,49 +68,49 @@ type WayPoint struct {
 
 // Cargo model (table cargo).
 type Cargo struct {
-	ID           uuid.UUID
-	Name         *string
-	Weight       float64
-	Volume       float64
+	ID     uuid.UUID
+	Name   *string
+	Weight float64
+	Volume float64
 	// VehiclesAmount — сколько машин требуется для этого груза.
 	VehiclesAmount int
 	// VehiclesLeft — сколько машин ещё не «вышли в путь» (уменьшается при переходе рейса в IN_TRANSIT).
-	VehiclesLeft int
-	Packaging        *string
-	PackagingAmount  *int
-	Dimensions       *string
-	PhotoURLs        []string
-	WayPoints        []WayPoint
-	ReadyEnabled bool
-	ReadyAt      *time.Time
-	Comment      *string
-	TruckType    string
-	PowerPlateType   string
-	TrailerPlateType string
-	TempMin      *float64
-	TempMax      *float64
-	ADREnabled   bool
-	ADRClass     *string
-	LoadingTypes []string
-	UnloadingTypes []string
+	VehiclesLeft         int
+	Packaging            *string
+	PackagingAmount      *int
+	Dimensions           *string
+	PhotoURLs            []string
+	WayPoints            []WayPoint
+	ReadyEnabled         bool
+	ReadyAt              *time.Time
+	Comment              *string
+	TruckType            string
+	PowerPlateType       string
+	TrailerPlateType     string
+	TempMin              *float64
+	TempMax              *float64
+	ADREnabled           bool
+	ADRClass             *string
+	LoadingTypes         []string
+	UnloadingTypes       []string
 	IsTwoDriversRequired bool
-	ShipmentType *ShipmentType
-	BeltsCount   *int
-	Documents    *Documents
-	ContactName  *string
-	ContactPhone *string
-	Status       CargoStatus
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	ShipmentType         *ShipmentType
+	BeltsCount           *int
+	Documents            *Documents
+	ContactName          *string
+	ContactPhone         *string
+	Status               CargoStatus
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
 	// Moderation: admin reject reason (mandatory when status = rejected)
 	ModerationRejectionReason *string
 	// Кто создал: admin, dispatcher или company (admins, freelance_dispatchers или companies)
-	CreatedByType *string   // "admin" | "dispatcher" | "company"
+	CreatedByType *string // "admin" | "dispatcher" | "company"
 	CreatedByID   *uuid.UUID
 	// От какой компании груз (опционально; при created_by_type=company совпадает с created_by_id)
-	CompanyID     *uuid.UUID
-	CargoTypeID   *uuid.UUID
+	CompanyID   *uuid.UUID
+	CargoTypeID *uuid.UUID
 	// Denormalised from cargo_types (LEFT JOIN); nil when cargo_type_id is NULL.
 	CargoTypeCode   *string
 	CargoTypeNameRU *string
@@ -143,56 +143,56 @@ type RoutePoint struct {
 
 // Payment model (table payments).
 type Payment struct {
-	ID                uuid.UUID
-	CargoID           uuid.UUID
-	IsNegotiable      bool
-	PriceRequest      bool
-	TotalAmount       *float64
-	TotalCurrency     *string
-	WithPrepayment    bool
-	PrepaymentAmount  *float64
+	ID                 uuid.UUID
+	CargoID            uuid.UUID
+	IsNegotiable       bool
+	PriceRequest       bool
+	TotalAmount        *float64
+	TotalCurrency      *string
+	WithPrepayment     bool
+	PrepaymentAmount   *float64
 	PrepaymentCurrency *string
-	PrepaymentType    *string
-	RemainingAmount   *float64
-	RemainingCurrency *string
-	RemainingType     *string
-	PaymentNote       *string
-	PaymentTermsNote  *string
+	PrepaymentType     *string
+	RemainingAmount    *float64
+	RemainingCurrency  *string
+	RemainingType      *string
+	PaymentNote        *string
+	PaymentTermsNote   *string
 }
 
 // ProposedBy — кто задал цену в оффере (кто должен принять другую сторону).
 const (
-	OfferProposedByDriver      = "DRIVER"      // водитель предложил цену → принимает диспетчер
-	OfferProposedByDispatcher  = "DISPATCHER"  // диспетчер предложил цену → принимает водитель
+	OfferProposedByDriver     = "DRIVER"     // водитель предложил цену → принимает диспетчер
+	OfferProposedByDispatcher = "DISPATCHER" // диспетчер предложил цену → принимает водитель
 )
 
 // Offer model (table offers).
 type Offer struct {
-	ID             uuid.UUID
-	CargoID        uuid.UUID
-	CarrierID      uuid.UUID
-	Price          float64
-	Currency       string
-	Comment        *string
-	ProposedBy     string // DRIVER | DISPATCHER
-	Status         string // PENDING, ACCEPTED, REJECTED
+	ID              uuid.UUID
+	CargoID         uuid.UUID
+	CarrierID       uuid.UUID
+	Price           float64
+	Currency        string
+	Comment         *string
+	ProposedBy      string  // DRIVER | DISPATCHER
+	Status          string  // PENDING, ACCEPTED, REJECTED
 	RejectionReason *string // optional, when dispatcher rejects
-	CreatedAt      time.Time
+	CreatedAt       time.Time
 }
 
 // DriverCargoOffer is one driver offer plus minimal cargo/trip info.
 // Used by GET /v1/driver/cargo-offers.
 type DriverCargoOffer struct {
 	Offer
-	CargoStatus         CargoStatus
-	CargoName           *string
-	CargoWeight         float64
-	CargoVolume         float64
-	CargoTruckType      string
-	CargoVehiclesAmount int
-	CargoVehiclesLeft   int
-	CargoFromCityCode   *string
-	CargoToCityCode     *string
+	CargoStatus          CargoStatus
+	CargoName            *string
+	CargoWeight          float64
+	CargoVolume          float64
+	CargoTruckType       string
+	CargoVehiclesAmount  int
+	CargoVehiclesLeft    int
+	CargoFromCityCode    *string
+	CargoToCityCode      *string
 	CargoCurrentPrice    *float64
 	CargoCurrentCurrency *string
 	CargoCreatedByType   *string
@@ -217,15 +217,32 @@ type DispatcherSentOffer struct {
 	TripStatus           *string
 }
 
+// DriverAllOffer is one driver-centric offer row for /v1/driver/offers/all (incoming/outgoing).
+type DriverAllOffer struct {
+	Offer
+	CargoStatus          CargoStatus
+	CargoName            *string
+	CargoFromCityCode    *string
+	CargoToCityCode      *string
+	CargoVehiclesAmount  int
+	CargoVehiclesLeft    int
+	CargoCurrentPrice    *float64
+	CargoCurrentCurrency *string
+	CargoCreatedByType   *string
+	CargoCreatedByID     *uuid.UUID
+	TripID               *uuid.UUID
+	TripStatus           *string
+}
+
 // CargoPhoto is metadata for a cargo photo stored on disk.
 type CargoPhoto struct {
-	ID        uuid.UUID
-	CargoID   uuid.UUID
+	ID         uuid.UUID
+	CargoID    uuid.UUID
 	UploaderID *uuid.UUID
-	Mime      string
-	SizeBytes int64
-	Path      string
-	CreatedAt time.Time
+	Mime       string
+	SizeBytes  int64
+	Path       string
+	CreatedAt  time.Time
 }
 
 // CargoPendingPhoto is a photo uploaded before cargo exists (cargo_pending_photos).

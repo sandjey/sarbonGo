@@ -13,6 +13,25 @@ info:
     **Категории API:** Водители (Drivers) — регистрация, профиль, KYC, рейсы; Cargo Manager — грузы, офферы, переговоры и связанные рейсы; Driver Manager — водители, приглашения и подбор грузов для водителей; Админ — компании и владельцы; Справочники (Reference) — города, типы кузова, статусы.
     В каждом разделе вверху дано краткое описание потока; у схем и методов — подробные русские пояснения к полям.
 
+    **Единые правила для всех list API (чтобы не ошибаться):**
+    - `page` начинается с `1`; `limit` обычно `1..100` (смотри ограничения у конкретного метода).
+    - Если параметр не передан, сервер использует **default** (всегда указан в описании endpoint).
+    - Поля `status` чувствительны к допустимым значениям; ориентируйся на `Reference`-разделы и `enum`.
+    - `direction`:
+      - `all` — показать оба направления в одном списке.
+      - `outgoing` — отправлено мной.
+      - `incoming` — отправлено мне.
+      - Допускаются алиасы (если указаны у endpoint).
+    - Сортировка:
+      - если есть параметр `sort`, формат обычно `<field>:<asc|desc>`, например `created_at:desc`.
+      - без `sort` используется дефолтный порядок, указанный в endpoint.
+    - Примеры:
+      - `GET /v1/dispatchers/offers/all?direction=incoming&status=PENDING&page=1&limit=30`
+      - `GET /v1/driver/offers/all?direction=outgoing&page=1&limit=20`
+      - `GET /api/cargo?status=SEARCHING_ALL&sort=created_at:desc&page=1&limit=20`
+      - `GET /v1/dispatchers/cargo/mine?status=SEARCHING_ALL&from_city_code=TAS&to_city_code=SAM`
+      - `POST /v1/driver/cargo/active` body: `{ "lat": 41.311, "lng": 69.279, "radius_km": 150, "page": 1, "limit": 20 }`
+
     **Полная документация на русском:** см. файл docs/DOCUMENTATION-RU.md в репозитории.
 
 servers:
@@ -70,9 +89,19 @@ tags:
   - name: "Cargo Manager / Cargo CRUD"
     description: "Создание, получение, обновление, удаление и статусы грузов, включая фото груза."
   - name: "Cargo Manager / View Cargo"
-    description: "Просмотр всех грузов Cargo Manager."
+    description: |
+      Просмотр грузов Cargo Manager.
+      Базовые list-endpoints:
+      - `/v1/dispatchers/cargo/mine` — только мои.
+      - `/v1/dispatchers/cargo/all` — общий каталог.
+      Фильтры: `status`, `truck_type`, `weight_min/max`, `created_from/to`, `q`, `from_city_code`, `to_city_code`.
+      Сортировка: `sort=<field>:<asc|desc>`, по умолчанию `created_at:desc`.
   - name: "Cargo Manager / Offers"
-    description: "Офферы Cargo Manager: отправить оффер и посмотреть мои офферы."
+    description: |
+      Офферы Cargo Manager.
+      - `/v1/dispatchers/offers/all` — единый список по `direction=all|incoming|outgoing` + `status` + `counterparty_id`.
+      - `/v1/dispatchers/offers/{id}/accept|reject` — действия по офферу.
+      В ответе списка есть `counts.incoming/outgoing`.
   - name: "Cargo Manager / Cargo likes"
     description: |
       **Избранные грузы (Cargo Manager).** Добавить/удалить/список по JWT диспетчера. Можно сохранить **любой** существующий груз (свой или чужой): `POST /v1/dispatchers/cargo-likes` + `cargo_id`, `DELETE /cargo-likes/{cargoId}`, `GET` + `limit`.
@@ -98,7 +127,11 @@ tags:
       **Рейсы водителя**
       GET /v1/driver/trips — список рейсов. POST /v1/driver/trips/:id/confirm (или confirm-transition) — шаг двустороннего подтверждения. POST /v1/driver/trips/:id/reject — отклонить назначение. POST /v1/driver/trips/:id/cancel — отменить рейс. GET /v1/driver/trips/:id/state — статус рейса, ожидание подтверждений, кратко по грузу. Требуется X-User-Token (driver).
   - name: Drivers / Cargo view
-    description: "Просмотр и поиск грузов для водителя: active (по координатам) и matching (без избранного)."
+    description: |
+      Просмотр и поиск грузов для водителя:
+      - `POST /v1/driver/cargo/active` — ближайшие по координатам (distance asc), опционально `radius_km`.
+      - `GET /v1/driver/matching-cargo` — подбор по типу прицепа.
+      Во всех списках есть пагинация `page/limit`.
   - name: Drivers / Cargo likes
     description: |
       **Избранные грузы (водитель).** `POST /v1/driver/cargo-likes` + `cargo_id`, `DELETE /cargo-likes/{cargoId}`, `GET` + `limit`. Хранение: `driver_cargo_favorites`.
@@ -106,7 +139,12 @@ tags:
     description: |
       **Избранные диспетчеры (водитель).** Закладки по `freelance_dispatchers.id`: `POST /v1/driver/dispatcher-likes` + `dispatcher_id`, `DELETE /dispatcher-likes/{dispatcherId}`, `GET` + `limit`. Таблица `driver_dispatcher_favorites`.
   - name: Drivers / Offers
-    description: "Офферы водителя: отправить оффер, посмотреть мои офферы, принять/отклонить приглашение."
+    description: |
+      Офферы водителя:
+      - `/v1/driver/offers/all` — единый список по `direction=all|incoming|outgoing`, фильтры `status`, `counterparty_id`.
+      - `/v1/driver/cargo/{id}/offers` — отправить оффер.
+      - `/v1/driver/offers/{id}/accept|reject` — принять/отклонить.
+      Для `/offers/all` сервер возвращает `counts.incoming/outgoing`.
   - name: Drivers / Driver invitations
     description: |
       **Приглашения для водителя: получить список, принять или отказать.**
@@ -3653,11 +3691,20 @@ paths:
       summary: "Все офферы Cargo Manager (исходящие и входящие)"
       description: |
         Единый список офферов для Cargo Manager с переключением направления:
-        - `direction=outgoing` (по умолчанию) — офферы, **отправленные мной** водителям (`proposed_by=DISPATCHER`)
+        - `direction=all` (по умолчанию) — оба направления в одном списке
+        - `direction=outgoing` — офферы, **отправленные мной** водителям (`proposed_by=DISPATCHER`)
         - `direction=incoming` — офферы, **отправленные мне** водителями (`proposed_by=DRIVER`)
 
         Структура элемента: блоки `cargo`, `offer`, `trip` (если уже создан рейс).
-        Поддерживает фильтр `status` (PENDING, ACCEPTED, REJECTED), пагинацию.
+        Поддерживает фильтр `status` (PENDING, ACCEPTED, REJECTED), пагинацию и счетчики `data.counts.incoming/outgoing`.
+        **Как читать:**
+        - `direction=all` + `counts` — полный обзор.
+        - `direction=outgoing` — только отправленные мной.
+        - `direction=incoming` — только отправленные мне.
+        **Примеры:**
+        - `GET /v1/dispatchers/offers/all?direction=all&page=1&limit=30`
+        - `GET /v1/dispatchers/offers/all?direction=incoming&status=PENDING`
+        - `GET /v1/dispatchers/offers/all?direction=outgoing&to_driver_id=<driver_uuid>`
         Допустимые алиасы `direction`: outgoing/from_me/sent/by и incoming/to_me/received.
         Ответы на 5 языках (X-Language: ru, uz, en, tr, zh).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -3665,8 +3712,8 @@ paths:
         - name: direction
           in: query
           required: false
-          description: "Направление офферов: outgoing (по умолчанию) или incoming"
-          schema: { type: string, example: "outgoing" }
+          description: "Направление офферов: all (по умолчанию), outgoing или incoming"
+          schema: { type: string, example: "all" }
         - name: counterparty_id
           in: query
           required: false
@@ -3693,7 +3740,7 @@ paths:
           in: query
           schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
       responses:
-        "200": { description: "data.items, data.total, data.page, data.limit, data.direction, data.counterparty_id" }
+        "200": { description: "data.items, data.total, data.page, data.limit, data.direction, data.counterparty_id, data.counts.incoming, data.counts.outgoing" }
         "400": { description: invalid_payload_detail }
         "401": { description: unauthorized }
         "500": { description: failed_to_list_sent_offers }
@@ -3708,6 +3755,10 @@ paths:
         Поддерживает фильтрацию/сортировку/пагинацию как `GET /api/cargo`, плюс фильтр по городам:
         - `from_city_code` — city_code основной LOAD точки (route_points.is_main_load=true)
         - `to_city_code` — city_code основной UNLOAD точки (route_points.is_main_unload=true)
+        **Примеры:**
+        - `GET /v1/dispatchers/cargo/mine?page=1&limit=20`
+        - `GET /v1/dispatchers/cargo/mine?status=SEARCHING_ALL,COMPLETED&sort=created_at:desc`
+        - `GET /v1/dispatchers/cargo/mine?from_city_code=TAS&to_city_code=SAM&truck_type=TENT`
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: page
@@ -3766,6 +3817,10 @@ paths:
         Каталог **всех грузов** в системе для Cargo Manager.
         По умолчанию (если не передан `status`) возвращаются только **активные** грузы со статусом `SEARCHING_ALL`.
         Фильтры как `GET /api/cargo` + `from_city_code` / `to_city_code` по основным точкам маршрута.
+        **Примеры:**
+        - `GET /v1/dispatchers/cargo/all?page=1&limit=20`
+        - `GET /v1/dispatchers/cargo/all?status=SEARCHING_ALL&sort=created_at:desc`
+        - `GET /v1/dispatchers/cargo/all?q=wheat&weight_min=10&weight_max=25`
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: page
@@ -4378,42 +4433,49 @@ paths:
         "500":
           description: failed_to_delete_favorite
 
-  /v1/driver/cargo-offers:
+  /v1/driver/offers/all:
     get:
       tags: ["Drivers / Offers"]
-      summary: "Мои офферы по грузам"
+      summary: "Все офферы водителя (входящие и исходящие)"
       description: |
-        Список офферов (запросов на перевозку), которые отправил текущий водитель.
-        Фильтр по вкладкам через `bucket`:
-        - `sent` = отправленные/ожидающие ответа
-        - `accepted` = согласованные (рабочие)
-        - `completed` = завершённые
-        - `rejected` = отклонённые
-        Структура элемента разделена на 2 блока: `cargo` и `offer`.
-        В `cargo` дополнительно возвращаются: `from_city_code`, `to_city_code`, `vehicles_amount`, `vehicles_left`.
+        Единый список офферов для Driver Mobile:
+        - `direction=all` (по умолчанию) — оба направления в одном списке
+        - `direction=outgoing` — офферы, отправленные водителем (`proposed_by=DRIVER`)
+        - `direction=incoming` — офферы/инвайты, отправленные водителю (`proposed_by=DISPATCHER`)
 
-        В блоке `offer`:
-        - `source_role`: кто отправил приглашение (`DRIVER`, `CARGO_MANAGER`, `DRIVER_MANAGER`)
-        - `source_id`: id отправителя
-        - `invitation_price`: сумма приглашения/оффера
-        - `state`: `pending | accepted | active | rejected`
-        - `step`:
-          - `WAITING_DRIVER_RESPONSE`
-          - `WAITING_CARGO_MANAGER_RESPONSE`
-          - `WAITING_DRIVER_MANAGER_RESPONSE`
-          - `ACCEPTED`
-          - `ACTIVE_TRIP`
-          - `REJECTED`
-
-        Поле `status` оффера в корне элемента не возвращается, чтобы не путать со `status` груза.
-        Ответы на 5 языках (X-Language: ru, uz, en, tr, zh).
+        Поддерживает `status`, пагинацию, фильтр по контрагенту-диспетчеру (`counterparty_id`)
+        и счетчики `data.counts.incoming/outgoing`.
+        Алиасы: `to_dispatcher_id` (для outgoing), `from_dispatcher_id` (для incoming).
+        **Как читать:**
+        - `direction=all` + `counts` — общий обзор.
+        - `direction=incoming` — приглашения/офферы, отправленные мне.
+        - `direction=outgoing` — офферы, отправленные мной.
+        **Примеры:**
+        - `GET /v1/driver/offers/all?direction=all&page=1&limit=30`
+        - `GET /v1/driver/offers/all?direction=incoming&status=PENDING`
+        - `GET /v1/driver/offers/all?direction=outgoing&to_dispatcher_id=<dispatcher_uuid>`
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
-        - name: bucket
+        - name: direction
           in: query
           required: false
-          schema: { type: string, enum: [sent, accepted, completed, rejected], default: sent }
-          description: "Логические вкладки UI (без показа внутренних статусов таблицы offers)"
+          schema: { type: string, example: "all" }
+        - name: counterparty_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: to_dispatcher_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: from_dispatcher_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: "PENDING" }
         - name: page
           in: query
           schema: { type: integer, default: 1, minimum: 1 }
@@ -4421,14 +4483,10 @@ paths:
           in: query
           schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
       responses:
-        "200":
-          description: "data.items — массив с блоками cargo и offer, плюс trip; data.total, data.page, data.limit"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
-        "400": { description: invalid_cargo_offer_bucket }
+        "200": { description: "data.items, data.total, data.page, data.limit, data.direction, data.counterparty_id, data.counts.incoming, data.counts.outgoing" }
+        "400": { description: invalid_payload_detail }
         "401": { description: unauthorized }
-        "500": { description: failed_to_list_cargo_offers (5 языков) }
+        "500": { description: failed_to_list_cargo_offers }
 
   /v1/driver/cargo/{id}/offers:
     post:
@@ -4503,18 +4561,6 @@ paths:
         "400": { description: rejection_reason_required / rejection_reason_too_short }
         "403": { description: not_your_offer }
 
-  /v1/driver/cargo-invitation-stats:
-    get:
-      tags: ["Drivers / Offers"]
-      summary: "Счётчики приглашений/офферов по всем грузам (водитель)"
-      description: |
-        Сводка по офферам текущего водителя: сколько **получено** приглашений от диспетчеров (DISPATCHER) и сколько **отправлено** водителем (DRIVER), всего и в статусе PENDING.
-        Поля: invitations_received_* (от диспетчера), invitations_sent_* (от водителя).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200":
-          description: totals and pending counts
-
   /v1/driver/active-cargo:
     get:
       tags: ["Legacy / Deprecated"]
@@ -4547,6 +4593,10 @@ paths:
         Для водителя компании дополнительно учитываются грузы `SEARCHING_COMPANY` своей компании.
 
         `radius_km` — опционален. Если передан, в ответ попадают только грузы в указанном радиусе.
+        **Примеры body:**
+        - `{ "lat": 41.311, "lng": 69.279 }`
+        - `{ "lat": 41.311, "lng": 69.279, "radius_km": 150 }`
+        - `{ "lat": 41.311, "lng": 69.279, "radius_km": 70, "page": 1, "limit": 20 }`
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
         required: true

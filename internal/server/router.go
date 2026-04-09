@@ -365,7 +365,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/cargo/active", cargoH.ListActiveCargoForDriver)
 	driverAuthed.GET("/active-cargo", cargoDriversH.GetMyActiveCargo)
 	driverAuthed.GET("/cargo-offers", cargoH.ListMyCargoOffers)
-	driverAuthed.GET("/cargo-invitation-stats", cargoH.GetDriverOfferInvitationStats)
+	driverAuthed.GET("/offers/all", cargoH.ListOffersForDriver)
 	driverAuthed.POST("/cargo/:id/offers", cargoH.DriverCreateOffer)
 	driverAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	driverAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDriver)

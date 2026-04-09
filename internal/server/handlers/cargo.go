@@ -1098,8 +1098,10 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 	}
 	offset := (page - 1) * limit
 	status := strings.ToUpper(strings.TrimSpace(c.Query("status")))
-	direction := strings.ToLower(strings.TrimSpace(c.DefaultQuery("direction", "outgoing")))
+	direction := strings.ToLower(strings.TrimSpace(c.DefaultQuery("direction", "all")))
 	switch direction {
+	case "all", "both":
+		direction = "all"
 	case "outgoing", "from_me", "sent", "by":
 		direction = "outgoing"
 	case "incoming", "to_me", "received":
@@ -1142,7 +1144,7 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 	for _, row := range rows {
 		sourceRole := "CARGO_MANAGER"
 		sourceID := dispatcherID.String()
-		if direction == "incoming" {
+		if direction == "incoming" || (direction == "all" && strings.EqualFold(strings.TrimSpace(row.ProposedBy), cargo.OfferProposedByDriver)) {
 			sourceRole = "DRIVER"
 			sourceID = row.CarrierID.String()
 		}
@@ -1180,6 +1182,8 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
+	incomingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, "incoming", counterpartyID)
+	outgoingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, "outgoing", counterpartyID)
 	resp.OKLang(c, "sent_offers_listed", gin.H{
 		"items":           items,
 		"total":           total,
@@ -1188,6 +1192,132 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		"status":          status,
 		"direction":       direction,
 		"counterparty_id": counterpartyID,
+		"counts": gin.H{
+			"incoming": incomingCount,
+			"outgoing": outgoingCount,
+		},
+	})
+}
+
+// ListOffersForDriver GET /v1/driver/offers/all
+func (h *CargoHandler) ListOffersForDriver(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	page := getIntQuery(c, "page", 1)
+	if page < 1 {
+		page = 1
+	}
+	limit := getIntQuery(c, "limit", 30)
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+	status := strings.ToUpper(strings.TrimSpace(c.Query("status")))
+	direction := strings.ToLower(strings.TrimSpace(c.DefaultQuery("direction", "all")))
+	switch direction {
+	case "all", "both":
+		direction = "all"
+	case "outgoing", "from_me", "sent", "by":
+		direction = "outgoing"
+	case "incoming", "to_me", "received":
+		direction = "incoming"
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	var counterpartyID *uuid.UUID
+	rawCounterparty := strings.TrimSpace(c.Query("counterparty_id"))
+	if rawCounterparty == "" {
+		if direction == "outgoing" {
+			rawCounterparty = strings.TrimSpace(c.Query("to_dispatcher_id"))
+		} else {
+			rawCounterparty = strings.TrimSpace(c.Query("from_dispatcher_id"))
+		}
+	}
+	if rawCounterparty != "" {
+		id, err := uuid.Parse(rawCounterparty)
+		if err != nil || id == uuid.Nil {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+			return
+		}
+		counterpartyID = &id
+	}
+
+	total, err := h.repo.CountDriverOffersAll(c.Request.Context(), driverID, status, direction, counterpartyID)
+	if err != nil {
+		h.logger.Error("driver offers all count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_cargo_offers")
+		return
+	}
+	rows, err := h.repo.ListDriverOffersAll(c.Request.Context(), driverID, status, direction, counterpartyID, limit, offset)
+	if err != nil {
+		h.logger.Error("driver offers all list", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_cargo_offers")
+		return
+	}
+	items := make([]gin.H, 0, len(rows))
+	for _, row := range rows {
+		sourceRole := "DRIVER"
+		sourceID := driverID.String()
+		isIncomingRow := strings.EqualFold(strings.TrimSpace(row.ProposedBy), cargo.OfferProposedByDispatcher)
+		if direction == "incoming" || (direction == "all" && isIncomingRow) {
+			sourceRole = "CARGO_MANAGER"
+			if row.CargoCreatedByType != nil && strings.EqualFold(strings.TrimSpace(*row.CargoCreatedByType), "driver") {
+				sourceRole = "DRIVER_MANAGER"
+			}
+			if row.CargoCreatedByID != nil {
+				sourceID = row.CargoCreatedByID.String()
+			} else {
+				sourceID = ""
+			}
+		}
+		item := gin.H{
+			"cargo_id": row.CargoID.String(),
+			"cargo": gin.H{
+				"id":                     row.CargoID.String(),
+				"name":                   row.CargoName,
+				"status":                 row.CargoStatus,
+				"from_city_code":         row.CargoFromCityCode,
+				"to_city_code":           row.CargoToCityCode,
+				"vehicles_amount":        row.CargoVehiclesAmount,
+				"vehicles_left":          row.CargoVehiclesLeft,
+				"current_price":          row.CargoCurrentPrice,
+				"current_price_currency": row.CargoCurrentCurrency,
+			},
+			"offer": gin.H{
+				"id":               row.ID.String(),
+				"proposed_by":      row.ProposedBy,
+				"price":            row.Price,
+				"invitation_price": row.Price,
+				"currency":         row.Currency,
+				"comment":          row.Comment,
+				"created_at":       row.CreatedAt,
+				"rejection_reason": row.RejectionReason,
+				"status":           row.Status,
+				"source_role":      sourceRole,
+				"source_id":        sourceID,
+			},
+		}
+		if row.TripID != nil {
+			item["trip"] = gin.H{"id": row.TripID.String(), "status": row.TripStatus}
+		} else {
+			item["trip"] = nil
+		}
+		items = append(items, item)
+	}
+	incomingCount, _ := h.repo.CountDriverOffersAll(c.Request.Context(), driverID, status, "incoming", counterpartyID)
+	outgoingCount, _ := h.repo.CountDriverOffersAll(c.Request.Context(), driverID, status, "outgoing", counterpartyID)
+	resp.OKLang(c, "cargo_offers_listed", gin.H{
+		"items":           items,
+		"total":           total,
+		"page":            page,
+		"limit":           limit,
+		"status":          status,
+		"direction":       direction,
+		"counterparty_id": counterpartyID,
+		"counts": gin.H{
+			"incoming": incomingCount,
+			"outgoing": outgoingCount,
+		},
 	})
 }
 

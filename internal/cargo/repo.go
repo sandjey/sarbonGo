@@ -1195,12 +1195,21 @@ VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, now()) RETURNING id`,
 }
 
 func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
-	proposedBy := "DISPATCHER"
+	proposedBy := ""
 	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "", "all", "both":
+		proposedBy = ""
+	case "outgoing", "from_me", "sent", "by":
+		proposedBy = "DISPATCHER"
 	case "incoming", "to_me", "received":
 		proposedBy = "DRIVER"
+	default:
+		return 0, errors.New("cargo: invalid offers direction")
 	}
-	where := "o.proposed_by = '" + proposedBy + "' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+	where := "c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+	if proposedBy != "" {
+		where += " AND COALESCE(o.proposed_by, 'DRIVER') = '" + proposedBy + "'"
+	}
 	args := []any{dispatcherID}
 	argN := 2
 	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
@@ -1227,12 +1236,21 @@ func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.U
 	if offset < 0 {
 		offset = 0
 	}
-	proposedBy := "DISPATCHER"
+	proposedBy := ""
 	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "", "all", "both":
+		proposedBy = ""
+	case "outgoing", "from_me", "sent", "by":
+		proposedBy = "DISPATCHER"
 	case "incoming", "to_me", "received":
 		proposedBy = "DRIVER"
+	default:
+		return nil, errors.New("cargo: invalid offers direction")
 	}
-	where := "o.proposed_by = '" + proposedBy + "' AND c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+	where := "c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
+	if proposedBy != "" {
+		where += " AND COALESCE(o.proposed_by, 'DRIVER') = '" + proposedBy + "'"
+	}
 	args := []any{dispatcherID}
 	argN := 2
 	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
@@ -1321,6 +1339,130 @@ LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 		if tripStatus.Valid {
 			v := tripStatus.String
 			row.TripStatus = &v
+		}
+		list = append(list, row)
+	}
+	return list, rows.Err()
+}
+
+func (r *Repo) CountDriverOffersAll(ctx context.Context, driverID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
+	where := []string{"o.carrier_id = $1"}
+	args := []any{driverID}
+	argN := 2
+	if status != "" {
+		where = append(where, "o.status = $"+strconv.Itoa(argN))
+		args = append(args, strings.ToUpper(strings.TrimSpace(status)))
+		argN++
+	}
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "", "all", "both":
+		// both incoming and outgoing
+	case "outgoing", "from_me", "sent", "by":
+		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DRIVER'")
+	case "incoming", "to_me", "received":
+		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'")
+	default:
+		return 0, errors.New("cargo: invalid offers direction")
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		where = append(where, "c.created_by_id = $"+strconv.Itoa(argN))
+		args = append(args, *counterpartyID)
+	}
+	q := `SELECT COUNT(*)
+FROM offers o
+JOIN cargo c ON c.id = o.cargo_id
+WHERE ` + strings.Join(where, " AND ")
+	var total int
+	if err := r.pg.QueryRow(ctx, q, args...).Scan(&total); err != nil {
+		return 0, err
+	}
+	return total, nil
+}
+
+func (r *Repo) ListDriverOffersAll(ctx context.Context, driverID uuid.UUID, status, direction string, counterpartyID *uuid.UUID, limit, offset int) ([]DriverAllOffer, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	where := []string{"o.carrier_id = $1"}
+	args := []any{driverID}
+	argN := 2
+	if status != "" {
+		where = append(where, "o.status = $"+strconv.Itoa(argN))
+		args = append(args, strings.ToUpper(strings.TrimSpace(status)))
+		argN++
+	}
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "", "all", "both":
+		// both incoming and outgoing
+	case "outgoing", "from_me", "sent", "by":
+		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DRIVER'")
+	case "incoming", "to_me", "received":
+		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'")
+	default:
+		return nil, errors.New("cargo: invalid offers direction")
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		where = append(where, "c.created_by_id = $"+strconv.Itoa(argN))
+		args = append(args, *counterpartyID)
+		argN++
+	}
+	args = append(args, limit, offset)
+	q := `SELECT
+  o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER') AS proposed_by, o.status, o.rejection_reason, o.created_at,
+  c.status, c.name, rpf.city_code AS from_city_code, rpt.city_code AS to_city_code,
+  COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0),
+  p.total_amount, p.total_currency, c.created_by_type, c.created_by_id,
+  t.id, t.status
+FROM offers o
+JOIN cargo c ON c.id = o.cargo_id
+LEFT JOIN LATERAL (
+  SELECT rp.city_code
+  FROM route_points rp
+  WHERE rp.cargo_id = c.id AND rp.is_main_load = true
+  ORDER BY rp.point_order ASC
+  LIMIT 1
+) rpf ON true
+LEFT JOIN LATERAL (
+  SELECT rp.city_code
+  FROM route_points rp
+  WHERE rp.cargo_id = c.id AND rp.is_main_unload = true
+  ORDER BY rp.point_order ASC
+  LIMIT 1
+) rpt ON true
+LEFT JOIN payments p ON p.cargo_id = c.id
+LEFT JOIN trips t ON t.cargo_id = c.id AND t.driver_id = o.carrier_id
+WHERE ` + strings.Join(where, " AND ") + `
+ORDER BY o.created_at DESC
+LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
+	rows, err := r.pg.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []DriverAllOffer
+	for rows.Next() {
+		var row DriverAllOffer
+		var rej sql.NullString
+		if err := rows.Scan(
+			&row.ID, &row.CargoID, &row.CarrierID, &row.Price, &row.Currency, &row.Comment, &row.ProposedBy, &row.Status, &rej, &row.CreatedAt,
+			&row.CargoStatus, &row.CargoName, &row.CargoFromCityCode, &row.CargoToCityCode,
+			&row.CargoVehiclesAmount, &row.CargoVehiclesLeft,
+			&row.CargoCurrentPrice, &row.CargoCurrentCurrency, &row.CargoCreatedByType, &row.CargoCreatedByID,
+			&row.TripID, &row.TripStatus,
+		); err != nil {
+			return nil, err
+		}
+		if rej.Valid {
+			s := strings.TrimSpace(rej.String)
+			if s != "" {
+				row.RejectionReason = &s
+			}
 		}
 		list = append(list, row)
 	}
