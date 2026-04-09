@@ -4561,6 +4561,28 @@ paths:
         "400": { description: rejection_reason_required / rejection_reason_too_short }
         "403": { description: not_your_offer }
 
+  /v1/driver/offers/{id}/cancel:
+    post:
+      tags: ["Drivers / Offers"]
+      summary: "Единая отмена: pending offer или связанный trip"
+      description: |
+        Универсальная отмена со стороны водителя:
+        - если оффер в `PENDING` — оффер переводится в `REJECTED` (внутренняя причина `cancelled_by_driver`);
+        - если оффер в `ACCEPTED` и по нему есть trip — trip отменяется (архивируется), оффер возвращается в `PENDING`.
+
+        Используйте этот endpoint, когда водитель хочет освободиться и принять другой оффер.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.status=cancelled, data.target=offer|trip" }
+        "400": { description: invalid_payload_detail / trip_already_completed }
+        "403": { description: not_your_offer / trip_not_assigned_to_you }
+        "404": { description: offer_not_found / trip_not_found }
+
   /v1/driver/active-cargo:
     get:
       tags: ["Legacy / Deprecated"]

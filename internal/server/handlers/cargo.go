@@ -1804,6 +1804,117 @@ func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 	resp.OKLang(c, "ok", gin.H{"status": "rejected"})
 }
 
+// CancelOfferOrTripDriver POST /v1/driver/offers/:id/cancel
+// Single driver action:
+// - PENDING offer  -> mark REJECTED with internal reason "cancelled_by_driver"
+// - ACCEPTED offer -> cancel linked trip (if exists), rollback offer to PENDING via OnTripCancelledTx
+func (h *CargoHandler) CancelOfferOrTripDriver(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	offerID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+		return
+	}
+	offer, err := h.repo.GetOfferByID(c.Request.Context(), offerID)
+	if err != nil || offer == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
+		return
+	}
+	if offer.CarrierID != driverID {
+		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
+		return
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(offer.Status)) {
+	case "PENDING":
+		if err := h.repo.RejectOffer(c.Request.Context(), offerID, "cancelled_by_driver"); err != nil {
+			if errors.Is(err, cargo.ErrRejectionReasonRequired) {
+				resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
+				return
+			}
+			resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
+			return
+		}
+		resp.OKLang(c, "ok", gin.H{
+			"offer_id": offerID.String(),
+			"status":   "cancelled",
+			"target":   "offer",
+		})
+		return
+
+	case "ACCEPTED":
+		if h.tripsRepo == nil {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+		t, err := h.tripsRepo.GetByOfferID(c.Request.Context(), offerID)
+		if err != nil || t == nil {
+			resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
+			return
+		}
+		if t.DriverID == nil || *t.DriverID != driverID {
+			resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
+			return
+		}
+		if t.Status == trips.StatusCompleted {
+			resp.ErrorLang(c, http.StatusBadRequest, "trip_already_completed")
+			return
+		}
+
+		tx, err := h.tripsRepo.BeginTx(c.Request.Context())
+		if err != nil {
+			h.logger.Error("driver offer cancel begin tx", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+			return
+		}
+		defer tx.Rollback(c.Request.Context())
+
+		tLocked, err := h.tripsRepo.GetByIDForUpdateTx(c.Request.Context(), tx, t.ID)
+		if err != nil || tLocked == nil {
+			resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
+			return
+		}
+		if tLocked.DriverID == nil || *tLocked.DriverID != driverID {
+			resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
+			return
+		}
+		if tLocked.Status == trips.StatusCompleted {
+			resp.ErrorLang(c, http.StatusBadRequest, "trip_already_completed")
+			return
+		}
+		if err := h.tripsRepo.ArchiveTripAndDeleteTx(c.Request.Context(), tx, tLocked.ID, "driver"); err != nil {
+			if err == trips.ErrNotFound {
+				resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
+				return
+			}
+			h.logger.Error("driver offer cancel archive trip", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+			return
+		}
+		if err := h.repo.OnTripCancelledTx(c.Request.Context(), tx, tLocked.CargoID, tLocked.OfferID, tLocked.Status); err != nil {
+			h.logger.Error("driver offer cancel on trip cancelled", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+			return
+		}
+		if err := tx.Commit(c.Request.Context()); err != nil {
+			h.logger.Error("driver offer cancel commit", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+			return
+		}
+		resp.OKLang(c, "ok", gin.H{
+			"offer_id": offerID.String(),
+			"trip_id":  tLocked.ID.String(),
+			"cargo_id": tLocked.CargoID.String(),
+			"status":   "cancelled",
+			"target":   "trip",
+		})
+		return
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+}
+
 // GetDriverOfferInvitationStats GET /v1/driver/cargo-invitation-stats — counts for current driver (all cargos).
 func (h *CargoHandler) GetDriverOfferInvitationStats(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)

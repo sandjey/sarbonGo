@@ -369,6 +369,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/cargo/:id/offers", cargoH.DriverCreateOffer)
 	driverAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	driverAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDriver)
+	driverAuthed.POST("/offers/:id/cancel", cargoH.CancelOfferOrTripDriver)
 
 	// Dispatchers: только API диспетчера
 	dispAuthed := v1.Group("/dispatchers")
