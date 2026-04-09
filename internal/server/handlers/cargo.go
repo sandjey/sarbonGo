@@ -1661,6 +1661,13 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	agreedPrice := offer.Price
 	agreedCurrency := strings.ToUpper(strings.TrimSpace(offer.Currency))
 	if err != nil {
+		h.logger.Error("accept offer failed",
+			zap.Error(err),
+			zap.String("offer_id", offerID.String()),
+			zap.String("role", role),
+			zap.String("proposed_by", proposedBy),
+			zap.String("carrier_id", offer.CarrierID.String()),
+		)
 		switch {
 		case errors.Is(err, cargo.ErrOfferNotFoundOrNotPending):
 			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
@@ -1670,6 +1677,8 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusConflict, "driver_busy_with_another_cargo")
 		case errors.Is(err, cargo.ErrCargoNotSearching):
 			resp.ErrorLang(c, http.StatusConflict, "cargo_not_searching")
+		case isDBConflict(err):
+			resp.ErrorLang(c, http.StatusConflict, "driver_busy_with_another_cargo")
 		default:
 			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		}
@@ -1698,6 +1707,14 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		"agreed_price":    agreedPrice,
 		"agreed_currency": agreedCurrency,
 	})
+}
+
+func isDBConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "23505" || strings.HasPrefix(pgErr.Code, "23")
 }
 
 // RejectOfferReq body for POST .../offers/:id/reject — reason is mandatory.

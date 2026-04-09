@@ -103,28 +103,35 @@ func AcceptTx(ctx context.Context, tx pgx.Tx, cargoID, driverID uuid.UUID) error
 		 VALUES ($1, $2, $3)`
 	_, err := tx.Exec(ctx, insertSQL, cargoID, driverID, StatusActive)
 	if err != nil {
-		// unique active per driver
-		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.ConstraintName == "ux_cargo_drivers_driver_active" {
-			// Defensive recovery for stale ACTIVE links (e.g. trip already cancelled/archived).
-			// If we can safely release stale ACTIVE, retry once.
-			released, relErr := releaseStaleActiveTx(ctx, tx, driverID)
-			if relErr != nil {
-				return relErr
+		if pgErr, ok := err.(*pgconn.PgError); ok {
+			// already exists (cargo_id, driver_id)
+			if pgErr.ConstraintName == "cargo_drivers_cargo_id_driver_id_key" {
+				return nil
 			}
-			if released {
-				_, err = tx.Exec(ctx, insertSQL, cargoID, driverID, StatusActive)
-				if err == nil {
-					return nil
+			// Handle active-driver uniqueness robustly (constraint name may differ by environment).
+			if pgErr.ConstraintName == "ux_cargo_drivers_driver_active" || pgErr.Code == "23505" {
+				// Defensive recovery for stale ACTIVE links (e.g. trip already cancelled/archived).
+				// If we can safely release stale ACTIVE, retry once.
+				released, relErr := releaseStaleActiveTx(ctx, tx, driverID)
+				if relErr != nil {
+					return relErr
 				}
-				if pgErr2, ok2 := err.(*pgconn.PgError); ok2 && pgErr2.ConstraintName == "ux_cargo_drivers_driver_active" {
-					return ErrDriverBusy
+				if released {
+					_, err = tx.Exec(ctx, insertSQL, cargoID, driverID, StatusActive)
+					if err == nil {
+						return nil
+					}
+					if pgErr2, ok2 := err.(*pgconn.PgError); ok2 {
+						if pgErr2.ConstraintName == "cargo_drivers_cargo_id_driver_id_key" {
+							return nil
+						}
+						if pgErr2.ConstraintName == "ux_cargo_drivers_driver_active" || pgErr2.Code == "23505" {
+							return ErrDriverBusy
+						}
+					}
 				}
+				return ErrDriverBusy
 			}
-			return ErrDriverBusy
-		}
-		// already exists (cargo_id, driver_id)
-		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.ConstraintName == "cargo_drivers_cargo_id_driver_id_key" {
-			return nil
 		}
 		return err
 	}
