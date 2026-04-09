@@ -19,7 +19,6 @@ import (
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/cargodrivers"
 	"sarbonNew/internal/chat"
-	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/companies"
 	"sarbonNew/internal/companytz"
 	"sarbonNew/internal/config"
@@ -30,6 +29,7 @@ import (
 	"sarbonNew/internal/driverinvitations"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/drivertodispatcherinvitations"
+	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/goadmin"
 	"sarbonNew/internal/infra"
 	"sarbonNew/internal/security"
@@ -165,7 +165,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo)
 
 	favRepo := favorites.NewRepo(deps.PG)
-	favH := handlers.NewFavoritesHandler(logger, favRepo, cargoRepo, driversRepo)
+	favH := handlers.NewFavoritesHandler(logger, favRepo, cargoRepo, driversRepo, dispatchersRepo)
 
 	driverCargoSearchH := handlers.NewDriverCargoSearchHandler(logger, cargoRepo, driversRepo)
 
@@ -209,7 +209,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	// WebRTC/call signaling routing: requires call_id in payload and validates participants.
 	chatHub.SetOnCallSignal(func(fromUserID uuid.UUID, msgType string, data json.RawMessage) (uuid.UUID, []byte, bool) {
 		var body struct {
-			CallID string          `json:"call_id"`
+			CallID  string          `json:"call_id"`
 			Payload json.RawMessage `json:"payload"`
 		}
 		if json.Unmarshal(data, &body) != nil || strings.TrimSpace(body.CallID) == "" {
@@ -234,9 +234,9 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 		out, _ := json.Marshal(map[string]any{
 			"type": msgType,
 			"data": map[string]any{
-				"call_id":  callID.String(),
-				"from_id":  fromUserID.String(),
-				"payload":  body.Payload,
+				"call_id": callID.String(),
+				"from_id": fromUserID.String(),
+				"payload": body.Payload,
 			},
 		})
 		return peerID, out, true
@@ -252,7 +252,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 
 	v1.POST("/company-users/auth/phone", companyUserAuthH.SendOTP)
 	v1.POST("/company-users/auth/otp/verify", companyUserAuthH.VerifyOTP)
-	v1.POST("/company-users/auth/refresh", authH.Refresh)   // company user: обновить пару токенов по refresh_token
+	v1.POST("/company-users/auth/refresh", authH.Refresh) // company user: обновить пару токенов по refresh_token
 	v1.POST("/company-users/registration/complete", companyUserRegH.Complete)
 
 	// Driver: только API водителя (auth, registration, profile, trips, invitations)
@@ -298,7 +298,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	v1.POST("/dispatchers/auth/phone", dispAuthH.SendOTP)
 	v1.POST("/dispatchers/auth/otp/verify", dispAuthH.VerifyOTP)
 	v1.POST("/dispatchers/auth/login/password", dispAuthH.LoginPassword)
-	v1.POST("/dispatchers/auth/refresh", authH.Refresh)   // диспетчер: обновить пару токенов по refresh_token
+	v1.POST("/dispatchers/auth/refresh", authH.Refresh) // диспетчер: обновить пару токенов по refresh_token
 	v1.POST("/dispatchers/auth/reset-password/request", dispAuthH.ResetPasswordRequest)
 	v1.POST("/dispatchers/auth/reset-password/confirm", dispAuthH.ResetPasswordConfirm)
 	v1.POST("/dispatchers/auth/logout", dispAuthH.Logout)
@@ -306,7 +306,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 
 	// Admin auth (login by password, refresh) — только base headers; без admin token
 	v1.POST("/admin/auth/login/password", adminAuthH.LoginPassword)
-	v1.POST("/admin/auth/refresh", authH.Refresh)   // админ: обновить пару токенов по refresh_token
+	v1.POST("/admin/auth/refresh", authH.Refresh) // админ: обновить пару токенов по refresh_token
 
 	// Все маршруты под adminAuthed проверяют: base headers (X-Client-Token, X-Device-Type, X-Language) + X-User-Token с role=admin
 	adminAuthed := v1.Group("/admin")
@@ -352,12 +352,17 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.GET("/dispatcher-invitations", d2dInvH.ListSentByDriver)
 	driverAuthed.POST("/dispatcher-invitations", d2dInvH.CreateFromDriver)
 	driverAuthed.DELETE("/dispatcher-invitations/:token", d2dInvH.CancelByDriver)
+	driverAuthed.POST("/cargo-likes", favH.AddDriverFavoriteCargo)
+	driverAuthed.DELETE("/cargo-likes/:cargoId", favH.DeleteDriverFavoriteCargo)
+	driverAuthed.GET("/cargo-likes", favH.ListDriverFavoriteCargo)
+	driverAuthed.POST("/dispatcher-likes", favH.AddDriverFavoriteDispatcher)
+	driverAuthed.DELETE("/dispatcher-likes/:dispatcherId", favH.DeleteDriverFavoriteDispatcher)
+	driverAuthed.GET("/dispatcher-likes", favH.ListDriverFavoriteDispatchers)
 	driverAuthed.POST("/favorite-cargo", favH.AddDriverFavoriteCargo)
 	driverAuthed.DELETE("/favorite-cargo/:cargoId", favH.DeleteDriverFavoriteCargo)
 	driverAuthed.GET("/favorite-cargo", favH.ListDriverFavoriteCargo)
-	driverAuthed.GET("/nearby-cargo", driverCargoSearchH.NearbyCargoForDriver)
 	driverAuthed.GET("/matching-cargo", driverCargoSearchH.MatchingCargoForDriver)
-	driverAuthed.GET("/cargo/active", cargoH.ListActiveCargoForDriver)
+	driverAuthed.POST("/cargo/active", cargoH.ListActiveCargoForDriver)
 	driverAuthed.GET("/active-cargo", cargoDriversH.GetMyActiveCargo)
 	driverAuthed.GET("/cargo-offers", cargoH.ListMyCargoOffers)
 	driverAuthed.GET("/cargo-invitation-stats", cargoH.GetDriverOfferInvitationStats)
@@ -403,13 +408,19 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.GET("/trips/:id/state", tripsH.TripStateDispatcher)
 	dispAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
-	dispAuthed.GET("/offers/sent", cargoH.ListSentOffersForDispatcher)
+	dispAuthed.GET("/offers/all", cargoH.ListSentOffersForDispatcher)
 	dispAuthed.GET("/cargo/mine", cargoH.ListMyCargoForDispatcher)
 	dispAuthed.GET("/cargo/all", cargoH.ListAllCargoForDispatcher)
 	dispAuthed.GET("/cargo/:id/negotiation", cargoH.ListCargoNegotiation)
 	dispAuthed.GET("/cargo/:id/drivers", cargoDriversH.ListByCargo)
 	dispAuthed.POST("/cargo/:id/drivers/remove", cargoDriversH.RemoveFromCargo)
 	dispAuthed.GET("/cargo/export.xlsx", dispCargoExportH.ExportMyCargoExcel)
+	dispAuthed.POST("/cargo-likes", favH.AddDispatcherFavoriteCargo)
+	dispAuthed.DELETE("/cargo-likes/:cargoId", favH.DeleteDispatcherFavoriteCargo)
+	dispAuthed.GET("/cargo-likes", favH.ListDispatcherFavoriteCargo)
+	dispAuthed.POST("/driver-likes", favH.AddDispatcherFavoriteDriver)
+	dispAuthed.DELETE("/driver-likes/:driverId", favH.DeleteDispatcherFavoriteDriver)
+	dispAuthed.GET("/driver-likes", favH.ListDispatcherFavoriteDrivers)
 	dispAuthed.POST("/favorite-cargo", favH.AddDispatcherFavoriteCargo)
 	dispAuthed.DELETE("/favorite-cargo/:cargoId", favH.DeleteDispatcherFavoriteCargo)
 	dispAuthed.GET("/favorite-cargo", favH.ListDispatcherFavoriteCargo)

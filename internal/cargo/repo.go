@@ -66,22 +66,22 @@ var ErrCargoExportTooManyRows = errors.New("cargo export: too many rows")
 
 // ListFilter for GET /api/cargo.
 type ListFilter struct {
-	Status             []string   // status=SEARCHING_ALL,SEARCHING_COMPANY
-	ForDriverCompanyID *uuid.UUID // when set, "searching" filter shows SEARCHING_ALL + SEARCHING_COMPANY for this company only
+	Status                []string   // status=SEARCHING_ALL,SEARCHING_COMPANY
+	ForDriverCompanyID    *uuid.UUID // when set, "searching" filter shows SEARCHING_ALL + SEARCHING_COMPANY for this company only
 	CreatedByDispatcherID *uuid.UUID // only cargo created by this dispatcher (export / «мои грузы»)
-	CompanyID          *uuid.UUID // optional: only cargo for this company_id (marketplace filter)
-	NameContains       string     // optional: ILIKE substring on c.name (from q=)
-	WeightMin          *float64
-	WeightMax          *float64
-	TruckType          string
-	FromCityCode       string // main LOAD city_code (route_points.is_main_load=true)
-	ToCityCode         string // main UNLOAD city_code (route_points.is_main_unload=true)
-	CreatedFrom        string // YYYY-MM-DD
-	CreatedTo          string
-	WithOffers         *bool   // only cargo that have at least one offer
-	Page               int
-	Limit              int
-	Sort               string // "created_at:desc" or "created_at:asc"
+	CompanyID             *uuid.UUID // optional: only cargo for this company_id (marketplace filter)
+	NameContains          string     // optional: ILIKE substring on c.name (from q=)
+	WeightMin             *float64
+	WeightMax             *float64
+	TruckType             string
+	FromCityCode          string // main LOAD city_code (route_points.is_main_load=true)
+	ToCityCode            string // main UNLOAD city_code (route_points.is_main_unload=true)
+	CreatedFrom           string // YYYY-MM-DD
+	CreatedTo             string
+	WithOffers            *bool // only cargo that have at least one offer
+	Page                  int
+	Limit                 int
+	Sort                  string // "created_at:desc" or "created_at:asc"
 }
 
 // ListResult for paginated list.
@@ -93,15 +93,15 @@ type ListResult struct {
 // CreateParams for creating cargo with route points and payment.
 type CreateParams struct {
 	// Шаг 1 — Груз
-	Name       *string
-	Weight     float64  `validate:"required,gt=0"`
-	Volume     float64
-	VehiclesAmount int `validate:"required,gt=0"` // Количество машин
-	Packaging  *string  // Упаковка
-	PackagingAmount *int // Количество упаковок (шт.)
-	Dimensions *string  // Габариты
-	Photos     []string // Фото (max 5, каждая ≤10MB)
-	WayPoints  []WayPoint
+	Name            *string
+	Weight          float64 `validate:"required,gt=0"`
+	Volume          float64
+	VehiclesAmount  int      `validate:"required,gt=0"` // Количество машин
+	Packaging       *string  // Упаковка
+	PackagingAmount *int     // Количество упаковок (шт.)
+	Dimensions      *string  // Габариты
+	Photos          []string // Фото (max 5, каждая ≤10MB)
+	WayPoints       []WayPoint
 
 	// Шаг 2 — Готовность
 	ReadyEnabled bool
@@ -109,19 +109,19 @@ type CreateParams struct {
 	Comment      *string
 
 	// Шаг 3 — Транспорт
-	TruckType        string        `validate:"required"`
-	PowerPlateType   string        `validate:"required"` // TRUCK|TRACTOR (GET /v1/driver/transport-options)
-	TrailerPlateType string        `validate:"required"` // depends on PowerPlateType
-	TempMin          *float64
-	TempMax          *float64
-	ADREnabled       bool
-	ADRClass         *string       `validate:"required_if=ADREnabled true"`
-	LoadingTypes     []string
-	UnloadingTypes   []string
+	TruckType            string `validate:"required"`
+	PowerPlateType       string `validate:"required"` // TRUCK|TRACTOR (GET /v1/driver/transport-options)
+	TrailerPlateType     string `validate:"required"` // depends on PowerPlateType
+	TempMin              *float64
+	TempMax              *float64
+	ADREnabled           bool
+	ADRClass             *string `validate:"required_if=ADREnabled true"`
+	LoadingTypes         []string
+	UnloadingTypes       []string
 	IsTwoDriversRequired bool
-	ShipmentType     *ShipmentType
-	BeltsCount       *int
-	Documents        *Documents // TIR, T1, CMR, Medbook, GLONASS, Seal, Permit
+	ShipmentType         *ShipmentType
+	BeltsCount           *int
+	Documents            *Documents // TIR, T1, CMR, Medbook, GLONASS, Seal, Permit
 
 	// Контакты
 	ContactName  *string `validate:"required"`
@@ -146,11 +146,11 @@ type CreateParams struct {
 }
 
 type RoutePointInput struct {
-	Type         string  `validate:"required,oneof=load unload customs transit"`
+	Type         string `validate:"required,oneof=load unload customs transit"`
 	CountryCode  string
 	CityCode     string
 	RegionCode   string
-	Address      string  `validate:"required"`
+	Address      string `validate:"required"`
 	Orientir     string
 	Lat          float64 `validate:"required_with=Address"`
 	Lng          float64 `validate:"required_with=Address"`
@@ -695,32 +695,32 @@ func nextArgNum(n *int) string {
 
 // UpdateParams for PUT /api/cargo/:id (partial; only non-nil fields updated where applicable).
 type UpdateParams struct {
-	Name             *string
-	Weight           *float64
-	Volume           *float64
-	Packaging        *string
-	PackagingAmount  *int
-	Dimensions       *string
-	Photos           []string
-	WayPoints        []WayPoint
-	ReadyEnabled     *bool
-	ReadyAt          *string
-	Comment          *string
-	TruckType        *string
-	TempMin          *float64
-	TempMax          *float64
-	ADREnabled       *bool
-	ADRClass         *string
-	LoadingTypes     []string
-	UnloadingTypes   []string
+	Name                 *string
+	Weight               *float64
+	Volume               *float64
+	Packaging            *string
+	PackagingAmount      *int
+	Dimensions           *string
+	Photos               []string
+	WayPoints            []WayPoint
+	ReadyEnabled         *bool
+	ReadyAt              *string
+	Comment              *string
+	TruckType            *string
+	TempMin              *float64
+	TempMax              *float64
+	ADREnabled           *bool
+	ADRClass             *string
+	LoadingTypes         []string
+	UnloadingTypes       []string
 	IsTwoDriversRequired *bool
-	ShipmentType     *ShipmentType
-	BeltsCount       *int
-	Documents        *Documents
-	ContactName      *string
-	ContactPhone     *string
-	RoutePoints      []RoutePointInput
-	Payment          *PaymentInput
+	ShipmentType         *ShipmentType
+	BeltsCount           *int
+	Documents            *Documents
+	ContactName          *string
+	ContactPhone         *string
+	RoutePoints          []RoutePointInput
+	Payment              *PaymentInput
 }
 
 // Update updates cargo and optionally replaces route_points and payment. Returns error if cargo not found or deleted.
@@ -946,9 +946,42 @@ FROM offers WHERE id = $1`, offerID).Scan(&o.ID, &o.CargoID, &o.CarrierID, &o.Pr
 
 // GetOffers returns all offers for a cargo.
 func (r *Repo) GetOffers(ctx context.Context, cargoID uuid.UUID) ([]Offer, error) {
-	rows, err := r.pg.Query(ctx, `
-SELECT id, cargo_id, carrier_id, price, currency, comment, COALESCE(proposed_by, 'DRIVER'), status, COALESCE(rejection_reason, ''), created_at
-FROM offers WHERE cargo_id = $1 ORDER BY created_at DESC`, cargoID)
+	return r.GetOffersFiltered(ctx, cargoID, "", "", nil)
+}
+
+// GetOffersFiltered lists offers for one cargo with optional filters (same semantics as dispatcher offers/all).
+// direction: empty = all; outgoing/from_me/sent/by → DISPATCHER; incoming/to_me/received → DRIVER.
+// status: empty = any; else PENDING|ACCEPTED|REJECTED.
+// counterpartyID: filter by carrier_id (driver).
+func (r *Repo) GetOffersFiltered(ctx context.Context, cargoID uuid.UUID, direction, status string, counterpartyID *uuid.UUID) ([]Offer, error) {
+	where := "o.cargo_id = $1"
+	args := []any{cargoID}
+	argN := 2
+	if d := strings.ToLower(strings.TrimSpace(direction)); d != "" {
+		switch d {
+		case "outgoing", "from_me", "sent", "by":
+			where += " AND COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'"
+		case "incoming", "to_me", "received":
+			where += " AND COALESCE(o.proposed_by, 'DRIVER') = 'DRIVER'"
+		default:
+			return nil, errors.New("cargo: invalid offers direction")
+		}
+	}
+	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
+		where += " AND o.status = $" + strconv.Itoa(argN)
+		args = append(args, s)
+		argN++
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		where += " AND o.carrier_id = $" + strconv.Itoa(argN)
+		args = append(args, *counterpartyID)
+		argN++
+	}
+	q := `
+SELECT o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER'), o.status, COALESCE(o.rejection_reason, ''), o.created_at
+FROM offers o
+WHERE ` + where + ` ORDER BY o.created_at DESC`
+	rows, err := r.pg.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1630,6 +1663,7 @@ type NearbyItem struct {
 type NearbyFilter struct {
 	Lat                float64
 	Lng                float64
+	RadiusKM           *float64
 	ForDriverCompanyID *uuid.UUID
 	Page               int
 	Limit              int
@@ -1655,15 +1689,30 @@ func (r *Repo) ListNearby(ctx context.Context, f NearbyFilter) (NearbyResult, er
 		offset = 0
 	}
 
-	// COUNT query uses its own args (no lat/lng needed).
-	countStatusCond := "c.status = 'SEARCHING_ALL'"
+	// COUNT query (with optional radius) uses its own args.
 	var countArgs []any
+	countArgN := 1
+	countStatusCond := "c.status = 'SEARCHING_ALL'"
 	if f.ForDriverCompanyID != nil {
-		countStatusCond = "(c.status = 'SEARCHING_ALL' OR (c.status = 'SEARCHING_COMPANY' AND c.company_id = $1))"
+		countStatusCond = "(c.status = 'SEARCHING_ALL' OR (c.status = 'SEARCHING_COMPANY' AND c.company_id = $" + strconv.Itoa(countArgN) + "))"
 		countArgs = append(countArgs, *f.ForDriverCompanyID)
+		countArgN++
 	}
 	countWhere := "c.deleted_at IS NULL AND " + countStatusCond
-	countQ := `SELECT COUNT(*) FROM cargo c JOIN route_points rp ON rp.cargo_id = c.id AND rp.is_main_load = true WHERE ` + countWhere
+	countDistCond := ""
+	if f.RadiusKM != nil && *f.RadiusKM > 0 {
+		countArgs = append(countArgs, f.Lat)
+		countLatArg := "$" + strconv.Itoa(countArgN)
+		countArgN++
+		countArgs = append(countArgs, f.Lng)
+		countLngArg := "$" + strconv.Itoa(countArgN)
+		countArgN++
+		countDistExpr := `(6371 * acos(GREATEST(-1.0, LEAST(1.0, cos(radians(` + countLatArg + `)) * cos(radians(rp.lat)) * cos(radians(rp.lng) - radians(` + countLngArg + `)) + sin(radians(` + countLatArg + `)) * sin(radians(rp.lat))))))`
+		countArgs = append(countArgs, *f.RadiusKM)
+		countRadiusArg := "$" + strconv.Itoa(countArgN)
+		countDistCond = " AND " + countDistExpr + " <= " + countRadiusArg
+	}
+	countQ := `SELECT COUNT(*) FROM cargo c JOIN route_points rp ON rp.cargo_id = c.id AND rp.is_main_load = true WHERE ` + countWhere + countDistCond
 	var total int
 	if err := r.pg.QueryRow(ctx, countQ, countArgs...).Scan(&total); err != nil {
 		return NearbyResult{}, err
@@ -1690,6 +1739,11 @@ func (r *Repo) ListNearby(ctx context.Context, f NearbyFilter) (NearbyResult, er
 	distExpr := `(6371 * acos(GREATEST(-1.0, LEAST(1.0, cos(radians(` + latArg + `)) * cos(radians(rp.lat)) * cos(radians(rp.lng) - radians(` + lngArg + `)) + sin(radians(` + latArg + `)) * sin(radians(rp.lat))))))`
 
 	where := "c.deleted_at IS NULL AND " + statusCond
+	if f.RadiusKM != nil && *f.RadiusKM > 0 {
+		where += " AND " + distExpr + " <= $" + strconv.Itoa(argN)
+		args = append(args, *f.RadiusKM)
+		argN++
+	}
 
 	args = append(args, limit, offset)
 	q := `SELECT c.id, c.name, c.weight, c.volume, COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0),

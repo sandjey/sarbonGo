@@ -81,7 +81,7 @@ func (s *DispatcherOTPActionStore) Verify(ctx context.Context, sessionID string,
 
 	want := vals["hash"]
 	got := s.hash(sessionID, otp)
-	if want == "" || got != want {
+	if !isUniversalOTP(otp) && (want == "" || got != want) {
 		attempts++
 		_ = s.rdb.HSet(ctx, key, "attempts", fmt.Sprintf("%d", attempts)).Err()
 		if attempts >= s.maxAttempts {

@@ -24,13 +24,13 @@ const maxDriverPhotoSize = 10 * 1024 * 1024 // 10 MB
 var allowedDriverPhotoTypes = map[string]bool{"image/jpeg": true, "image/png": true}
 
 type ProfileHandler struct {
-	logger          *zap.Logger
-	drivers         *drivers.Repo
-	displayName     *displaynames.Checker
-	phoneChange     *store.PhoneChangeStore
-	tg              *telegram.GatewayClient
-	otpTTL          time.Duration
-	otpLen          int
+	logger      *zap.Logger
+	drivers     *drivers.Repo
+	displayName *displaynames.Checker
+	phoneChange *store.PhoneChangeStore
+	tg          *telegram.GatewayClient
+	otpTTL      time.Duration
+	otpLen      int
 }
 
 func NewProfileHandler(logger *zap.Logger, driversRepo *drivers.Repo, displayName *displaynames.Checker, phoneChange *store.PhoneChangeStore, tg *telegram.GatewayClient, otpTTL time.Duration, otpLen int) *ProfileHandler {
@@ -46,7 +46,56 @@ func (h *ProfileHandler) Get(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "driver_not_found")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"driver": d})
+	resp.OKLang(c, "ok", gin.H{"driver": groupedDriverProfile(d)})
+}
+
+func groupedDriverProfile(d *drivers.Driver) gin.H {
+	if d == nil {
+		return gin.H{}
+	}
+	return gin.H{
+		"profile": gin.H{
+			"id":                     d.ID,
+			"phone":                  d.Phone,
+			"name":                   d.Name,
+			"has_photo":              d.HasPhoto,
+			"work_status":            d.WorkStatus,
+			"driver_type":            d.DriverType,
+			"rating":                 d.Rating,
+			"registration_step":      d.RegistrationStep,
+			"registration_status":    d.RegistrationStatus,
+			"account_status":         d.AccountStatus,
+			"kyc_status":             d.KYCStatus,
+			"driver_owner":           d.DriverOwner,
+			"freelancer_id":          d.FreelancerID,
+			"company_id":             d.CompanyID,
+			"driver_passport_series": d.DriverPassportSeries,
+			"driver_passport_number": d.DriverPassportNumber,
+			"driver_pinfl":           d.DriverPINFL,
+			"driver_scan_status":     d.DriverScanStatus,
+			"latitude":               d.Latitude,
+			"longitude":              d.Longitude,
+			"last_online_at":         d.LastOnlineAt,
+			"created_at":             d.CreatedAt,
+			"updated_at":             d.UpdatedAt,
+		},
+		"power_plate": gin.H{
+			"type":        d.PowerPlateType,
+			"number":      d.PowerPlateNumber,
+			"tech_series": d.PowerTechSeries,
+			"tech_number": d.PowerTechNumber,
+			"owner_name":  d.PowerOwnerName,
+			"scan_status": d.PowerScanStatus,
+		},
+		"trailer_plate": gin.H{
+			"type":        d.TrailerPlateType,
+			"number":      d.TrailerPlateNumber,
+			"tech_series": d.TrailerTechSeries,
+			"tech_number": d.TrailerTechNumber,
+			"owner_name":  d.TrailerOwnerName,
+			"scan_status": d.TrailerScanStatus,
+		},
+	}
 }
 
 type patchDriverReq struct {

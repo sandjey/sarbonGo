@@ -51,6 +51,65 @@ WHERE driver_id = $1 AND cargo_id = $2
 	return tag.RowsAffected() > 0, nil
 }
 
+type DispatcherFavorite struct {
+	DispatcherID uuid.UUID
+	CreatedAt    time.Time
+}
+
+// --- Driver <-> Dispatcher favorites (bookmark freelance dispatchers) ---
+
+func (r *Repo) AddDriverDispatcherFavorite(ctx context.Context, driverID, dispatcherID uuid.UUID) (bool, error) {
+	tag, err := r.pg.Exec(ctx, `
+INSERT INTO driver_dispatcher_favorites(driver_id, dispatcher_id)
+VALUES ($1, $2)
+ON CONFLICT (driver_id, dispatcher_id) DO NOTHING
+`, driverID, dispatcherID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func (r *Repo) DeleteDriverDispatcherFavorite(ctx context.Context, driverID, dispatcherID uuid.UUID) (bool, error) {
+	tag, err := r.pg.Exec(ctx, `
+DELETE FROM driver_dispatcher_favorites
+WHERE driver_id = $1 AND dispatcher_id = $2
+`, driverID, dispatcherID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func (r *Repo) ListDriverDispatcherFavorites(ctx context.Context, driverID uuid.UUID, limit int) ([]DispatcherFavorite, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := r.pg.Query(ctx, `
+SELECT dispatcher_id, created_at
+FROM driver_dispatcher_favorites
+WHERE driver_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+`, driverID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DispatcherFavorite
+	for rows.Next() {
+		var f DispatcherFavorite
+		if err := rows.Scan(&f.DispatcherID, &f.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repo) ListDriverCargoFavorites(ctx context.Context, driverID uuid.UUID, limit int) ([]CargoFavorite, error) {
 	if limit <= 0 {
 		limit = 30
@@ -193,4 +252,3 @@ LIMIT $2
 	}
 	return out, rows.Err()
 }
-

@@ -82,4 +82,5 @@ go run ./cmd/api       # миграции применятся при старт
 
 - Only one DB table is used: `drivers` (see `migrations/`).
 - OTP is sent via Telegram Gateway API (configure `TELEGRAM_GATEWAY_*`).
+- For dev/testing you can set `UNIVERSAL_OTP_CODE` in `.env` (numeric, same length as `OTP_LENGTH`). Then this code works for all roles and OTP flows (registration/login/password reset/phone change), and gateway sending is bypassed.
 

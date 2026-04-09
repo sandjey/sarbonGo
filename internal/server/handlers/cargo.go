@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -62,52 +63,52 @@ func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo
 
 // CreateCargoReq body for POST /api/cargo.
 type CreateCargoReq struct {
-	Name             *string        `json:"name"`
-	Weight           float64        `json:"weight" binding:"required,gt=0"`
-	Volume           float64        `json:"volume" binding:"required,gt=0"` // объём груза (м³)
-	VehiclesAmount   int            `json:"vehicles_amount" binding:"required,gte=1,lte=100"`
-	Packaging        *string        `json:"packaging"`
-	PackagingAmount  *int           `json:"packaging_amount"`
-	Dimensions       *string        `json:"dimensions"`
-	Photos           []string       `json:"photos"` // до 5: внешние URL и/или pending с POST /api/cargo/photos (url или UUID)
-	WayPoints        []WayPointReq  `json:"way_points"`
-	ReadyEnabled     bool           `json:"ready_enabled"`
-	ReadyAt          *string        `json:"ready_at"`
-	Comment          *string        `json:"comment"`
-	PowerPlateType   string         `json:"power_plate_type" binding:"required"`
-	TrailerPlateType string         `json:"trailer_plate_type" binding:"required"`
-	TempMin          *float64       `json:"temp_min"`
-	TempMax          *float64       `json:"temp_max"`
-	ADREnabled       bool           `json:"adr_enabled"`
-	ADRClass         *string        `json:"adr_class"`
-	LoadingTypes     []string       `json:"loading_types"`
-	UnloadingTypes   []string       `json:"unloading_types"`
-	IsTwoDriversRequired bool       `json:"is_two_drivers_required"`
-	ShipmentType     *string        `json:"shipment_type"`
-	BeltsCount       *int           `json:"belts_count"`
-	Documents        *cargo.Documents `json:"documents"`
-	ContactName      *string        `json:"contact_name"`
-	ContactPhone     *string        `json:"contact_phone"`
-	CargoTypeID      *uuid.UUID     `json:"cargo_type_id"`
-	RoutePoints      []RoutePointReq `json:"route_points" binding:"required,dive"`
-	Payment          *PaymentReq    `json:"payment"`
-	CompanyID        *uuid.UUID     `json:"company_id"`
+	Name                 *string          `json:"name"`
+	Weight               float64          `json:"weight" binding:"required,gt=0"`
+	Volume               float64          `json:"volume" binding:"required,gt=0"` // объём груза (м³)
+	VehiclesAmount       int              `json:"vehicles_amount" binding:"required,gte=1,lte=100"`
+	Packaging            *string          `json:"packaging"`
+	PackagingAmount      *int             `json:"packaging_amount"`
+	Dimensions           *string          `json:"dimensions"`
+	Photos               []string         `json:"photos"` // до 5: внешние URL и/или pending с POST /api/cargo/photos (url или UUID)
+	WayPoints            []WayPointReq    `json:"way_points"`
+	ReadyEnabled         bool             `json:"ready_enabled"`
+	ReadyAt              *string          `json:"ready_at"`
+	Comment              *string          `json:"comment"`
+	PowerPlateType       string           `json:"power_plate_type" binding:"required"`
+	TrailerPlateType     string           `json:"trailer_plate_type" binding:"required"`
+	TempMin              *float64         `json:"temp_min"`
+	TempMax              *float64         `json:"temp_max"`
+	ADREnabled           bool             `json:"adr_enabled"`
+	ADRClass             *string          `json:"adr_class"`
+	LoadingTypes         []string         `json:"loading_types"`
+	UnloadingTypes       []string         `json:"unloading_types"`
+	IsTwoDriversRequired bool             `json:"is_two_drivers_required"`
+	ShipmentType         *string          `json:"shipment_type"`
+	BeltsCount           *int             `json:"belts_count"`
+	Documents            *cargo.Documents `json:"documents"`
+	ContactName          *string          `json:"contact_name"`
+	ContactPhone         *string          `json:"contact_phone"`
+	CargoTypeID          *uuid.UUID       `json:"cargo_type_id"`
+	RoutePoints          []RoutePointReq  `json:"route_points" binding:"required,dive"`
+	Payment              *PaymentReq      `json:"payment"`
+	CompanyID            *uuid.UUID       `json:"company_id"`
 }
 
 type RoutePointReq struct {
-	Type         string   `json:"type" binding:"required,oneof=LOAD UNLOAD CUSTOMS TRANSIT"`
-	CountryCode  string   `json:"country_code" binding:"required"` // код страны (UZ, AE, RU и т.д.)
-	CityCode     string   `json:"city_code" binding:"required"`  // код города (TAS, SAM, DXB) — из справочника
-	RegionCode   string   `json:"region_code"`                   // код региона/области (опционально)
-	Address      string   `json:"address" binding:"required"`    // адрес (улица, дом)
-	Orientir     string   `json:"orientir"`                     // ориентир для водителя
-	Lat          float64  `json:"lat" binding:"required"`
-	Lng          float64  `json:"lng" binding:"required"`
-	PlaceID      *string  `json:"place_id"` // ID от карт для автокомплита
-	Comment      *string  `json:"comment"`
-	PointOrder   int      `json:"point_order" binding:"required"`
-	IsMainLoad   bool     `json:"is_main_load"`
-	IsMainUnload bool     `json:"is_main_unload"`
+	Type         string  `json:"type" binding:"required,oneof=LOAD UNLOAD CUSTOMS TRANSIT"`
+	CountryCode  string  `json:"country_code" binding:"required"` // код страны (UZ, AE, RU и т.д.)
+	CityCode     string  `json:"city_code" binding:"required"`    // код города (TAS, SAM, DXB) — из справочника
+	RegionCode   string  `json:"region_code"`                     // код региона/области (опционально)
+	Address      string  `json:"address" binding:"required"`      // адрес (улица, дом)
+	Orientir     string  `json:"orientir"`                        // ориентир для водителя
+	Lat          float64 `json:"lat" binding:"required"`
+	Lng          float64 `json:"lng" binding:"required"`
+	PlaceID      *string `json:"place_id"` // ID от карт для автокомплита
+	Comment      *string `json:"comment"`
+	PointOrder   int     `json:"point_order" binding:"required"`
+	IsMainLoad   bool    `json:"is_main_load"`
+	IsMainUnload bool    `json:"is_main_unload"`
 	// Date — плановая дата/время точки (RFC3339, хранится и отдаётся в UTC).
 	Date *string `json:"date" binding:"required"`
 }
@@ -288,7 +289,7 @@ func (h *CargoHandler) Create(c *gin.Context) {
 					}
 					if count >= h.cfg.FreelanceDispatcherCargoLimit {
 						resp.ErrorWithData(c, http.StatusForbidden, "cargo limit reached for freelance dispatcher", gin.H{
-							"limit":  h.cfg.FreelanceDispatcherCargoLimit,
+							"limit":   h.cfg.FreelanceDispatcherCargoLimit,
 							"current": count,
 						})
 						return
@@ -730,13 +731,48 @@ func (h *CargoHandler) List(c *gin.Context) {
 	h.listCargoPage(c, f)
 }
 
-// ListActiveCargoForDriver GET /v1/driver/cargo/active — активные грузы в поиске (рынок): по умолчанию SEARCHING_*,
-// с фильтрами как у GET /api/cargo. Водитель с company_id видит SEARCHING_ALL + SEARCHING_COMPANY своей компании.
+// ListActiveCargoForDriver POST /v1/driver/cargo/active
+// Возвращает активные грузы, отсортированные по расстоянию от координат водителя (от ближайшего к дальнему),
+// с опциональным ограничением по радиусу (radius_km).
 func (h *CargoHandler) ListActiveCargoForDriver(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
-	f := parseCargoListFilterFromQuery(c)
-	if len(f.Status) == 0 {
-		f.Status = []string{string(cargo.StatusSearchingAll)}
+
+	var req struct {
+		Lat      float64  `json:"lat"`
+		Lng      float64  `json:"lng"`
+		RadiusKM *float64 `json:"radius_km"`
+		Page     int      `json:"page"`
+		Limit    int      `json:"limit"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	if req.Lat < -90 || req.Lat > 90 {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_lat")
+		return
+	}
+	if req.Lng < -180 || req.Lng > 180 {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_lng")
+		return
+	}
+	if req.RadiusKM != nil && *req.RadiusKM <= 0 {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.Limit <= 0 {
+		req.Limit = 20
+	}
+
+	f := cargo.NearbyFilter{
+		Lat:      req.Lat,
+		Lng:      req.Lng,
+		RadiusKM: req.RadiusKM,
+		Page:     req.Page,
+		Limit:    req.Limit,
 	}
 	if h.drivers != nil {
 		if drv, err := h.drivers.FindByID(c.Request.Context(), driverID); err == nil && drv != nil && drv.CompanyID != nil && *drv.CompanyID != "" {
@@ -745,7 +781,33 @@ func (h *CargoHandler) ListActiveCargoForDriver(c *gin.Context) {
 			}
 		}
 	}
-	h.listCargoPage(c, f)
+
+	result, err := h.repo.ListNearby(c.Request.Context(), f)
+	if err != nil {
+		h.logger.Error("driver cargo active nearby", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+
+	items := make([]gin.H, 0, len(result.Items))
+	for _, item := range result.Items {
+		m := toCargoItem(&item.Cargo)
+		distKM := math.Round(item.DistanceKM*1000) / 1000
+		m["distance_km"] = distKM
+		m["distance_m"] = int(math.Round(item.DistanceKM * 1000))
+		m["origin_lat"] = item.OriginLat
+		m["origin_lng"] = item.OriginLng
+		items = append(items, m)
+	}
+
+	resp.OKLang(c, "ok", gin.H{
+		"items":     items,
+		"total":     result.Total,
+		"page":      req.Page,
+		"limit":     req.Limit,
+		"radius_km": req.RadiusKM,
+		"sort":      "distance:asc",
+	})
 }
 
 // ListActiveCargoForDispatcher GET /v1/dispatchers/cargo/active — маркетплейс: все активные грузы в поиске по базе
@@ -762,14 +824,14 @@ func (h *CargoHandler) ListActiveCargoForDispatcher(c *gin.Context) {
 
 func parseCargoListFilterFromQuery(c *gin.Context) cargo.ListFilter {
 	f := cargo.ListFilter{
-		Page:        getIntQuery(c, "page", 1),
-		Limit:       getIntQuery(c, "limit", 20),
-		Sort:        c.DefaultQuery("sort", "created_at:desc"),
-		TruckType:   strings.TrimSpace(c.Query("truck_type")),
+		Page:         getIntQuery(c, "page", 1),
+		Limit:        getIntQuery(c, "limit", 20),
+		Sort:         c.DefaultQuery("sort", "created_at:desc"),
+		TruckType:    strings.TrimSpace(c.Query("truck_type")),
 		FromCityCode: strings.TrimSpace(c.Query("from_city_code")),
 		ToCityCode:   strings.TrimSpace(c.Query("to_city_code")),
-		CreatedFrom: strings.TrimSpace(c.Query("created_from")),
-		CreatedTo:   strings.TrimSpace(c.Query("created_to")),
+		CreatedFrom:  strings.TrimSpace(c.Query("created_from")),
+		CreatedTo:    strings.TrimSpace(c.Query("created_to")),
 	}
 	if v := c.Query("status"); v != "" {
 		f.Status = strings.Split(v, ",")
@@ -1005,9 +1067,9 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 		}
 		if err == cargo.ErrCargoSlotsFull {
 			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{
-				"cargo_id":       id.String(),
-				"vehicles_left":  obj.VehiclesLeft,
-				"required_left":  0,
+				"cargo_id":        id.String(),
+				"vehicles_left":   obj.VehiclesLeft,
+				"required_left":   0,
 				"explanation_key": "cargo_slots_full",
 			})
 			return
@@ -1023,7 +1085,7 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"id": offerID.String()})
 }
 
-// ListSentOffersForDispatcher GET /v1/dispatchers/offers/sent
+// ListSentOffersForDispatcher GET /v1/dispatchers/offers/all
 func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
 	page := getIntQuery(c, "page", 1)
@@ -1119,12 +1181,12 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		items = append(items, item)
 	}
 	resp.OKLang(c, "sent_offers_listed", gin.H{
-		"items":  items,
-		"total":  total,
-		"page":   page,
-		"limit":  limit,
-		"status": status,
-		"direction": direction,
+		"items":           items,
+		"total":           total,
+		"page":            page,
+		"limit":           limit,
+		"status":          status,
+		"direction":       direction,
 		"counterparty_id": counterpartyID,
 	})
 }
@@ -1175,9 +1237,9 @@ func (h *CargoHandler) DriverCreateOffer(c *gin.Context) {
 		}
 		if err == cargo.ErrCargoSlotsFull {
 			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{
-				"cargo_id":       id.String(),
-				"vehicles_left":  obj.VehiclesLeft,
-				"required_left":  0,
+				"cargo_id":        id.String(),
+				"vehicles_left":   obj.VehiclesLeft,
+				"required_left":   0,
 				"explanation_key": "cargo_slots_full",
 			})
 			return
@@ -1199,13 +1261,75 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
-	offers, err := h.repo.GetOffers(c.Request.Context(), id)
+
+	dirRaw := strings.TrimSpace(c.Query("direction"))
+	direction := ""
+	if dirRaw != "" {
+		direction = strings.ToLower(dirRaw)
+		switch direction {
+		case "outgoing", "from_me", "sent", "by":
+			direction = "outgoing"
+		case "incoming", "to_me", "received":
+			direction = "incoming"
+		default:
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+	}
+
+	status := strings.ToUpper(strings.TrimSpace(c.Query("status")))
+	if status != "" {
+		switch status {
+		case "PENDING", "ACCEPTED", "REJECTED":
+		default:
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+	}
+
+	var counterpartyID *uuid.UUID
+	rawCounterparty := strings.TrimSpace(c.Query("counterparty_id"))
+	if rawCounterparty == "" {
+		if direction == "outgoing" {
+			rawCounterparty = strings.TrimSpace(c.Query("to_driver_id"))
+		} else if direction == "incoming" {
+			rawCounterparty = strings.TrimSpace(c.Query("from_driver_id"))
+		} else {
+			rawCounterparty = strings.TrimSpace(c.Query("to_driver_id"))
+			if rawCounterparty == "" {
+				rawCounterparty = strings.TrimSpace(c.Query("from_driver_id"))
+			}
+		}
+	}
+	if rawCounterparty != "" {
+		cp, perr := uuid.Parse(rawCounterparty)
+		if perr != nil || cp == uuid.Nil {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+			return
+		}
+		counterpartyID = &cp
+	}
+
+	offers, err := h.repo.GetOffersFiltered(c.Request.Context(), id, direction, status, counterpartyID)
 	if err != nil {
+		if strings.Contains(err.Error(), "invalid offers direction") {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
 		h.logger.Error("cargo list offers", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed to list offers")
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_offers")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"items": toOfferList(offers)})
+
+	payload := gin.H{
+		"items":           toOfferList(offers),
+		"status":          status,
+		"counterparty_id": counterpartyID,
+	}
+	if direction != "" {
+		payload["direction"] = direction
+	}
+	resp.OKLang(c, "ok", payload)
 }
 
 // ListMyCargoOffers lists driver offers (requests) grouped by bucket:
@@ -1293,7 +1417,7 @@ func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
 			step = "REJECTED"
 		}
 		item := gin.H{
-			"cargo_id":          row.CargoID.String(),
+			"cargo_id": row.CargoID.String(),
 			"cargo": gin.H{
 				"id":                     row.CargoID.String(),
 				"name":                   row.CargoName,
@@ -1426,13 +1550,13 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		if tripID != uuid.Nil {
 			_ = h.tripsRepo.AssignDriver(c.Request.Context(), tripID, carrierID)
 			resp.OKLang(c, "ok", gin.H{
-				"cargo_id":         cargoID.String(),
-				"offer_id":         offerID.String(),
-				"trip_id":          tripID.String(),
-				"driver_id":        carrierID.String(),
-				"status":           "accepted",
-				"agreed_price":     agreedPrice,
-				"agreed_currency":  agreedCurrency,
+				"cargo_id":        cargoID.String(),
+				"offer_id":        offerID.String(),
+				"trip_id":         tripID.String(),
+				"driver_id":       carrierID.String(),
+				"status":          "accepted",
+				"agreed_price":    agreedPrice,
+				"agreed_currency": agreedCurrency,
 			})
 			return
 		}
@@ -1560,7 +1684,7 @@ func (h *CargoHandler) GetDriverOfferInvitationStats(c *gin.Context) {
 		return
 	}
 	resp.OKLang(c, "ok", gin.H{
-		"invitations_received_total":  s.OutgoingTotal,  // DISPATCHER → driver
+		"invitations_received_total":   s.OutgoingTotal, // DISPATCHER → driver
 		"invitations_received_pending": s.OutgoingPending,
 		"invitations_sent_total":       s.IncomingTotal, // DRIVER → cargo
 		"invitations_sent_pending":     s.IncomingPending,
@@ -1675,32 +1799,32 @@ func (h *CargoHandler) ListCargoNegotiation(c *gin.Context) {
 
 // UpdateCargoReq for PUT /api/cargo/:id (all optional).
 type UpdateCargoReq struct {
-	Name             *string          `json:"name"`
-	Weight           *float64         `json:"weight"`
-	Volume           *float64         `json:"volume"`
-	Packaging        *string          `json:"packaging"`
-	PackagingAmount  *int             `json:"packaging_amount"`
-	Dimensions       *string          `json:"dimensions"`
-	Photos           []string         `json:"photos"`
-	WayPoints        []WayPointReq    `json:"way_points"`
-	ReadyEnabled     *bool            `json:"ready_enabled"`
-	ReadyAt          *string          `json:"ready_at"`
-	Comment          *string          `json:"comment"`
-	TruckType        *string          `json:"truck_type"`
-	TempMin          *float64         `json:"temp_min"`
-	TempMax          *float64         `json:"temp_max"`
-	ADREnabled       *bool            `json:"adr_enabled"`
-	ADRClass         *string          `json:"adr_class"`
-	LoadingTypes     []string         `json:"loading_types"`
-	UnloadingTypes   []string         `json:"unloading_types"`
-	IsTwoDriversRequired *bool        `json:"is_two_drivers_required"`
-	ShipmentType     *string          `json:"shipment_type"`
-	BeltsCount       *int             `json:"belts_count"`
-	Documents        *cargo.Documents `json:"documents"`
-	ContactName      *string          `json:"contact_name"`
-	ContactPhone     *string          `json:"contact_phone"`
-	RoutePoints      []RoutePointReq  `json:"route_points"`
-	Payment          *PaymentReq      `json:"payment"`
+	Name                 *string          `json:"name"`
+	Weight               *float64         `json:"weight"`
+	Volume               *float64         `json:"volume"`
+	Packaging            *string          `json:"packaging"`
+	PackagingAmount      *int             `json:"packaging_amount"`
+	Dimensions           *string          `json:"dimensions"`
+	Photos               []string         `json:"photos"`
+	WayPoints            []WayPointReq    `json:"way_points"`
+	ReadyEnabled         *bool            `json:"ready_enabled"`
+	ReadyAt              *string          `json:"ready_at"`
+	Comment              *string          `json:"comment"`
+	TruckType            *string          `json:"truck_type"`
+	TempMin              *float64         `json:"temp_min"`
+	TempMax              *float64         `json:"temp_max"`
+	ADREnabled           *bool            `json:"adr_enabled"`
+	ADRClass             *string          `json:"adr_class"`
+	LoadingTypes         []string         `json:"loading_types"`
+	UnloadingTypes       []string         `json:"unloading_types"`
+	IsTwoDriversRequired *bool            `json:"is_two_drivers_required"`
+	ShipmentType         *string          `json:"shipment_type"`
+	BeltsCount           *int             `json:"belts_count"`
+	Documents            *cargo.Documents `json:"documents"`
+	ContactName          *string          `json:"contact_name"`
+	ContactPhone         *string          `json:"contact_phone"`
+	RoutePoints          []RoutePointReq  `json:"route_points"`
+	Payment              *PaymentReq      `json:"payment"`
 }
 
 // trailerPlateToTruckType maps transport trailer code to cargo.truck_type (Reference / Cargo).
@@ -1987,35 +2111,35 @@ func toCreateParams(req CreateCargoReq) cargo.CreateParams {
 		loadingTypes = append(loadingTypes, upperStr(v))
 	}
 	p := cargo.CreateParams{
-		Name:             req.Name,
-		Weight:           req.Weight,
-		Volume:           req.Volume,
-		VehiclesAmount:   req.VehiclesAmount,
-		Packaging:        req.Packaging,
-		PackagingAmount:  req.PackagingAmount,
-		Dimensions:       req.Dimensions,
-		Photos:           req.Photos,
-		WayPoints:        toWayPointInputs(req.WayPoints),
-		ReadyEnabled:     req.ReadyEnabled,
-		ReadyAt:          req.ReadyAt,
-		Comment:          req.Comment,
-		TruckType:        trailerPlateToTruckType(req.TrailerPlateType),
-		PowerPlateType:   upperStr(req.PowerPlateType),
-		TrailerPlateType: upperStr(req.TrailerPlateType),
-		TempMin:          req.TempMin,
-		TempMax:          req.TempMax,
-		ADREnabled:       req.ADREnabled,
-		ADRClass:         strPtrUpper(req.ADRClass),
-		LoadingTypes:     loadingTypes,
-		UnloadingTypes:   toUpperSlice(req.UnloadingTypes),
+		Name:                 req.Name,
+		Weight:               req.Weight,
+		Volume:               req.Volume,
+		VehiclesAmount:       req.VehiclesAmount,
+		Packaging:            req.Packaging,
+		PackagingAmount:      req.PackagingAmount,
+		Dimensions:           req.Dimensions,
+		Photos:               req.Photos,
+		WayPoints:            toWayPointInputs(req.WayPoints),
+		ReadyEnabled:         req.ReadyEnabled,
+		ReadyAt:              req.ReadyAt,
+		Comment:              req.Comment,
+		TruckType:            trailerPlateToTruckType(req.TrailerPlateType),
+		PowerPlateType:       upperStr(req.PowerPlateType),
+		TrailerPlateType:     upperStr(req.TrailerPlateType),
+		TempMin:              req.TempMin,
+		TempMax:              req.TempMax,
+		ADREnabled:           req.ADREnabled,
+		ADRClass:             strPtrUpper(req.ADRClass),
+		LoadingTypes:         loadingTypes,
+		UnloadingTypes:       toUpperSlice(req.UnloadingTypes),
 		IsTwoDriversRequired: req.IsTwoDriversRequired,
-		ShipmentType:     shipmentTypePtrUpper(req.ShipmentType),
-		BeltsCount:       req.BeltsCount,
-		Documents:        req.Documents,
-		ContactName:      req.ContactName,
-		ContactPhone:     req.ContactPhone,
-		CargoTypeID:      req.CargoTypeID,
-		Status:           cargo.StatusPendingModeration,
+		ShipmentType:         shipmentTypePtrUpper(req.ShipmentType),
+		BeltsCount:           req.BeltsCount,
+		Documents:            req.Documents,
+		ContactName:          req.ContactName,
+		ContactPhone:         req.ContactPhone,
+		CargoTypeID:          req.CargoTypeID,
+		Status:               cargo.StatusPendingModeration,
 	}
 	if req.Payment != nil {
 		p.Payment = &cargo.PaymentInput{
@@ -2074,7 +2198,7 @@ func toUpdateParams(req UpdateCargoReq) cargo.UpdateParams {
 		p.Payment = &cargo.PaymentInput{
 			IsNegotiable: req.Payment.IsNegotiable, PriceRequest: req.Payment.PriceRequest,
 			TotalAmount: req.Payment.TotalAmount, TotalCurrency: strPtrUpper(req.Payment.TotalCurrency),
-			WithPrepayment: req.Payment.WithPrepayment,
+			WithPrepayment:   req.Payment.WithPrepayment,
 			PrepaymentAmount: req.Payment.PrepaymentAmount, PrepaymentCurrency: strPtrUpper(req.Payment.PrepaymentCurrency),
 			PrepaymentType: strPtrUpper(req.Payment.PrepaymentType), RemainingAmount: req.Payment.RemainingAmount,
 			RemainingCurrency: strPtrUpper(req.Payment.RemainingCurrency), RemainingType: strPtrUpper(req.Payment.RemainingType),
@@ -2104,8 +2228,8 @@ func toCargoItem(c *cargo.Cargo) gin.H {
 	out := gin.H{
 		"id": c.ID.String(), "name": c.Name, "weight": c.Weight, "volume": c.Volume,
 		"vehicles_amount": c.VehiclesAmount,
-		"vehicles_left": c.VehiclesLeft,
-		"packaging": c.Packaging, "packaging_amount": c.PackagingAmount, "dimensions": c.Dimensions, "photos": c.PhotoURLs, "way_points": c.WayPoints,
+		"vehicles_left":   c.VehiclesLeft,
+		"packaging":       c.Packaging, "packaging_amount": c.PackagingAmount, "dimensions": c.Dimensions, "photos": c.PhotoURLs, "way_points": c.WayPoints,
 		"ready_enabled": c.ReadyEnabled, "ready_at": c.ReadyAt, "comment": c.Comment,
 		"truck_type": c.TruckType, "temp_min": c.TempMin, "temp_max": c.TempMax,
 		"power_plate_type": c.PowerPlateType, "trailer_plate_type": c.TrailerPlateType,
@@ -2157,10 +2281,10 @@ func toCargoDetail(c *cargo.Cargo, points []cargo.RoutePoint, pay *cargo.Payment
 	detail["payment"] = toPaymentResp(pay)
 	if stats != nil {
 		detail["offer_invitation_stats"] = gin.H{
-			"from_drivers_total":    stats.IncomingTotal,
-			"from_drivers_pending":  stats.IncomingPending,
-			"to_drivers_total":      stats.OutgoingTotal,
-			"to_drivers_pending":    stats.OutgoingPending,
+			"from_drivers_total":   stats.IncomingTotal,
+			"from_drivers_pending": stats.IncomingPending,
+			"to_drivers_total":     stats.OutgoingTotal,
+			"to_drivers_pending":   stats.OutgoingPending,
 		}
 	}
 	return detail
@@ -2192,7 +2316,7 @@ func toPaymentResp(p *cargo.Payment) gin.H {
 	return gin.H{
 		"id": p.ID.String(), "cargo_id": p.CargoID.String(), "is_negotiable": p.IsNegotiable, "price_request": p.PriceRequest,
 		"total_amount": p.TotalAmount, "total_currency": p.TotalCurrency,
-		"with_prepayment": p.WithPrepayment,
+		"with_prepayment":   p.WithPrepayment,
 		"prepayment_amount": p.PrepaymentAmount, "prepayment_currency": p.PrepaymentCurrency, "prepayment_type": p.PrepaymentType,
 		"remaining_amount": p.RemainingAmount, "remaining_currency": p.RemainingCurrency, "remaining_type": p.RemainingType,
 		"payment_note": p.PaymentNote, "payment_terms_note": p.PaymentTermsNote,
@@ -2209,7 +2333,7 @@ func toOfferList(offers []cargo.Offer) []gin.H {
 		item := gin.H{
 			"id": o.ID.String(), "cargo_id": o.CargoID.String(), "carrier_id": o.CarrierID.String(),
 			"proposed_by": pb,
-			"price": o.Price, "currency": o.Currency, "comment": o.Comment, "status": o.Status, "created_at": o.CreatedAt,
+			"price":       o.Price, "currency": o.Currency, "comment": o.Comment, "status": o.Status, "created_at": o.CreatedAt,
 		}
 		if o.RejectionReason != nil && *o.RejectionReason != "" {
 			item["rejection_reason"] = *o.RejectionReason

@@ -1038,6 +1038,13 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Gönderilen teklifler listelenemedi",
 		"zh": "无法加载已发送报价",
 	},
+	"failed_to_list_offers": {
+		"en": "Failed to list offers",
+		"ru": "Не удалось загрузить список офферов",
+		"uz": "Takliflar ro'yxatini yuklab bo'lmadi",
+		"tr": "Teklifler listelenemedi",
+		"zh": "无法加载报价列表",
+	},
 	"dispatcher_offer_already_exists": {
 		"en": "Offer for this cargo and driver was already sent",
 		"ru": "Оффер по этому грузу этому водителю уже отправлен",

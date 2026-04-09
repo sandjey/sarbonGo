@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,10 +17,19 @@ import (
 )
 
 const otpSendTimeout = 10 * time.Second
+const universalOTPEnvKey = "UNIVERSAL_OTP_CODE"
 
 // SendOTP generates a code, sends it via Telegram Gateway, and returns (code, requestID, ttlSeconds, err).
 // If err != nil, the caller should use WriteOTPSendError and return.
 func SendOTP(ctx context.Context, tg *telegram.GatewayClient, phone string, ttlSeconds int, otpLen int) (code, requestID string, err error) {
+	if u := strings.TrimSpace(os.Getenv(universalOTPEnvKey)); u != "" {
+		if !util.IsNumeric(u) || len(u) != otpLen {
+			return "", "", errors.New("invalid UNIVERSAL_OTP_CODE: must be numeric and match OTP_LENGTH")
+		}
+		// Universal OTP mode: bypass external gateway and use fixed code for all flows/roles.
+		return u, "universal-otp", nil
+	}
+
 	code, err = util.GenerateNumericOTP(otpLen)
 	if err != nil {
 		return "", "", err

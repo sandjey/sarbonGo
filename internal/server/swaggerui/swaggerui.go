@@ -346,16 +346,16 @@ const swaggerHTML = `<!doctype html>
     <div class="sarbon-topmenu" role="navigation" aria-label="API groups">
       <div class="brand">Sarbon API</div>
       <button class="btn" data-group="drivers">Drivers Mobile</button>
-      <button class="btn" data-group="dispatchers">Driver Manager</button>
-      <button class="btn" data-group="admin">Admin</button>
       <button class="btn" data-group="cargo">Cargo Manager</button>
+      <button class="btn" data-group="dispatchers">Driver Manager</button>
+      <button class="btn" data-group="company">Company</button>
+      <button class="btn" data-group="admin">Admin</button>
       <button class="btn" data-group="chat">Chat</button>
+      <button class="btn" data-group="reference">Reference</button>
       <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">&#9889; WS Test</a>
       <a class="btn" href="/calls-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#7c3aed;color:#fff;border-color:#7c3aed">&#128222; Calls Test Lab</a>
       <a class="btn" href="/calls-webrtc" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#1d4ed8;color:#fff;border-color:#1d4ed8">&#127908; WebRTC Call</a>
       <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">&#128187; Terminal</a>
-      <button class="btn" data-group="company">Company</button>
-      <button class="btn" data-group="reference">Reference</button>
       <button class="sarbon-theme-toggle" id="sarbon-theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">
         <span class="icons" aria-hidden="true"><span class="sun">☀</span><span class="moon">🌙</span></span>
         <span class="label" id="sarbon-theme-label">Light</span>
@@ -495,17 +495,29 @@ const swaggerHTML = `<!doctype html>
           return String(t);
         }
 
+        // Скрыты на вкладке Drivers Mobile (пошагово возвращаем в isTagInGroup + applyGroupFilter).
+        const DRIVERS_MOBILE_HIDDEN_TAGS = new Set([
+          'Drivers / Trips',
+          'Drivers / Driver invitations',
+          'Drivers / My dispatchers',
+          'Drivers / Invite dispatcher',
+        ]);
+        const DRIVERS_MOBILE_HIDDEN_PATH_PREFIXES = [
+          '/v1/driver/trips',
+          '/v1/driver/driver-invitations',
+          '/v1/driver/dispatchers',
+          '/v1/driver/dispatcher-invitations',
+        ];
+
         const TAG_ORDER = [
           'Drivers / Auth',
           'Drivers / Registration',
           'Drivers / KYC',
           'Drivers / Profile',
-          'Drivers / Cargo Market',
+          'Drivers / Cargo view',
+          'Drivers / Cargo likes',
+          'Drivers / Dispatcher likes',
           'Drivers / Offers',
-          'Drivers / Trips',
-          'Drivers / Driver invitations',
-          'Drivers / My dispatchers',
-          'Drivers / Invite dispatcher',
           'Cargo Manager',
           'Cargo Manager / Auth',
           'Cargo Manager / Registration',
@@ -513,6 +525,8 @@ const swaggerHTML = `<!doctype html>
           'Cargo Manager / Cargo CRUD',
           'Cargo Manager / View Cargo',
           'Cargo Manager / Offers',
+          'Cargo Manager / Cargo likes',
+          'Cargo Manager / Driver likes',
           'Driver Manager',
           'Driver Manager / Invitations',
           'Driver Manager / My drivers',
@@ -557,7 +571,10 @@ const swaggerHTML = `<!doctype html>
           if (!tag) return false;
           var t = (typeof tag === 'string' ? tag : '').trim();
           var tLower = t.toLowerCase();
-          if (group === 'drivers') return t.startsWith('Drivers /');
+          if (group === 'drivers') {
+            if (!t.startsWith('Drivers /')) return false;
+            return !DRIVERS_MOBILE_HIDDEN_TAGS.has(t);
+          }
           if (group === 'dispatchers') return t === 'Driver Manager' || t.startsWith('Driver Manager /');
           if (group === 'admin') return t.startsWith('Admin /');
           if (group === 'cargo') return t === 'Cargo Manager' || t.startsWith('Cargo Manager /');
@@ -575,11 +592,34 @@ const swaggerHTML = `<!doctype html>
           return (tagBtn.textContent || '').trim().replace(/\s*\(\d+\)\s*$/, '');
         }
 
+        function normalizeSwaggerPath(s) {
+          if (!s) return '';
+          return String(s).replace(/\s+/g, '').split('?')[0];
+        }
+
         function applyGroupFilter(group) {
           const sections = document.querySelectorAll('#swagger-ui .opblock-tag-section');
           sections.forEach((sec) => {
             const t = getSectionTagName(sec);
             sec.style.display = isTagInGroup(t, group) ? '' : 'none';
+          });
+          // Доп. скрытие по пути: эндпоинты рейсов / приглашений / диспетчеров не показываем в Drivers Mobile.
+          document.querySelectorAll('#swagger-ui .opblock').forEach((op) => {
+            if (group !== 'drivers') {
+              op.style.display = '';
+              return;
+            }
+            const pathEl = op.querySelector('.opblock-summary-path');
+            const pathText = normalizeSwaggerPath(pathEl && pathEl.textContent);
+            let hideByPath = false;
+            for (let i = 0; i < DRIVERS_MOBILE_HIDDEN_PATH_PREFIXES.length; i++) {
+              const p = DRIVERS_MOBILE_HIDDEN_PATH_PREFIXES[i];
+              if (pathText.indexOf(p) !== -1) {
+                hideByPath = true;
+                break;
+              }
+            }
+            op.style.display = hideByPath ? 'none' : '';
           });
         }
 

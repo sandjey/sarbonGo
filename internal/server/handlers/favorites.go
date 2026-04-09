@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/cargo"
+	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/server/mw"
@@ -18,18 +19,20 @@ import (
 )
 
 type FavoritesHandler struct {
-	logger      *zap.Logger
-	favRepo     *favorites.Repo
-	cargoRepo   *cargo.Repo
-	driversRepo *drivers.Repo
+	logger          *zap.Logger
+	favRepo         *favorites.Repo
+	cargoRepo       *cargo.Repo
+	driversRepo     *drivers.Repo
+	dispatchersRepo *dispatchers.Repo
 }
 
-func NewFavoritesHandler(logger *zap.Logger, favRepo *favorites.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo) *FavoritesHandler {
+func NewFavoritesHandler(logger *zap.Logger, favRepo *favorites.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo, dispatchersRepo *dispatchers.Repo) *FavoritesHandler {
 	return &FavoritesHandler{
-		logger:      logger,
-		favRepo:     favRepo,
-		cargoRepo:   cargoRepo,
-		driversRepo: driversRepo,
+		logger:          logger,
+		favRepo:         favRepo,
+		cargoRepo:       cargoRepo,
+		driversRepo:     driversRepo,
+		dispatchersRepo: dispatchersRepo,
 	}
 }
 
@@ -39,6 +42,33 @@ type addFavoriteCargoReq struct {
 
 type addFavoriteDriverReq struct {
 	DriverID uuid.UUID `json:"driver_id" binding:"required"`
+}
+
+type addFavoriteDispatcherReq struct {
+	DispatcherID uuid.UUID `json:"dispatcher_id" binding:"required"`
+}
+
+func dispatcherLikeToGin(d *dispatchers.Dispatcher) gin.H {
+	h := gin.H{
+		"id":        d.ID,
+		"phone":     d.Phone,
+		"has_photo": d.HasPhoto,
+	}
+	if d.Name != nil {
+		h["name"] = *d.Name
+	} else {
+		h["name"] = ""
+	}
+	if d.WorkStatus != nil {
+		h["work_status"] = *d.WorkStatus
+	}
+	if d.ManagerRole != nil {
+		h["role"] = *d.ManagerRole
+	}
+	if d.Rating != nil {
+		h["rating"] = *d.Rating
+	}
+	return h
 }
 
 // --- Driver favorites cargo ---
@@ -124,17 +154,106 @@ func (h *FavoritesHandler) ListDriverFavoriteCargo(c *gin.Context) {
 			"cargo_id":   f.CargoID.String(),
 			"created_at": f.CreatedAt,
 			"cargo": gin.H{
-				"id":          cargoObj.ID.String(),
-				"weight":      cargoObj.Weight,
-				"volume":      cargoObj.Volume,
-				"truck_type":  cargoObj.TruckType,
-				"status":      cargoObj.Status,
+				"id":         cargoObj.ID.String(),
+				"weight":     cargoObj.Weight,
+				"volume":     cargoObj.Volume,
+				"truck_type": cargoObj.TruckType,
+				"status":     cargoObj.Status,
 			},
 		})
 	}
 
 	resp.OKLang(c, "ok", gin.H{"items": items})
 }
+
+// --- Driver favorites dispatchers (freelance_dispatchers.id) ---
+
+func (h *FavoritesHandler) AddDriverFavoriteDispatcher(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+
+	var req addFavoriteDispatcherReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+
+	d, err := h.dispatchersRepo.FindByID(c.Request.Context(), req.DispatcherID)
+	if err != nil || d == nil {
+		if err != nil && !errors.Is(err, dispatchers.ErrNotFound) {
+			h.logger.Error("driver favorite dispatcher add: dispatcher get failed", zap.Error(err))
+		}
+		resp.ErrorLang(c, http.StatusNotFound, "dispatcher_not_found")
+		return
+	}
+
+	inserted, err := h.favRepo.AddDriverDispatcherFavorite(c.Request.Context(), driverID, req.DispatcherID)
+	if err != nil {
+		h.logger.Error("driver favorite dispatcher add: db insert failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_favorite")
+		return
+	}
+	if inserted {
+		resp.SuccessLang(c, http.StatusCreated, "favorite_added", gin.H{"dispatcher_id": req.DispatcherID.String()})
+		return
+	}
+	resp.OKLang(c, "favorite_already_exists", gin.H{"dispatcher_id": req.DispatcherID.String()})
+}
+
+func (h *FavoritesHandler) DeleteDriverFavoriteDispatcher(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	dispID, err := uuid.Parse(c.Param("dispatcherId"))
+	if err != nil || dispID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+		return
+	}
+
+	ok, err := h.favRepo.DeleteDriverDispatcherFavorite(c.Request.Context(), driverID, dispID)
+	if err != nil {
+		h.logger.Error("driver favorite dispatcher delete: db delete failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_delete_favorite")
+		return
+	}
+	if !ok {
+		resp.ErrorLang(c, http.StatusNotFound, "favorite_not_found")
+		return
+	}
+	resp.OKLang(c, "favorite_deleted", gin.H{"dispatcher_id": dispID.String()})
+}
+
+func (h *FavoritesHandler) ListDriverFavoriteDispatchers(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+
+	limit := 30
+	if l := c.Query("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	list, err := h.favRepo.ListDriverDispatcherFavorites(c.Request.Context(), driverID, limit)
+	if err != nil {
+		h.logger.Error("driver favorite dispatcher list: db list failed", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_favorites")
+		return
+	}
+
+	items := make([]gin.H, 0, len(list))
+	for _, f := range list {
+		d, err := h.dispatchersRepo.FindByID(c.Request.Context(), f.DispatcherID)
+		if err != nil || d == nil {
+			continue
+		}
+		items = append(items, gin.H{
+			"dispatcher_id": f.DispatcherID.String(),
+			"created_at":    f.CreatedAt,
+			"dispatcher":    dispatcherLikeToGin(d),
+		})
+	}
+	resp.OKLang(c, "ok", gin.H{"items": items})
+}
+
+// --- Freelance dispatcher (Cargo Manager) favorites: storage freelance_dispatcher_*_favorites ---
+// Preferred routes: GET|POST /v1/dispatchers/cargo-likes, DELETE .../cargo-likes/:cargoId (same handlers).
 
 // --- Freelance dispatcher favorites cargo ---
 
@@ -219,11 +338,11 @@ func (h *FavoritesHandler) ListDispatcherFavoriteCargo(c *gin.Context) {
 			"cargo_id":   f.CargoID.String(),
 			"created_at": f.CreatedAt,
 			"cargo": gin.H{
-				"id":          cargoObj.ID.String(),
-				"weight":      cargoObj.Weight,
-				"volume":      cargoObj.Volume,
-				"truck_type":  cargoObj.TruckType,
-				"status":      cargoObj.Status,
+				"id":         cargoObj.ID.String(),
+				"weight":     cargoObj.Weight,
+				"volume":     cargoObj.Volume,
+				"truck_type": cargoObj.TruckType,
+				"status":     cargoObj.Status,
 			},
 		})
 	}
@@ -314,16 +433,15 @@ func (h *FavoritesHandler) ListDispatcherFavoriteDrivers(c *gin.Context) {
 			"driver_id":  drv.ID,
 			"created_at": f.CreatedAt,
 			"driver": gin.H{
-				"id":           drv.ID,
-				"phone":        drv.Phone,
-				"name":         drv.Name,
+				"id":          drv.ID,
+				"phone":       drv.Phone,
+				"name":        drv.Name,
 				"work_status": drv.WorkStatus,
 				"driver_type": drv.DriverType,
-				"rating":       drv.Rating,
+				"rating":      drv.Rating,
 			},
 		})
 	}
 
 	resp.OKLang(c, "ok", gin.H{"items": items})
 }
-
