@@ -497,13 +497,11 @@ const swaggerHTML = `<!doctype html>
 
         // Скрыты на вкладке Drivers Mobile (пошагово возвращаем в isTagInGroup + applyGroupFilter).
         const DRIVERS_MOBILE_HIDDEN_TAGS = new Set([
-          'Drivers / Trips',
           'Drivers / Driver invitations',
           'Drivers / My dispatchers',
           'Drivers / Invite dispatcher',
         ]);
         const DRIVERS_MOBILE_HIDDEN_PATH_PREFIXES = [
-          '/v1/driver/trips',
           '/v1/driver/driver-invitations',
           '/v1/driver/dispatchers',
           '/v1/driver/dispatcher-invitations',
@@ -518,6 +516,7 @@ const swaggerHTML = `<!doctype html>
           'Drivers / Cargo likes',
           'Drivers / Dispatcher likes',
           'Drivers / Offers',
+          'Drivers / Trips',
           'Cargo Manager',
           'Cargo Manager / Auth',
           'Cargo Manager / Registration',

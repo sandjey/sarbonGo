@@ -98,44 +98,93 @@ func (r *Repo) MarkFinished(ctx context.Context, cargoID, driverID uuid.UUID, ne
 }
 
 // AcceptTx inserts ACTIVE link inside existing tx.
+// Uses SAVEPOINT so a failed INSERT (unique violation) does not abort the whole transaction:
+// PostgreSQL would otherwise reject further SQL with SQLSTATE 25P02 until ROLLBACK.
 func AcceptTx(ctx context.Context, tx pgx.Tx, cargoID, driverID uuid.UUID) error {
+	const sp = "sp_cargo_drivers_accept"
 	insertSQL := `INSERT INTO cargo_drivers (cargo_id, driver_id, status)
 		 VALUES ($1, $2, $3)`
+
+	if _, err := tx.Exec(ctx, "SAVEPOINT "+sp); err != nil {
+		return err
+	}
+	release := func() error {
+		_, e := tx.Exec(ctx, "RELEASE SAVEPOINT "+sp)
+		return e
+	}
+	rollback := func() error {
+		_, e := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT "+sp)
+		return e
+	}
+
 	_, err := tx.Exec(ctx, insertSQL, cargoID, driverID, StatusActive)
-	if err != nil {
-		if pgErr, ok := err.(*pgconn.PgError); ok {
-			// already exists (cargo_id, driver_id)
-			if pgErr.ConstraintName == "cargo_drivers_cargo_id_driver_id_key" {
-				return nil
+	if err == nil {
+		return release()
+	}
+
+	pgErr, ok := err.(*pgconn.PgError)
+	if !ok {
+		_ = rollback()
+		_ = release()
+		return err
+	}
+
+	// Duplicate (cargo_id, driver_id): link already exists — treat as success.
+	if pgErr.ConstraintName == "cargo_drivers_cargo_id_driver_id_key" {
+		if e := rollback(); e != nil {
+			return e
+		}
+		return release()
+	}
+
+	// Unique partial index: one ACTIVE cargo per driver — may be stale row; recover after rollback.
+	isActiveDriverConflict := pgErr.ConstraintName == "ux_cargo_drivers_driver_active" ||
+		(pgErr.Code == "23505" && pgErr.TableName == "cargo_drivers")
+	if isActiveDriverConflict {
+		if e := rollback(); e != nil {
+			return e
+		}
+		released, relErr := releaseStaleActiveTx(ctx, tx, driverID)
+		if relErr != nil {
+			_ = release()
+			return relErr
+		}
+		if !released {
+			if e := release(); e != nil {
+				return e
 			}
-			// Handle active-driver uniqueness robustly (constraint name may differ by environment).
-			if pgErr.ConstraintName == "ux_cargo_drivers_driver_active" || pgErr.Code == "23505" {
-				// Defensive recovery for stale ACTIVE links (e.g. trip already cancelled/archived).
-				// If we can safely release stale ACTIVE, retry once.
-				released, relErr := releaseStaleActiveTx(ctx, tx, driverID)
-				if relErr != nil {
-					return relErr
-				}
-				if released {
-					_, err = tx.Exec(ctx, insertSQL, cargoID, driverID, StatusActive)
-					if err == nil {
-						return nil
-					}
-					if pgErr2, ok2 := err.(*pgconn.PgError); ok2 {
-						if pgErr2.ConstraintName == "cargo_drivers_cargo_id_driver_id_key" {
-							return nil
-						}
-						if pgErr2.ConstraintName == "ux_cargo_drivers_driver_active" || pgErr2.Code == "23505" {
-							return ErrDriverBusy
-						}
-					}
+			return ErrDriverBusy
+		}
+		// released stale ACTIVE — retry insert (still under SAVEPOINT; another failure aborts sub-xact)
+		_, err2 := tx.Exec(ctx, insertSQL, cargoID, driverID, StatusActive)
+		if err2 == nil {
+			return release()
+		}
+		if rb2 := rollback(); rb2 != nil {
+			return rb2
+		}
+		if pgErr2, ok2 := err2.(*pgconn.PgError); ok2 {
+			if pgErr2.ConstraintName == "cargo_drivers_cargo_id_driver_id_key" {
+				return release()
+			}
+			if pgErr2.ConstraintName == "ux_cargo_drivers_driver_active" || (pgErr2.Code == "23505" && pgErr2.TableName == "cargo_drivers") {
+				if e := release(); e != nil {
+					return e
 				}
 				return ErrDriverBusy
 			}
 		}
-		return err
+		if e := release(); e != nil {
+			return e
+		}
+		return err2
 	}
-	return nil
+
+	if e := rollback(); e != nil {
+		return e
+	}
+	_ = release()
+	return err
 }
 
 func releaseStaleActiveTx(ctx context.Context, tx pgx.Tx, driverID uuid.UUID) (bool, error) {

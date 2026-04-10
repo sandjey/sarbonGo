@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -439,6 +440,9 @@ var ErrCargoNotSearching = errors.New("cargo: cargo not searching")
 var ErrCargoSlotsFull = errors.New("cargo: cargo has no vehicles_left")
 var ErrDispatcherOfferAlreadyExists = errors.New("cargo: dispatcher offer already exists for this cargo and driver")
 var ErrDriverBusy = errors.New("cargo: driver already has active cargo")
+var ErrOfferPriceOutOfRange = errors.New("cargo: offer price is out of NUMERIC(18,2) range")
+
+const maxOfferPriceNumeric18_2 = 9999999999999999.99
 
 // buildCargoListWhereAndOrder строит WHERE (без префикса), аргументы и ORDER BY для списка грузов.
 func buildCargoListWhereAndOrder(f ListFilter) (where string, args []any, order string) {
@@ -1152,6 +1156,9 @@ func driverCargoOffersBucketWhere(bucket string) (string, error) {
 
 // CreateOffer inserts an offer for a cargo. proposedBy: OfferProposedByDriver or OfferProposedByDispatcher.
 func (r *Repo) CreateOffer(ctx context.Context, cargoID, carrierID uuid.UUID, price float64, currency, comment, proposedBy string) (uuid.UUID, error) {
+	if math.IsNaN(price) || math.IsInf(price, 0) || math.Abs(price) > maxOfferPriceNumeric18_2 {
+		return uuid.Nil, ErrOfferPriceOutOfRange
+	}
 	if proposedBy != OfferProposedByDispatcher {
 		proposedBy = OfferProposedByDriver
 	}

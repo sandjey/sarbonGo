@@ -95,6 +95,39 @@ func (h *TripsHandler) ListMy(c *gin.Context) {
 	resp.OKLang(c, "ok", gin.H{"items": out})
 }
 
+// ListMyActive GET /v1/driver/trips/active — только активные рейсы (не COMPLETED/CANCELLED) с полными данными trip + cargo (как карточка груза: route_points, payment).
+func (h *TripsHandler) ListMyActive(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	list, err := h.repo.ListActiveByDriver(c.Request.Context(), driverID, limit)
+	if err != nil {
+		h.logger.Error("trips list my active", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+	out := make([]gin.H, 0, len(list))
+	for i := range list {
+		t := &list[i]
+		item := toTripResp(t)
+		if h.cargoRepo != nil {
+			cobj, _ := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false)
+			if cobj != nil {
+				pts, _ := h.cargoRepo.GetRoutePoints(c.Request.Context(), t.CargoID)
+				pay, _ := h.cargoRepo.GetPayment(c.Request.Context(), t.CargoID)
+				item["cargo"] = toCargoDetail(cobj, pts, pay, nil)
+			} else {
+				item["cargo"] = nil
+			}
+		}
+		out = append(out, item)
+	}
+	resp.OKLang(c, "ok", gin.H{
+		"items": out,
+		"total": len(out),
+		"limit": limit,
+	})
+}
+
 // AssignDriverReq body for PATCH /v1/dispatchers/trips/:id/assign-driver (dispatcher).
 type AssignDriverReq struct {
 	DriverID string `json:"driver_id" binding:"required,uuid"`
@@ -331,7 +364,12 @@ func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"status": "cancelled", "cargo_id": t.CargoID.String()})
+	resp.OKLang(c, "ok", gin.H{
+		"status":   "cancelled",
+		"trip_id":  tripID.String(),
+		"cargo_id": t.CargoID.String(),
+		"offer_id": t.OfferID.String(),
+	})
 }
 
 // CancelTripDriver POST /v1/driver/trips/:id/cancel

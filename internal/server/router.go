@@ -335,6 +335,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.PATCH("/registration/geo-push", regH.GeoPush)
 	driverAuthed.PATCH("/registration/transport-type", regH.TransportType)
 	driverAuthed.PATCH("/kyc", kycH.Submit)
+	driverAuthed.GET("/trips/active", tripsH.ListMyActive)
 	driverAuthed.GET("/trips", tripsH.ListMy)
 	driverAuthed.POST("/trips/:id/confirm", tripsH.DriverConfirm)
 	driverAuthed.POST("/trips/:id/confirm-transition", tripsH.ConfirmTransitionDriver)
@@ -369,7 +370,6 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/cargo/:id/offers", cargoH.DriverCreateOffer)
 	driverAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	driverAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDriver)
-	driverAuthed.POST("/offers/:id/cancel", cargoH.CancelOfferOrTripDriver)
 
 	// Dispatchers: только API диспетчера
 	dispAuthed := v1.Group("/dispatchers")

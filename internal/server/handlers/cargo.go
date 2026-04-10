@@ -1061,6 +1061,12 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 			return
 		}
+		if err == cargo.ErrOfferPriceOutOfRange {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+				"reason": "offer_price_out_of_range",
+			})
+			return
+		}
 		if err == cargo.ErrDispatcherOfferAlreadyExists {
 			resp.ErrorLang(c, http.StatusConflict, "dispatcher_offer_already_exists")
 			return
@@ -1365,6 +1371,12 @@ func (h *CargoHandler) DriverCreateOffer(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 			return
 		}
+		if err == cargo.ErrOfferPriceOutOfRange {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+				"reason": "offer_price_out_of_range",
+			})
+			return
+		}
 		if err == cargo.ErrCargoSlotsFull {
 			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{
 				"cargo_id":        id.String(),
@@ -1599,10 +1611,12 @@ func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
 	})
 }
 
+// AcceptOffer POST …/offers/:id/accept — принимает оффер **только** по UUID оффера в пути (`id` = offer_id).
+// Тело запроса и query-параметры для выбора оффера не используются; cargo_id/trip_id извлекаются из найденной строки оффера.
 func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	offerID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid offer id")
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
 	raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken))
@@ -1640,7 +1654,13 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusForbidden, "only_dispatcher_accepts_driver_offer")
 			return
 		}
-		if cargoObj.CreatedByType == nil || *cargoObj.CreatedByType != "DISPATCHER" || cargoObj.CreatedByID == nil || *cargoObj.CreatedByID != userID {
+		var dispCompanyID *uuid.UUID
+		if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+			if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+				dispCompanyID = &u
+			}
+		}
+		if !dispatcherOwnsCargoForNegotiation(cargoObj, userID, dispCompanyID) {
 			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 			return
 		}
@@ -1673,26 +1693,62 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			zap.String("proposed_by", proposedBy),
 			zap.String("carrier_id", offer.CarrierID.String()),
 		)
+		offerIDStr := offerID.String()
 		switch {
 		case errors.Is(err, cargo.ErrOfferNotFoundOrNotPending):
-			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
+			resp.ErrorWithDataLang(c, http.StatusNotFound, "offer_not_found_or_not_pending", gin.H{"reason": "offer_not_pending", "offer_id": offerIDStr})
 		case errors.Is(err, cargo.ErrCargoSlotsFull):
-			resp.ErrorLang(c, http.StatusConflict, "cargo_slots_full")
+			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{"reason": "cargo_slots_full", "offer_id": offerIDStr, "cargo_id": offer.CargoID.String()})
 		case errors.Is(err, cargo.ErrDriverBusy):
-			resp.ErrorLang(c, http.StatusConflict, "driver_busy_with_another_cargo")
+			resp.ErrorWithDataLang(c, http.StatusConflict, "driver_busy_with_another_cargo", gin.H{"reason": "driver_busy", "offer_id": offerIDStr, "driver_id": offer.CarrierID.String()})
 		case errors.Is(err, cargo.ErrCargoNotSearching):
-			resp.ErrorLang(c, http.StatusConflict, "cargo_not_searching")
+			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_not_searching", gin.H{"reason": "cargo_not_searching", "offer_id": offerIDStr, "cargo_id": offer.CargoID.String()})
 		case isDBConflict(err):
-			resp.ErrorLang(c, http.StatusConflict, "driver_busy_with_another_cargo")
+			resp.ErrorWithDataLang(c, http.StatusConflict, "driver_busy_with_another_cargo", gin.H{"reason": "driver_cargo_link_conflict", "offer_id": offerIDStr})
+		case isTransactionAborted(err):
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", gin.H{"reason": "transaction_aborted", "offer_id": offerIDStr})
 		default:
-			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", gin.H{"reason": "accept_failed", "offer_id": offerIDStr})
 		}
 		return
 	}
 	if h.tripsRepo != nil {
-		tripID, _ := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, agreedPrice, agreedCurrency)
+		tripID, tripErr := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, agreedPrice, agreedCurrency)
+		if tripErr != nil {
+			if errors.Is(tripErr, trips.ErrAgreedPriceOutOfRange) {
+				resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+					"reason":   "agreed_price_out_of_range",
+					"offer_id": offerID.String(),
+					"cargo_id": cargoID.String(),
+				})
+				return
+			}
+			h.logger.Error("accept offer: trip create failed",
+				zap.Error(tripErr),
+				zap.String("offer_id", offerID.String()),
+				zap.String("cargo_id", cargoID.String()),
+			)
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", gin.H{
+				"reason":   "trip_create_failed",
+				"offer_id": offerID.String(),
+				"cargo_id": cargoID.String(),
+			})
+			return
+		}
 		if tripID != uuid.Nil {
-			_ = h.tripsRepo.AssignDriver(c.Request.Context(), tripID, carrierID)
+			if adErr := h.tripsRepo.AssignDriver(c.Request.Context(), tripID, carrierID); adErr != nil {
+				h.logger.Error("accept offer: assign driver failed",
+					zap.Error(adErr),
+					zap.String("trip_id", tripID.String()),
+					zap.String("driver_id", carrierID.String()),
+				)
+				resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", gin.H{
+					"reason":   "trip_assign_driver_failed",
+					"offer_id": offerID.String(),
+					"trip_id":  tripID.String(),
+				})
+				return
+			}
 			resp.OKLang(c, "ok", gin.H{
 				"cargo_id":        cargoID.String(),
 				"offer_id":        offerID.String(),
@@ -1720,6 +1776,14 @@ func isDBConflict(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23505" || strings.HasPrefix(pgErr.Code, "23")
+}
+
+func isTransactionAborted(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "25P02"
 }
 
 // RejectOfferReq body for POST .../offers/:id/reject — reason is mandatory.
@@ -1824,117 +1888,6 @@ func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 		return
 	}
 	resp.OKLang(c, "ok", gin.H{"status": "rejected"})
-}
-
-// CancelOfferOrTripDriver POST /v1/driver/offers/:id/cancel
-// Single driver action:
-// - PENDING offer  -> mark REJECTED with internal reason "cancelled_by_driver"
-// - ACCEPTED offer -> cancel linked trip (if exists), rollback offer to PENDING via OnTripCancelledTx
-func (h *CargoHandler) CancelOfferOrTripDriver(c *gin.Context) {
-	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
-	offerID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
-		return
-	}
-	offer, err := h.repo.GetOfferByID(c.Request.Context(), offerID)
-	if err != nil || offer == nil {
-		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
-		return
-	}
-	if offer.CarrierID != driverID {
-		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
-		return
-	}
-
-	switch strings.ToUpper(strings.TrimSpace(offer.Status)) {
-	case "PENDING":
-		if err := h.repo.RejectOffer(c.Request.Context(), offerID, "cancelled_by_driver"); err != nil {
-			if errors.Is(err, cargo.ErrRejectionReasonRequired) {
-				resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
-				return
-			}
-			resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
-			return
-		}
-		resp.OKLang(c, "ok", gin.H{
-			"offer_id": offerID.String(),
-			"status":   "cancelled",
-			"target":   "offer",
-		})
-		return
-
-	case "ACCEPTED":
-		if h.tripsRepo == nil {
-			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
-			return
-		}
-		t, err := h.tripsRepo.GetByOfferID(c.Request.Context(), offerID)
-		if err != nil || t == nil {
-			resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
-			return
-		}
-		if t.DriverID == nil || *t.DriverID != driverID {
-			resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
-			return
-		}
-		if t.Status == trips.StatusCompleted {
-			resp.ErrorLang(c, http.StatusBadRequest, "trip_already_completed")
-			return
-		}
-
-		tx, err := h.tripsRepo.BeginTx(c.Request.Context())
-		if err != nil {
-			h.logger.Error("driver offer cancel begin tx", zap.Error(err))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
-			return
-		}
-		defer tx.Rollback(c.Request.Context())
-
-		tLocked, err := h.tripsRepo.GetByIDForUpdateTx(c.Request.Context(), tx, t.ID)
-		if err != nil || tLocked == nil {
-			resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
-			return
-		}
-		if tLocked.DriverID == nil || *tLocked.DriverID != driverID {
-			resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
-			return
-		}
-		if tLocked.Status == trips.StatusCompleted {
-			resp.ErrorLang(c, http.StatusBadRequest, "trip_already_completed")
-			return
-		}
-		if err := h.tripsRepo.ArchiveTripAndDeleteTx(c.Request.Context(), tx, tLocked.ID, "driver"); err != nil {
-			if err == trips.ErrNotFound {
-				resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
-				return
-			}
-			h.logger.Error("driver offer cancel archive trip", zap.Error(err))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
-			return
-		}
-		if err := h.repo.OnTripCancelledTx(c.Request.Context(), tx, tLocked.CargoID, tLocked.OfferID, tLocked.Status); err != nil {
-			h.logger.Error("driver offer cancel on trip cancelled", zap.Error(err))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
-			return
-		}
-		if err := tx.Commit(c.Request.Context()); err != nil {
-			h.logger.Error("driver offer cancel commit", zap.Error(err))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
-			return
-		}
-		resp.OKLang(c, "ok", gin.H{
-			"offer_id": offerID.String(),
-			"trip_id":  tLocked.ID.String(),
-			"cargo_id": tLocked.CargoID.String(),
-			"status":   "cancelled",
-			"target":   "trip",
-		})
-		return
-	default:
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
-		return
-	}
 }
 
 // GetDriverOfferInvitationStats GET /v1/driver/cargo-invitation-stats — counts for current driver (all cargos).

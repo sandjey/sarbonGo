@@ -3,6 +3,7 @@ package trips
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 
 	"github.com/google/uuid"
@@ -13,6 +14,9 @@ import (
 var ErrNotFound = errors.New("trip not found")
 var ErrInvalidTransition = errors.New("invalid status transition")
 var ErrForbiddenRole = errors.New("trip: not allowed for this role")
+var ErrAgreedPriceOutOfRange = errors.New("trip: agreed_price is out of NUMERIC(18,2) range")
+
+const maxAgreedPriceNumeric18_2 = 9999999999999999.99
 
 var allowedTransitions = map[string][]string{
 	StatusInProgress: {StatusInTransit, StatusCancelled},
@@ -50,6 +54,9 @@ func (r *Repo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 
 // Create creates trip with status IN_PROGRESS (after offer accepted). agreedPrice/currency — договор с этим водителем.
 func (r *Repo) Create(ctx context.Context, cargoID, offerID uuid.UUID, agreedPrice float64, agreedCurrency string) (uuid.UUID, error) {
+	if math.IsNaN(agreedPrice) || math.IsInf(agreedPrice, 0) || math.Abs(agreedPrice) > maxAgreedPriceNumeric18_2 {
+		return uuid.Nil, ErrAgreedPriceOutOfRange
+	}
 	cur := strings.ToUpper(strings.TrimSpace(agreedCurrency))
 	if cur == "" {
 		cur = "UZS"
@@ -293,6 +300,24 @@ func (r *Repo) ListByDriver(ctx context.Context, driverID uuid.UUID, limit int) 
 	rows, err := r.pg.Query(ctx,
 		tripSelect+`WHERE driver_id = $1 ORDER BY created_at DESC LIMIT $2`,
 		driverID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTripRows(rows)
+}
+
+// ListActiveByDriver returns non-terminal trips for the driver (IN_PROGRESS, IN_TRANSIT, DELIVERED).
+func (r *Repo) ListActiveByDriver(ctx context.Context, driverID uuid.UUID, limit int) ([]Trip, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := r.pg.Query(ctx,
+		tripSelect+`WHERE driver_id = $1 AND status NOT IN ($2, $3) ORDER BY created_at DESC LIMIT $4`,
+		driverID, StatusCompleted, StatusCancelled, limit)
 	if err != nil {
 		return nil, err
 	}
