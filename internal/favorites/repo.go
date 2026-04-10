@@ -51,6 +51,54 @@ WHERE driver_id = $1 AND cargo_id = $2
 	return tag.RowsAffected() > 0, nil
 }
 
+// DriverLikedCargoIDs returns the subset of cargoIDs that the driver has in cargo-likes.
+func (r *Repo) DriverLikedCargoIDs(ctx context.Context, driverID uuid.UUID, cargoIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := make(map[uuid.UUID]bool)
+	if len(cargoIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pg.Query(ctx, `
+SELECT cargo_id FROM driver_cargo_favorites
+WHERE driver_id = $1 AND cargo_id = ANY($2::uuid[])
+`, driverID, cargoIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
+// DispatcherLikedCargoIDs returns the subset of cargoIDs that the dispatcher has in cargo-likes.
+func (r *Repo) DispatcherLikedCargoIDs(ctx context.Context, dispatcherID uuid.UUID, cargoIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	out := make(map[uuid.UUID]bool)
+	if len(cargoIDs) == 0 {
+		return out, nil
+	}
+	rows, err := r.pg.Query(ctx, `
+SELECT cargo_id FROM freelance_dispatcher_cargo_favorites
+WHERE dispatcher_id = $1 AND cargo_id = ANY($2::uuid[])
+`, dispatcherID, cargoIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 type DispatcherFavorite struct {
 	DispatcherID uuid.UUID
 	CreatedAt    time.Time

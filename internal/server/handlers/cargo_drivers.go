@@ -10,6 +10,7 @@ import (
 
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/cargodrivers"
+	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 )
@@ -18,10 +19,11 @@ type CargoDriversHandler struct {
 	logger     *zap.Logger
 	cargoRepo  *cargo.Repo
 	cdRepo     *cargodrivers.Repo
+	fav        *favorites.Repo
 }
 
-func NewCargoDriversHandler(logger *zap.Logger, cargoRepo *cargo.Repo, cdRepo *cargodrivers.Repo) *CargoDriversHandler {
-	return &CargoDriversHandler{logger: logger, cargoRepo: cargoRepo, cdRepo: cdRepo}
+func NewCargoDriversHandler(logger *zap.Logger, cargoRepo *cargo.Repo, cdRepo *cargodrivers.Repo, fav *favorites.Repo) *CargoDriversHandler {
+	return &CargoDriversHandler{logger: logger, cargoRepo: cargoRepo, cdRepo: cdRepo, fav: fav}
 }
 
 // ListByCargo GET /v1/dispatchers/cargo/:id/drivers (dispatcher).
@@ -130,6 +132,12 @@ func (h *CargoDriversHandler) GetMyActiveCargo(c *gin.Context) {
 		resp.OKLang(c, "ok", gin.H{"active": false})
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"active": true, "cargo": toCargoItem(obj)})
+	cargoMap := toCargoItem(obj)
+	if h.fav != nil {
+		if flags, err := h.fav.DriverLikedCargoIDs(c.Request.Context(), driverID, []uuid.UUID{obj.ID}); err == nil {
+			cargoMap["is_liked"] = flags[obj.ID]
+		}
+	}
+	resp.OKLang(c, "ok", gin.H{"active": true, "cargo": cargoMap})
 }
 

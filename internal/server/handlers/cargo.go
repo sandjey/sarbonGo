@@ -24,6 +24,7 @@ import (
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/config"
 	"sarbonNew/internal/drivers"
+	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/reference"
 	"sarbonNew/internal/security"
 	"sarbonNew/internal/server/mw"
@@ -53,12 +54,13 @@ type CargoHandler struct {
 	repo      *cargo.Repo
 	tripsRepo *trips.Repo
 	drivers   *drivers.Repo
+	fav       *favorites.Repo
 	jwtm      *security.JWTManager
 	cfg       config.Config
 }
 
-func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, driversRepo *drivers.Repo, jwtm *security.JWTManager, cfg config.Config) *CargoHandler {
-	return &CargoHandler{logger: logger, repo: repo, tripsRepo: tripsRepo, drivers: driversRepo, jwtm: jwtm, cfg: cfg}
+func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, driversRepo *drivers.Repo, fav *favorites.Repo, jwtm *security.JWTManager, cfg config.Config) *CargoHandler {
+	return &CargoHandler{logger: logger, repo: repo, tripsRepo: tripsRepo, drivers: driversRepo, fav: fav, jwtm: jwtm, cfg: cfg}
 }
 
 // CreateCargoReq body for POST /api/cargo.
@@ -377,7 +379,12 @@ func (h *CargoHandler) Create(c *gin.Context) {
 	}
 	points, _ := h.repo.GetRoutePoints(c.Request.Context(), id)
 	pay, _ := h.repo.GetPayment(c.Request.Context(), id)
-	resp.SuccessLang(c, http.StatusCreated, "created", toCargoDetail(obj, points, pay, nil))
+	detail := toCargoDetail(obj, points, pay, nil)
+	viewer := parseCargoAPIViewer(c, h.jwtm)
+	if flags := h.cargoLikedFlags(c.Request.Context(), viewer, []uuid.UUID{id}); flags != nil {
+		applyIsLikedToDetail(detail, flags, id)
+	}
+	resp.SuccessLang(c, http.StatusCreated, "created", detail)
 }
 
 func (h *CargoHandler) prepareCargoCreatePhotos(ctx context.Context, photos []string) (external []string, pendingOrdered []uuid.UUID, err error) {
@@ -705,6 +712,7 @@ func (h *CargoHandler) DeletePhoto(c *gin.Context) {
 
 func (h *CargoHandler) List(c *gin.Context) {
 	f := parseCargoListFilterFromQuery(c)
+	var viewer *cargoAPIViewer
 	// Optional JWT-based restrictions:
 	// - driver: when listing "searching" cargo, show only SEARCHING_ALL + SEARCHING_COMPANY (his company)
 	// - dispatcher (freelance): show only cargo created by this dispatcher (created_by_type=DISPATCHER, created_by_id=me)
@@ -713,6 +721,7 @@ func (h *CargoHandler) List(c *gin.Context) {
 			if userID, role, _, _, err := h.jwtm.ParseAccessWithSID(raw); err == nil && userID != uuid.Nil {
 				switch role {
 				case "driver":
+					viewer = &cargoAPIViewer{DriverID: &userID}
 					if h.drivers != nil {
 						if drv, _ := h.drivers.FindByID(c.Request.Context(), userID); drv != nil && drv.CompanyID != nil && *drv.CompanyID != "" {
 							if cid, err := uuid.Parse(*drv.CompanyID); err == nil {
@@ -721,6 +730,7 @@ func (h *CargoHandler) List(c *gin.Context) {
 						}
 					}
 				case "dispatcher":
+					viewer = &cargoAPIViewer{DispatcherID: &userID}
 					f2 := f
 					f2.CreatedByDispatcherID = &userID
 					f = f2
@@ -728,7 +738,7 @@ func (h *CargoHandler) List(c *gin.Context) {
 			}
 		}
 	}
-	h.listCargoPage(c, f)
+	h.listCargoPage(c, f, viewer)
 }
 
 // ListActiveCargoForDriver POST /v1/driver/cargo/active
@@ -789,11 +799,21 @@ func (h *CargoHandler) ListActiveCargoForDriver(c *gin.Context) {
 		return
 	}
 
+	viewer := &cargoAPIViewer{DriverID: &driverID}
+	var liked map[uuid.UUID]bool
+	if len(result.Items) > 0 {
+		ids := make([]uuid.UUID, len(result.Items))
+		for i := range result.Items {
+			ids[i] = result.Items[i].Cargo.ID
+		}
+		liked = h.cargoLikedFlags(c.Request.Context(), viewer, ids)
+	}
 	items := make([]gin.H, 0, len(result.Items))
 	for _, item := range result.Items {
 		points, _ := h.repo.GetRoutePoints(c.Request.Context(), item.Cargo.ID)
 		pay, _ := h.repo.GetPayment(c.Request.Context(), item.Cargo.ID)
 		m := toCargoDetail(&item.Cargo, points, pay, nil)
+		applyIsLikedToDetail(m, liked, item.Cargo.ID)
 		distKM := math.Round(item.DistanceKM*1000) / 1000
 		m["distance_km"] = distKM
 		m["distance_m"] = int(math.Round(item.DistanceKM * 1000))
@@ -815,13 +835,13 @@ func (h *CargoHandler) ListActiveCargoForDriver(c *gin.Context) {
 // ListActiveCargoForDispatcher GET /v1/dispatchers/cargo/active — маркетплейс: все активные грузы в поиске по базе
 // (не только созданные этим диспетчером). По умолчанию status=SEARCHING_ALL; можно расширить status, q, фильтры.
 func (h *CargoHandler) ListActiveCargoForDispatcher(c *gin.Context) {
-	_ = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
 	f := parseCargoListFilterFromQuery(c)
 	if len(f.Status) == 0 {
 		f.Status = []string{string(cargo.StatusSearchingAll)}
 	}
 	// без CreatedByDispatcherID — полный каталог
-	h.listCargoPage(c, f)
+	h.listCargoPage(c, f, &cargoAPIViewer{DispatcherID: &dispatcherID})
 }
 
 func parseCargoListFilterFromQuery(c *gin.Context) cargo.ListFilter {
@@ -876,31 +896,41 @@ func (h *CargoHandler) ListMyCargoForDispatcher(c *gin.Context) {
 	}
 	f2 := f
 	f2.CreatedByDispatcherID = &dispatcherID
-	h.listCargoPage(c, f2)
+	h.listCargoPage(c, f2, &cargoAPIViewer{DispatcherID: &dispatcherID})
 }
 
 // ListAllCargoForDispatcher GET /v1/dispatchers/cargo/all — каталог всех грузов с фильтрами/сортировкой/пагинацией.
 func (h *CargoHandler) ListAllCargoForDispatcher(c *gin.Context) {
-	_ = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
 	f := parseCargoListFilterFromQuery(c)
 	if len(f.Status) == 0 {
 		f.Status = []string{string(cargo.StatusSearchingAll)}
 	}
-	h.listCargoPage(c, f)
+	h.listCargoPage(c, f, &cargoAPIViewer{DispatcherID: &dispatcherID})
 }
 
-func (h *CargoHandler) listCargoPage(c *gin.Context, f cargo.ListFilter) {
+func (h *CargoHandler) listCargoPage(c *gin.Context, f cargo.ListFilter, viewer *cargoAPIViewer) {
 	result, err := h.repo.List(c.Request.Context(), f)
 	if err != nil {
 		h.logger.Error("cargo list", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
+	var liked map[uuid.UUID]bool
+	if viewer != nil && len(result.Items) > 0 {
+		ids := make([]uuid.UUID, len(result.Items))
+		for i := range result.Items {
+			ids[i] = result.Items[i].ID
+		}
+		liked = h.cargoLikedFlags(c.Request.Context(), viewer, ids)
+	}
 	items := make([]gin.H, 0, len(result.Items))
 	for i := range result.Items {
 		points, _ := h.repo.GetRoutePoints(c.Request.Context(), result.Items[i].ID)
 		pay, _ := h.repo.GetPayment(c.Request.Context(), result.Items[i].ID)
-		items = append(items, toCargoDetail(&result.Items[i], points, pay, nil))
+		m := toCargoDetail(&result.Items[i], points, pay, nil)
+		applyIsLikedToDetail(m, liked, result.Items[i].ID)
+		items = append(items, m)
 	}
 	resp.OKLang(c, "ok", gin.H{
 		"items": items,
@@ -929,7 +959,11 @@ func (h *CargoHandler) GetByID(c *gin.Context) {
 	if st, err := h.repo.GetOfferInvitationStats(c.Request.Context(), id); err == nil {
 		stats = &st
 	}
-	resp.OKLang(c, "ok", toCargoDetail(obj, points, pay, stats))
+	detail := toCargoDetail(obj, points, pay, stats)
+	if flags := h.cargoLikedFlags(c.Request.Context(), parseCargoAPIViewer(c, h.jwtm), []uuid.UUID{id}); flags != nil {
+		applyIsLikedToDetail(detail, flags, id)
+	}
+	resp.OKLang(c, "ok", detail)
 }
 
 func (h *CargoHandler) Update(c *gin.Context) {
@@ -1190,6 +1224,7 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
+	h.applyIsLikedToOfferListItems(c.Request.Context(), items, &cargoAPIViewer{DispatcherID: &dispatcherID})
 	incomingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, "incoming", counterpartyID)
 	outgoingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, "outgoing", counterpartyID)
 	resp.OKLang(c, "sent_offers_listed", gin.H{
@@ -1312,6 +1347,7 @@ func (h *CargoHandler) ListOffersForDriver(c *gin.Context) {
 		}
 		items = append(items, item)
 	}
+	h.applyIsLikedToOfferListItems(c.Request.Context(), items, &cargoAPIViewer{DriverID: &driverID})
 	incomingCount, _ := h.repo.CountDriverOffersAll(c.Request.Context(), driverID, status, "incoming", counterpartyID)
 	outgoingCount, _ := h.repo.CountDriverOffersAll(c.Request.Context(), driverID, status, "outgoing", counterpartyID)
 	resp.OKLang(c, "cargo_offers_listed", gin.H{
@@ -1390,6 +1426,8 @@ func (h *CargoHandler) respondSingleOfferWithCargo(c *gin.Context, offer *cargo.
 		pb = cargo.OfferProposedByDriver
 	}
 
+	cargoDetail := toCargoDetail(cargoObj, points, pay, nil)
+	h.applyIsLikedToCargoMap(c.Request.Context(), cargoDetail, offer.CargoID, cargoViewerFromGin(c))
 	out := gin.H{
 		"offer": gin.H{
 			"id":               offer.ID.String(),
@@ -1404,7 +1442,7 @@ func (h *CargoHandler) respondSingleOfferWithCargo(c *gin.Context, offer *cargo.
 			"rejection_reason": offer.RejectionReason,
 			"created_at":       offer.CreatedAt,
 		},
-		"cargo": toCargoDetail(cargoObj, points, pay, nil),
+		"cargo": cargoDetail,
 	}
 	if h.tripsRepo != nil {
 		if t, _ := h.tripsRepo.GetByOfferID(c.Request.Context(), offer.ID); t != nil {
@@ -1560,6 +1598,11 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 			"cargo_type_name": firstNonEmptyStr(cargoObj.CargoTypeNameRU, cargoObj.CargoTypeNameUZ, cargoObj.CargoTypeNameEN, cargoObj.CargoTypeNameTR, cargoObj.CargoTypeNameZH),
 			"weight":          cargoObj.Weight,
 			"volume":          cargoObj.Volume,
+		}
+		if v := parseCargoAPIViewer(c, h.jwtm); v != nil {
+			if flags := h.cargoLikedFlags(c.Request.Context(), v, []uuid.UUID{id}); flags != nil {
+				cargoMini["is_liked"] = flags[id]
+			}
 		}
 	}
 	items := make([]gin.H, 0, len(offers))
@@ -1717,6 +1760,7 @@ func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
 
 		items = append(items, item)
 	}
+	h.applyIsLikedToOfferListItems(c.Request.Context(), items, &cargoAPIViewer{DriverID: &driverID})
 
 	resp.OKLang(c, "cargo_offers_listed", gin.H{
 		"items":  items,

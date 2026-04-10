@@ -99,6 +99,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	cargoRepo := cargo.NewRepo(deps.PG)
 	tripsRepo := trips.NewRepo(deps.PG)
 	cargoDriversRepo := cargodrivers.NewRepo(deps.PG)
+	favRepo := favorites.NewRepo(deps.PG)
 	dcrRepo := dispatchercompanies.NewRepo(deps.PG)
 	dispInvRepo := dispatcherinvitations.NewRepo(deps.PG)
 	driverInvRepo := driverinvitations.NewRepo(deps.PG)
@@ -150,7 +151,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispProfileH := handlers.NewDispatcherProfileHandler(logger, dispatchersRepo, displayNameChecker, dispPhoneActions, tgClient, cfg.OTPTTL, cfg.OTPLength)
 	adminAuthH := handlers.NewAdminAuthHandler(logger, adminsRepo, jwtm, refreshStore)
 	adminCompaniesH := handlers.NewAdminCompaniesHandler(logger, companiesRepo, appusersRepo, cfg)
-	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, driversRepo, jwtm, cfg)
+	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, driversRepo, favRepo, jwtm, cfg)
 	dispCargoExportH := handlers.NewDispatcherCargoExportHandler(logger, cargoRepo)
 	adminCargoModH := handlers.NewAdminCargoModerationHandler(logger, cargoRepo)
 	dispCompaniesH := handlers.NewDispatcherCompaniesHandler(logger, companiesRepo, dcrRepo, jwtm)
@@ -162,12 +163,11 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo)
 	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo)
 
-	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo)
+	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo, favRepo)
 
-	favRepo := favorites.NewRepo(deps.PG)
 	favH := handlers.NewFavoritesHandler(logger, favRepo, cargoRepo, driversRepo, dispatchersRepo)
 
-	driverCargoSearchH := handlers.NewDriverCargoSearchHandler(logger, cargoRepo, driversRepo)
+	driverCargoSearchH := handlers.NewDriverCargoSearchHandler(logger, cargoRepo, driversRepo, favRepo)
 
 	chatRepo := chat.NewRepo(deps.PG)
 	chatPresence := chat.NewPresenceStore(deps.Redis)

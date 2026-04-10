@@ -159,6 +159,7 @@ func (h *FavoritesHandler) ListDriverFavoriteCargo(c *gin.Context) {
 				"volume":     cargoObj.Volume,
 				"truck_type": cargoObj.TruckType,
 				"status":     cargoObj.Status,
+				"is_liked":   true,
 			},
 		})
 	}
@@ -343,6 +344,7 @@ func (h *FavoritesHandler) ListDispatcherFavoriteCargo(c *gin.Context) {
 				"volume":     cargoObj.Volume,
 				"truck_type": cargoObj.TruckType,
 				"status":     cargoObj.Status,
+				"is_liked":   true,
 			},
 		})
 	}

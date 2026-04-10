@@ -687,6 +687,12 @@ components:
             name_tr: { type: string, example: "PSHENITSA", description: "Название на турецком" }
             name_zh: { type: string, example: "PSHENITSA", description: "Название на китайском" }
         moderation_rejection_reason: { type: string, nullable: true, example: null, description: "Причина отклонения модерации (если груз отменён на модерации)" }
+        is_liked:
+          type: boolean
+          description: |
+            Для ответов **водителю** или **cargo manager (диспетчеру)** с JWT: **true**, если груз в избранном у текущего пользователя (`driver_cargo_favorites` / `freelance_dispatcher_cargo_favorites`, см. cargo-likes API), иначе **false**.
+            Поле может отсутствовать, если запрос без подходящего JWT (или роль не driver/dispatcher).
+          example: false
     RoutePoint:
       type: object
       description: |
@@ -4232,7 +4238,7 @@ paths:
           schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
       responses:
         "200":
-          description: "data.items — cargo_id, created_at, cargo"
+          description: "data.items — cargo_id, created_at, cargo (в объекте cargo всегда is_liked: true)"
         "500":
           description: failed_to_list_favorites
     post:
@@ -4472,7 +4478,7 @@ paths:
           description: "Макс. количество элементов"
       responses:
         "200":
-          description: "data.items — cargo_id, created_at, cargo (кратко)"
+          description: "data.items — cargo_id, created_at, cargo (кратко; в cargo всегда is_liked: true)"
           content:
             application/json:
               schema:

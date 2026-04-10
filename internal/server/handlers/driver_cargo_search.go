@@ -12,6 +12,7 @@ import (
 
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/drivers"
+	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 )
@@ -21,10 +22,11 @@ type DriverCargoSearchHandler struct {
 	logger  *zap.Logger
 	cargo   *cargo.Repo
 	drivers *drivers.Repo
+	fav     *favorites.Repo
 }
 
-func NewDriverCargoSearchHandler(logger *zap.Logger, cargoRepo *cargo.Repo, driversRepo *drivers.Repo) *DriverCargoSearchHandler {
-	return &DriverCargoSearchHandler{logger: logger, cargo: cargoRepo, drivers: driversRepo}
+func NewDriverCargoSearchHandler(logger *zap.Logger, cargoRepo *cargo.Repo, driversRepo *drivers.Repo, fav *favorites.Repo) *DriverCargoSearchHandler {
+	return &DriverCargoSearchHandler{logger: logger, cargo: cargoRepo, drivers: driversRepo, fav: fav}
 }
 
 // NearbyCargoForDriver GET /v1/driver/nearby-cargo?lat=...&lng=...&page=1&limit=20
@@ -74,9 +76,26 @@ func (h *DriverCargoSearchHandler) NearbyCargoForDriver(c *gin.Context) {
 		return
 	}
 
+	var liked map[uuid.UUID]bool
+	if h.fav != nil && len(result.Items) > 0 {
+		ids := make([]uuid.UUID, len(result.Items))
+		for i := range result.Items {
+			ids[i] = result.Items[i].Cargo.ID
+		}
+		var errL error
+		liked, errL = h.fav.DriverLikedCargoIDs(c.Request.Context(), uid, ids)
+		if errL != nil {
+			h.logger.Warn("driver nearby cargo is_liked", zap.Error(errL))
+			liked = map[uuid.UUID]bool{}
+		}
+	}
+
 	items := make([]gin.H, 0, len(result.Items))
 	for _, item := range result.Items {
 		m := toCargoItem(&item.Cargo)
+		if liked != nil {
+			m["is_liked"] = liked[item.Cargo.ID]
+		}
 		m["distance_km"] = math.Round(item.DistanceKM*100) / 100
 		m["origin_lat"] = item.OriginLat
 		m["origin_lng"] = item.OriginLng
@@ -139,8 +158,24 @@ func (h *DriverCargoSearchHandler) MatchingCargoForDriver(c *gin.Context) {
 		return
 	}
 
+	listItems := toCargoListItems(result.Items)
+	if h.fav != nil && len(result.Items) > 0 {
+		ids := make([]uuid.UUID, len(result.Items))
+		for i := range result.Items {
+			ids[i] = result.Items[i].ID
+		}
+		flags, errL := h.fav.DriverLikedCargoIDs(c.Request.Context(), uid, ids)
+		if errL != nil {
+			h.logger.Warn("driver matching cargo is_liked", zap.Error(errL))
+		} else {
+			for i := range listItems {
+				listItems[i]["is_liked"] = flags[result.Items[i].ID]
+			}
+		}
+	}
+
 	resp.OKLang(c, "ok", gin.H{
-		"items":         toCargoListItems(result.Items),
+		"items":         listItems,
 		"total":         result.Total,
 		"page":          f.Page,
 		"limit":         f.Limit,
