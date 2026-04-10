@@ -87,7 +87,10 @@ tags:
   - name: "Cargo Manager / Profile"
     description: "Профиль диспетчера: просмотр, изменение, фото, пароль, смена телефона."
   - name: "Cargo Manager / Cargo CRUD"
-    description: "Создание, получение, обновление, удаление и статусы грузов, включая фото груза."
+    description: |
+      Создание, получение, обновление, удаление и статусы грузов, включая фото груза.
+      Также содержит справочник типов груза для форм Cargo Manager:
+      - `GET /v1/dispatchers/cargo-types` — список `cargo_types` с названием на языке из `X-Language`.
   - name: "Cargo Manager / View Cargo"
     description: |
       Просмотр грузов Cargo Manager.
@@ -102,6 +105,19 @@ tags:
       - `/v1/dispatchers/offers/all` — единый список по `direction=all|incoming|outgoing` + `status` + `counterparty_id`.
       - `/v1/dispatchers/offers/{id}/accept|reject` — действия по офферу.
       В ответе списка есть `counts.incoming/outgoing`.
+  - name: "Cargo Manager / Trips"
+    description: |
+      **Рейсы Cargo Manager (диспетчер / компания).** Требуется X-User-Token (dispatcher).
+
+      - **GET /v1/dispatchers/trips** — список рейсов по **своим** грузам (и грузам выбранной компании после `switch-company`).
+        Фильтры: `cargo_id`, `driver_id`, `status` (через запятую), пагинация `limit`, `offset`,
+        сортировка `sort=created_at|updated_at` + `order=asc|desc`.
+      - **GET /v1/dispatchers/cargo/{id}/trips** — рейсы конкретного груза по `cargo_id` (только если груз ваш).
+      - **GET /v1/dispatchers/trips/history** — история событий: `offer_accepted`, `offer_rejected`, `trip_completed`, `trip_cancelled`.
+      - **GET /v1/dispatchers/trips/{id}** — получить рейс по `trip_id` (только если груз ваш).
+      - **POST /v1/dispatchers/trips/{id}/confirm-transition** — следующий шаг статуса рейса.
+      - **POST /v1/dispatchers/trips/{id}/cancel** — отменить рейс по `trip_id`.
+      - **GET /v1/dispatchers/trips/{id}/state** — состояние рейса (включая next_status).
   - name: "Cargo Manager / Cargo likes"
     description: |
       **Избранные грузы (Cargo Manager).** Добавить/удалить/список по JWT диспетчера. Можно сохранить **любой** существующий груз (свой или чужой): `POST /v1/dispatchers/cargo-likes` + `cargo_id`, `DELETE /cargo-likes/{cargoId}`, `GET` + `limit`.
@@ -128,6 +144,8 @@ tags:
 
       - **GET /v1/driver/trips/active** — только **активные** рейсы (статусы `IN_PROGRESS`, `IN_TRANSIT`, `DELIVERED`; без `COMPLETED` и `CANCELLED`). В каждом элементе: полные поля рейса + вложенный объект **cargo** как в карточке груза (`route_points`, `payment` и остальные поля груза).
       - **GET /v1/driver/trips** — все рейсы водителя (история + активные), опционально `limit`.
+      - **GET /v1/driver/trips/history** — история событий: `offer_accepted`, `offer_rejected`, `trip_completed`, `trip_cancelled`.
+      - **GET /v1/driver/trips/{id}** — получить рейс по `trip_id` (только если он назначен на вас).
       - **POST** …/confirm, …/confirm-transition — следующий шаг статуса рейса.
       - **POST** …/reject — снять назначение; **POST** …/cancel — отменить рейс.
       - **GET** …/state — краткое состояние рейса и груза.
@@ -1355,7 +1373,11 @@ paths:
         **Кто вызывает:** Диспетчер, компания, админ (перед принятием оффера). Водитель может смотреть свои офферы через список грузов или отдельный экран.
         **Назначение:** Просмотр офферов по конкретному грузу.
 
-        **Логика:** По умолчанию — все записи из `offers` с `cargo_id = id`, отсортированные по `created_at` (новые сверху). В каждом оффере: id, cargo_id, carrier_id (ID водителя), price, currency, comment, status (PENDING/ACCEPTED/REJECTED), created_at.
+        **Логика:** По умолчанию — все записи из `offers` с `cargo_id = id`, отсортированные по `created_at` (новые сверху).
+        В каждом элементе `items[]`:
+        - `offer` — поля оффера (id, cargo_id, carrier_id, proposed_by, price, currency, comment, status, rejection_reason, created_at);
+        - `cargo` — кратко по грузу: `cargo_type_name`, `weight`, `volume`;
+        - `driver` — водитель оффера: `phone`, `name`.
 
         **Фильтры (query)** — те же смыслы, что у `GET /v1/dispatchers/offers/all`, но в рамках одного груза:
         - `direction` — необязательно; если не передан — показываются **все** направления. `outgoing` / алиасы from_me, sent, by — `proposed_by=DISPATCHER`; `incoming` / to_me, received — `proposed_by=DRIVER`.
@@ -1394,7 +1416,7 @@ paths:
           schema: { type: string, example: "PENDING" }
       responses:
         "200":
-          description: "data.items — массив офферов; при использовании фильтров — data.direction (если задан), data.status, data.counterparty_id"
+          description: "data.items — массив элементов {offer, cargo, driver}; при использовании фильтров — data.direction (если задан), data.status, data.counterparty_id"
           content:
             application/json:
               schema:
@@ -1405,7 +1427,23 @@ paths:
                       data:
                         type: object
                         properties:
-                          items: { type: array, items: { $ref: "#/components/schemas/Offer" } }
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                offer: { $ref: "#/components/schemas/Offer" }
+                                cargo:
+                                  type: object
+                                  properties:
+                                    cargo_type_name: { type: string, nullable: true }
+                                    weight: { type: number }
+                                    volume: { type: number }
+                                driver:
+                                  type: object
+                                  properties:
+                                    phone: { type: string, nullable: true }
+                                    name: { type: string, nullable: true }
                           direction: { type: string, nullable: true }
                           status: { type: string }
                           counterparty_id: { type: string, format: uuid, nullable: true }
@@ -1737,7 +1775,12 @@ paths:
     get:
       tags: ["Cargo Manager", "Drivers / Trips"]
       summary: "Список рейсов по грузу"
-      description: "Query cargo_id (обязателен) — **все рейсы** по этому грузу (несколько машин). Базовые заголовки."
+      description: |
+        Query cargo_id (обязателен) — **все рейсы** по этому грузу (несколько машин).
+        В каждом элементе `items[]` дополнительно:
+        - `cargo`: `cargo_type_name`, `weight`, `volume`
+        - `driver`: `phone`, `name`
+        Базовые заголовки.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       parameters:
         - name: cargo_id
@@ -1746,7 +1789,7 @@ paths:
           schema: { type: string, format: uuid, example: "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
       responses:
         "200":
-          description: items — массив рейсов (id, cargo_id, offer_id, agreed_price, agreed_currency, driver_id, status, pending_confirm_to, …)
+          description: items — массив рейсов + вложенные `cargo` и `driver`
   /api/trips/{id}:
     get:
       tags: ["Cargo Manager", "Drivers / Trips"]
@@ -3566,35 +3609,114 @@ paths:
         "403": { description: access denied }
         "409": { description: "Неистёкшее приглашение в эту компанию на этот номер уже есть (driver_invitation_already_pending)" }
 
-  /v1/dispatchers/trips/{id}/assign-driver:
-    patch:
-      tags: ["Legacy / Deprecated"]
-      summary: "Назначить водителя на рейс"
-      description: "Тело: driver_id (UUID). Рейс должен быть в статусе IN_PROGRESS и без driver_id. После назначения водитель подтверждает/ведёт рейс по статусам IN_PROGRESS → IN_TRANSIT → DELIVERED → COMPLETED."
+  /v1/dispatchers/trips:
+    get:
+      tags: ["Cargo Manager / Trips"]
+      summary: "Список рейсов (cargo manager)"
+      description: |
+        Возвращает рейсы по грузам, к которым у диспетчера есть доступ:
+        - грузы созданные этим диспетчером (`created_by_type=DISPATCHER`), или
+        - грузы выбранной компании после `POST /v1/dispatchers/auth/switch-company` (`created_by_type=COMPANY` + `company_id` из JWT/контекста).
+
+        Фильтры:
+        - `cargo_id` (UUID) — рейсы только по одному грузу;
+        - `driver_id` (UUID) — рейсы только по водителю;
+        - `status` — список через запятую (например `IN_PROGRESS,IN_TRANSIT`).
+
+        Пагинация: `limit` (max 100), `offset`.
+        Сортировка: `sort=created_at|updated_at` + `order=asc|desc` (по умолчанию `created_at desc`).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: cargo_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: driver_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: "IN_PROGRESS,IN_TRANSIT" }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, example: 50, minimum: 1, maximum: 100 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, example: 0, minimum: 0 }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, example: "created_at" }
+        - name: order
+          in: query
+          required: false
+          schema: { type: string, example: "desc" }
+      responses:
+        "200": { description: "data.items[], data.total, data.limit, data.offset" }
+        "401": { description: unauthorized }
+
+  /v1/dispatchers/cargo/{id}/trips:
+    get:
+      tags: ["Cargo Manager / Trips"]
+      summary: "Рейсы по cargo_id (cargo manager)"
+      description: "Возвращает все рейсы указанного груза. Доступно только владельцу груза (диспетчер/компания после switch-company)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid, example: "f6a7b8c9-d0e1-2345-f678-901234567890" }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                driver_id: { type: string, format: uuid }
-              required: [driver_id]
-            example:
-              driver_id: "c3d4e5f6-a7b8-9012-cdef-123456789012"
+          description: UUID груза (cargo_id)
+          schema: { type: string, format: uuid }
       responses:
-        "200": { description: status IN_PROGRESS, driver_id }
-        "404": { description: trip not found or not IN_PROGRESS }
+        "200": { description: "data.cargo_id, data.items[], data.total" }
+        "403": { description: not_your_cargo }
+        "404": { description: cargo_not_found }
+
+  /v1/dispatchers/trips/{id}:
+    get:
+      tags: ["Cargo Manager / Trips"]
+      summary: "Получить рейс по trip_id (cargo manager)"
+      description: "Возвращает рейс по `trip_id`. Доступно только если груз рейса принадлежит диспетчеру/компании (см. GET /v1/dispatchers/trips)."
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID рейса (trip_id)
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data — объект рейса" }
+        "403": { description: not_your_cargo }
+        "404": { description: trip_not_found }
+
+  /v1/dispatchers/trips/history:
+    get:
+      tags: ["Cargo Manager / Trips"]
+      summary: "История trips/offers (cargo manager)"
+      description: |
+        Лента событий для cargo manager:
+        - `offer_accepted` (оффер принят),
+        - `offer_rejected` (оффер отклонён),
+        - `trip_completed` (рейс завершён),
+        - `trip_cancelled` (рейс отменён и ушёл в архив).
+        Параметр `limit` ограничивает количество записей каждого источника.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.items[]: event_type, event_at, offer?/trip?" }
+        "401": { description: unauthorized }
 
   /v1/dispatchers/trips/{id}/confirm-transition:
     post:
-      tags: ["Legacy / Deprecated"]
+      tags: ["Cargo Manager / Trips"]
       summary: "Подтвердить следующий статус рейса (диспетчер)"
       description: |
         Двустороннее подтверждение: диспетчер и водитель должны вызвать этот эндпоинт и парный вызов водителя для одного и того же перехода (next_status).
@@ -3615,7 +3737,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/cancel:
     post:
-      tags: ["Legacy / Deprecated"]
+      tags: ["Cargo Manager / Trips"]
       summary: "Отменить рейс (диспетчер)"
       description: |
         Отмена без второй стороны: рейс архивируется и удаляется из trips; груз остаётся для новой попытки; оффер возвращается в PENDING.
@@ -3639,7 +3761,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/state:
     get:
-      tags: ["Legacy / Deprecated"]
+      tags: ["Cargo Manager / Trips"]
       summary: "Состояние рейса и подтверждений (диспетчер)"
       description: |
         Рейс, next_status, pending_confirm_to, метки подтверждений, кратко cargo (id, status).
@@ -3681,6 +3803,25 @@ paths:
         "404": { description: offer_not_found_or_not_pending; data.reason }
         "409": { description: cargo_slots_full / cargo_not_searching / driver_busy; data.reason }
         "500": { description: failed_to_accept; data.reason }
+
+  /v1/dispatchers/offers/{id}:
+    get:
+      tags: ["Cargo Manager / Offers"]
+      summary: "Получить один оффер (cargo manager) + полный cargo"
+      description: |
+        Возвращает один оффер по `offer_id` из path (`{id}`) и **полный связанный cargo** (как карточка груза: route_points, payment и пр.).
+        Доступно только владельцу груза: диспетчер-создатель груза или диспетчер выбранной компании после switch-company.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID оффера (offer_id)
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.offer, data.cargo, data.trip|null" }
+        "403": { description: not_your_cargo }
+        "404": { description: offer_not_found / cargo_not_found }
 
   /v1/dispatchers/offers/{id}/reject:
     post:
@@ -3831,6 +3972,38 @@ paths:
           schema: { type: string, example: "SAM" }
       responses:
         "200": { description: "data.items, data.total" }
+        "401": { description: unauthorized }
+        "500": { description: failed_to_list }
+
+  /v1/dispatchers/cargo-types:
+    get:
+      tags: ["Cargo Manager / Cargo CRUD"]
+      summary: "Типы груза для Cargo Manager (локализованные по X-Language)"
+      description: |
+        Возвращает список типов груза из таблицы `cargo_types` для форм создания/редактирования груза.
+        Название `name` выбирается по заголовку `X-Language` (`ru|uz|en|tr|zh`).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200":
+          description: "data.items[]: id, code, name — только одно поле `name` на языке из X-Language (остальные локали в ответе не отдаются)"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          items:
+                            type: array
+                            items:
+                              type: object
+                              properties:
+                                id: { type: string, format: uuid }
+                                code: { type: string, example: "GRANIT" }
+                                name: { type: string, example: "Гранит" }
         "401": { description: unauthorized }
         "500": { description: failed_to_list }
 
@@ -4565,6 +4738,25 @@ paths:
         "409": { description: cargo_slots_full / cargo_not_searching / driver_busy; data.reason }
         "500": { description: failed_to_accept; data.reason }
 
+  /v1/driver/offers/{id}:
+    get:
+      tags: ["Drivers / Offers"]
+      summary: "Получить один оффер (водитель) + полный cargo"
+      description: |
+        Возвращает один оффер по `offer_id` из path (`{id}`) и **полный связанный cargo** (как карточка груза: route_points, payment и пр.).
+        Доступно только если `carrier_id` оффера = текущий водитель.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID оффера (offer_id)
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.offer, data.cargo, data.trip|null" }
+        "403": { description: not_your_offer }
+        "404": { description: offer_not_found / cargo_not_found }
+
   /v1/driver/offers/{id}/reject:
     post:
       tags: ["Drivers / Offers"]
@@ -4622,6 +4814,7 @@ paths:
         Возвращает грузы в поиске, отсортированные **от ближайшего к дальнему** по координатам водителя.
         Точка расчёта — main load (`route_points.is_main_load=true`).
         Для водителя компании дополнительно учитываются грузы `SEARCHING_COMPANY` своей компании.
+        В каждом элементе `data.items[]` возвращается **полный объект cargo** (как в GET /api/cargo/:id), включая `route_points` и `payment`, плюс поля расстояния.
 
         `radius_km` — опционален. Если передан, в ответ попадают только грузы в указанном радиусе.
         **Примеры body:**
@@ -4644,7 +4837,7 @@ paths:
                 limit: { type: integer, default: 20, minimum: 1, maximum: 100 }
       responses:
         "200":
-          description: "data.items — грузы с distance_km, distance_m, origin_lat, origin_lng; сортировка distance:asc"
+          description: "data.items — полные cargo (включая route_points и payment) + distance_km, distance_m, origin_lat, origin_lng; сортировка distance:asc"
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
@@ -4717,6 +4910,44 @@ paths:
         "200": { description: data.items — массив рейсов (поля рейса без вложенного cargo) }
         "401": { description: unauthorized }
         "500": { description: failed_to_list }
+
+  /v1/driver/trips/history:
+    get:
+      tags: ["Drivers / Trips"]
+      summary: "История trips/offers (водитель)"
+      description: |
+        Лента событий для водителя:
+        - `offer_accepted` (оффер принят),
+        - `offer_rejected` (оффер отклонён),
+        - `trip_completed` (рейс завершён),
+        - `trip_cancelled` (рейс отменён и ушёл в архив).
+        Параметр `limit` ограничивает количество записей каждого источника.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.items[]: event_type, event_at, offer?/trip?" }
+        "401": { description: unauthorized }
+
+  /v1/driver/trips/{id}:
+    get:
+      tags: ["Drivers / Trips"]
+      summary: "Получить рейс по trip_id (водитель)"
+      description: "Возвращает рейс по `trip_id`. Доступно только если рейс назначен текущему водителю."
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: UUID рейса (trip_id)
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data — объект рейса" }
+        "403": { description: trip_not_assigned_to_you }
+        "404": { description: trip_not_found }
 
   /v1/driver/trips/{id}/confirm:
     post:

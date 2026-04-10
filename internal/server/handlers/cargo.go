@@ -791,7 +791,9 @@ func (h *CargoHandler) ListActiveCargoForDriver(c *gin.Context) {
 
 	items := make([]gin.H, 0, len(result.Items))
 	for _, item := range result.Items {
-		m := toCargoItem(&item.Cargo)
+		points, _ := h.repo.GetRoutePoints(c.Request.Context(), item.Cargo.ID)
+		pay, _ := h.repo.GetPayment(c.Request.Context(), item.Cargo.ID)
+		m := toCargoDetail(&item.Cargo, points, pay, nil)
 		distKM := math.Round(item.DistanceKM*1000) / 1000
 		m["distance_km"] = distKM
 		m["distance_m"] = int(math.Round(item.DistanceKM * 1000))
@@ -1327,6 +1329,93 @@ func (h *CargoHandler) ListOffersForDriver(c *gin.Context) {
 	})
 }
 
+// GetOfferDriver GET /v1/driver/offers/:id — single offer for current driver with full cargo details.
+func (h *CargoHandler) GetOfferDriver(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	offerID, err := uuid.Parse(c.Param("id"))
+	if err != nil || offerID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+		return
+	}
+	offer, err := h.repo.GetOfferByID(c.Request.Context(), offerID)
+	if err != nil || offer == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
+		return
+	}
+	if offer.CarrierID != driverID {
+		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
+		return
+	}
+	h.respondSingleOfferWithCargo(c, offer)
+}
+
+// GetOfferDispatcher GET /v1/dispatchers/offers/:id — single offer for cargo manager with full cargo details.
+func (h *CargoHandler) GetOfferDispatcher(c *gin.Context) {
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
+
+	offerID, err := uuid.Parse(c.Param("id"))
+	if err != nil || offerID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+		return
+	}
+	offer, err := h.repo.GetOfferByID(c.Request.Context(), offerID)
+	if err != nil || offer == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
+		return
+	}
+	cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
+	if !dispatcherOwnsCargoForNegotiation(cargoObj, dispatcherID, companyID) {
+		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
+		return
+	}
+	h.respondSingleOfferWithCargo(c, offer)
+}
+
+func (h *CargoHandler) respondSingleOfferWithCargo(c *gin.Context, offer *cargo.Offer) {
+	cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
+	if cargoObj == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
+		return
+	}
+	points, _ := h.repo.GetRoutePoints(c.Request.Context(), offer.CargoID)
+	pay, _ := h.repo.GetPayment(c.Request.Context(), offer.CargoID)
+	pb := strings.ToUpper(strings.TrimSpace(offer.ProposedBy))
+	if pb == "" {
+		pb = cargo.OfferProposedByDriver
+	}
+
+	out := gin.H{
+		"offer": gin.H{
+			"id":               offer.ID.String(),
+			"cargo_id":         offer.CargoID.String(),
+			"carrier_id":       offer.CarrierID.String(),
+			"proposed_by":      pb,
+			"price":            offer.Price,
+			"invitation_price": offer.Price,
+			"currency":         offer.Currency,
+			"comment":          offer.Comment,
+			"status":           offer.Status,
+			"rejection_reason": offer.RejectionReason,
+			"created_at":       offer.CreatedAt,
+		},
+		"cargo": toCargoDetail(cargoObj, points, pay, nil),
+	}
+	if h.tripsRepo != nil {
+		if t, _ := h.tripsRepo.GetByOfferID(c.Request.Context(), offer.ID); t != nil {
+			out["trip"] = toTripResp(t)
+		} else {
+			out["trip"] = nil
+		}
+	}
+	resp.OKLang(c, "ok", out)
+}
+
 // DriverCreateOffer POST /v1/driver/cargo/:id/offers — водитель предлагает свою цену (proposed_by=DRIVER).
 func (h *CargoHandler) DriverCreateOffer(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
@@ -1463,8 +1552,35 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 		return
 	}
 
+	cargoObj, _ := h.repo.GetByID(c.Request.Context(), id, false)
+	cargoMini := gin.H(nil)
+	if cargoObj != nil {
+		cargoMini = gin.H{
+			"id":              cargoObj.ID.String(),
+			"cargo_type_name": firstNonEmptyStr(cargoObj.CargoTypeNameRU, cargoObj.CargoTypeNameUZ, cargoObj.CargoTypeNameEN, cargoObj.CargoTypeNameTR, cargoObj.CargoTypeNameZH),
+			"weight":          cargoObj.Weight,
+			"volume":          cargoObj.Volume,
+		}
+	}
+	items := make([]gin.H, 0, len(offers))
+	for _, o := range offers {
+		item := toOfferList([]cargo.Offer{o})[0]
+		if cargoMini != nil {
+			item["cargo"] = cargoMini
+		}
+		if h.drivers != nil {
+			if drv, _ := h.drivers.FindByID(c.Request.Context(), o.CarrierID); drv != nil {
+				item["driver"] = gin.H{
+					"id":    drv.ID,
+					"phone": drv.Phone,
+					"name":  drv.Name,
+				}
+			}
+		}
+		items = append(items, item)
+	}
 	payload := gin.H{
-		"items":           toOfferList(offers),
+		"items":           items,
 		"status":          status,
 		"counterparty_id": counterpartyID,
 	}
@@ -1713,7 +1829,7 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		return
 	}
 	if h.tripsRepo != nil {
-		tripID, tripErr := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, agreedPrice, agreedCurrency)
+		tripID, tripErr := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, carrierID, agreedPrice, agreedCurrency)
 		if tripErr != nil {
 			if errors.Is(tripErr, trips.ErrAgreedPriceOutOfRange) {
 				resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
@@ -1736,19 +1852,6 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			return
 		}
 		if tripID != uuid.Nil {
-			if adErr := h.tripsRepo.AssignDriver(c.Request.Context(), tripID, carrierID); adErr != nil {
-				h.logger.Error("accept offer: assign driver failed",
-					zap.Error(adErr),
-					zap.String("trip_id", tripID.String()),
-					zap.String("driver_id", carrierID.String()),
-				)
-				resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", gin.H{
-					"reason":   "trip_assign_driver_failed",
-					"offer_id": offerID.String(),
-					"trip_id":  tripID.String(),
-				})
-				return
-			}
 			resp.OKLang(c, "ok", gin.H{
 				"cargo_id":        cargoID.String(),
 				"offer_id":        offerID.String(),
@@ -2578,4 +2681,13 @@ func derefStr(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func firstNonEmptyStr(items ...*string) string {
+	for _, it := range items {
+		if it != nil && strings.TrimSpace(*it) != "" {
+			return strings.TrimSpace(*it)
+		}
+	}
+	return ""
 }

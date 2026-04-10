@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/cargo"
+	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/trips"
@@ -19,10 +20,11 @@ type TripsHandler struct {
 	logger    *zap.Logger
 	repo      *trips.Repo
 	cargoRepo *cargo.Repo
+	drivers   *drivers.Repo
 }
 
-func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo) *TripsHandler {
-	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo}
+func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo) *TripsHandler {
+	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo, drivers: driversRepo}
 }
 
 func dispatcherOwnsCargo(c *cargo.Cargo, dispatcherID uuid.UUID, companyID *uuid.UUID) bool {
@@ -73,9 +75,32 @@ func (h *TripsHandler) List(c *gin.Context) {
 	}
 	out := make([]interface{}, 0, len(list))
 	for i := range list {
-		out = append(out, toTripResp(&list[i]))
+		item := toTripResp(&list[i])
+		cargoObj, _ := h.cargoRepo.GetByID(c.Request.Context(), list[i].CargoID, false)
+		if cargoObj != nil {
+			item["cargo"] = tripCargoMini(cargoObj)
+		}
+		if list[i].DriverID != nil && h.drivers != nil {
+			if drv, _ := h.drivers.FindByID(c.Request.Context(), *list[i].DriverID); drv != nil {
+				item["driver"] = gin.H{
+					"id":    drv.ID,
+					"phone": drv.Phone,
+					"name":  drv.Name,
+				}
+			}
+		}
+		out = append(out, item)
 	}
 	resp.OKLang(c, "ok", gin.H{"items": out})
+}
+
+func tripCargoMini(cg *cargo.Cargo) gin.H {
+	return gin.H{
+		"id":              cg.ID.String(),
+		"cargo_type_name": firstNonEmptyStr(cg.CargoTypeNameRU, cg.CargoTypeNameUZ, cg.CargoTypeNameEN, cg.CargoTypeNameTR, cg.CargoTypeNameZH),
+		"weight":          cg.Weight,
+		"volume":          cg.Volume,
+	}
 }
 
 // ListMy for GET /v1/driver/trips (driver): returns trips assigned to current driver.
@@ -93,6 +118,325 @@ func (h *TripsHandler) ListMy(c *gin.Context) {
 		out = append(out, toTripResp(&list[i]))
 	}
 	resp.OKLang(c, "ok", gin.H{"items": out})
+}
+
+// GetMy returns a single trip for the assigned driver.
+func (h *TripsHandler) GetMy(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+		return
+	}
+	t, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil || t == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
+		return
+	}
+	if t.DriverID == nil || *t.DriverID != driverID {
+		resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
+		return
+	}
+	resp.OKLang(c, "ok", toTripResp(t))
+}
+
+// ListForCargoManager GET /v1/dispatchers/trips — list trips for dispatcher-owned cargo (or switched company cargo).
+func (h *TripsHandler) ListForCargoManager(c *gin.Context) {
+	dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
+
+	var cargoID *uuid.UUID
+	if s := strings.TrimSpace(c.Query("cargo_id")); s != "" {
+		if u, err := uuid.Parse(s); err == nil && u != uuid.Nil {
+			cargoID = &u
+		} else {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_cargo_id")
+			return
+		}
+	}
+	var driverID *uuid.UUID
+	if s := strings.TrimSpace(c.Query("driver_id")); s != "" {
+		if u, err := uuid.Parse(s); err == nil && u != uuid.Nil {
+			driverID = &u
+		} else {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
+			return
+		}
+	}
+	var statuses []string
+	if s := strings.TrimSpace(c.Query("status")); s != "" {
+		parts := strings.Split(s, ",")
+		for _, p := range parts {
+			v := strings.ToUpper(strings.TrimSpace(p))
+			if v != "" {
+				statuses = append(statuses, v)
+			}
+		}
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	sortField := strings.TrimSpace(c.DefaultQuery("sort", "created_at"))
+	sortOrder := strings.TrimSpace(c.DefaultQuery("order", "desc"))
+
+	list, total, err := h.repo.ListForCargoManager(c.Request.Context(), dispID, companyID, cargoID, driverID, statuses, limit, offset, sortField, sortOrder)
+	if err != nil {
+		h.logger.Error("trips list for cargo manager", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+	out := make([]interface{}, 0, len(list))
+	for i := range list {
+		out = append(out, toTripResp(&list[i]))
+	}
+	resp.OKLang(c, "ok", gin.H{
+		"items":  out,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+		"sort":   sortField,
+		"order":  sortOrder,
+	})
+}
+
+// GetForCargoManager returns a single trip by id for dispatcher-owned cargo (or switched company cargo).
+func (h *TripsHandler) GetForCargoManager(c *gin.Context) {
+	dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+		return
+	}
+	t, err := h.repo.GetByID(c.Request.Context(), id)
+	if err != nil || t == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
+		return
+	}
+	cargoObj, _ := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false)
+	if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
+		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
+		return
+	}
+	resp.OKLang(c, "ok", toTripResp(t))
+}
+
+// ListByCargoForCargoManager GET /v1/dispatchers/cargo/:id/trips
+func (h *TripsHandler) ListByCargoForCargoManager(c *gin.Context) {
+	dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
+	cargoID, err := uuid.Parse(c.Param("id"))
+	if err != nil || cargoID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_cargo_id")
+		return
+	}
+	cargoObj, _ := h.cargoRepo.GetByID(c.Request.Context(), cargoID, false)
+	if cargoObj == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
+		return
+	}
+	if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
+		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
+		return
+	}
+	list, err := h.repo.ListByCargoID(c.Request.Context(), cargoID)
+	if err != nil {
+		h.logger.Error("list trips by cargo for cargo manager", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+	out := make([]interface{}, 0, len(list))
+	for i := range list {
+		out = append(out, toTripResp(&list[i]))
+	}
+	resp.OKLang(c, "ok", gin.H{
+		"cargo_id": cargoID.String(),
+		"items":    out,
+		"total":    len(out),
+	})
+}
+
+// ListMyHistory GET /v1/driver/trips/history
+func (h *TripsHandler) ListMyHistory(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+
+	activeAndDone, err := h.repo.ListByDriver(c.Request.Context(), driverID, limit)
+	if err != nil {
+		h.logger.Error("driver trip history current", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+	archived, err := h.repo.ListArchivedByDriver(c.Request.Context(), driverID, limit)
+	if err != nil {
+		h.logger.Error("driver trip history archived", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+	items := make([]gin.H, 0, len(activeAndDone)+len(archived))
+	for i := range activeAndDone {
+		t := &activeAndDone[i]
+		if t.Status == trips.StatusCompleted {
+			items = append(items, gin.H{
+				"event_type": "trip_completed",
+				"event_at":   t.UpdatedAt,
+				"trip":       toTripResp(t),
+			})
+		}
+	}
+	for i := range archived {
+		t := &archived[i]
+		items = append(items, gin.H{
+			"event_type":        "trip_cancelled",
+			"event_at":          t.ArchivedAt,
+			"cancelled_by_role": t.CancelledByRole,
+			"trip":              toTripResp(&t.Trip),
+		})
+	}
+	accepted, _ := h.cargoRepo.ListDriverOffersAll(c.Request.Context(), driverID, "ACCEPTED", "all", nil, limit, 0)
+	for i := range accepted {
+		o := accepted[i]
+		items = append(items, gin.H{
+			"event_type": "offer_accepted",
+			"event_at":   o.CreatedAt,
+			"offer": gin.H{
+				"id":               o.ID.String(),
+				"cargo_id":         o.CargoID.String(),
+				"carrier_id":       o.CarrierID.String(),
+				"status":           o.Status,
+				"proposed_by":      o.ProposedBy,
+				"price":            o.Price,
+				"invitation_price": o.Price,
+				"currency":         o.Currency,
+				"comment":          o.Comment,
+				"rejection_reason": o.RejectionReason,
+				"created_at":       o.CreatedAt,
+			},
+		})
+	}
+	rejected, _ := h.cargoRepo.ListDriverOffersAll(c.Request.Context(), driverID, "REJECTED", "all", nil, limit, 0)
+	for i := range rejected {
+		o := rejected[i]
+		items = append(items, gin.H{
+			"event_type": "offer_rejected",
+			"event_at":   o.CreatedAt,
+			"offer": gin.H{
+				"id":               o.ID.String(),
+				"cargo_id":         o.CargoID.String(),
+				"carrier_id":       o.CarrierID.String(),
+				"status":           o.Status,
+				"proposed_by":      o.ProposedBy,
+				"price":            o.Price,
+				"invitation_price": o.Price,
+				"currency":         o.Currency,
+				"comment":          o.Comment,
+				"rejection_reason": o.RejectionReason,
+				"created_at":       o.CreatedAt,
+			},
+		})
+	}
+	resp.OKLang(c, "ok", gin.H{"items": items, "total": len(items), "limit": limit})
+}
+
+// ListHistoryForCargoManager GET /v1/dispatchers/trips/history
+func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
+	dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	current, _, err := h.repo.ListForCargoManager(c.Request.Context(), dispID, companyID, nil, nil, nil, limit, 0, "updated_at", "desc")
+	if err != nil {
+		h.logger.Error("cargo manager trip history current", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+	archived, err := h.repo.ListArchivedForCargoManager(c.Request.Context(), dispID, companyID, limit)
+	if err != nil {
+		h.logger.Error("cargo manager trip history archived", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		return
+	}
+	items := make([]gin.H, 0, len(current)+len(archived))
+	for i := range current {
+		t := &current[i]
+		if t.Status == trips.StatusCompleted {
+			items = append(items, gin.H{
+				"event_type": "trip_completed",
+				"event_at":   t.UpdatedAt,
+				"trip":       toTripResp(t),
+			})
+		}
+	}
+	for i := range archived {
+		t := &archived[i]
+		items = append(items, gin.H{
+			"event_type":        "trip_cancelled",
+			"event_at":          t.ArchivedAt,
+			"cancelled_by_role": t.CancelledByRole,
+			"trip":              toTripResp(&t.Trip),
+		})
+	}
+	accepted, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, "ACCEPTED", "all", nil, limit, 0)
+	for i := range accepted {
+		o := accepted[i]
+		items = append(items, gin.H{
+			"event_type": "offer_accepted",
+			"event_at":   o.CreatedAt,
+			"offer": gin.H{
+				"id":               o.ID.String(),
+				"cargo_id":         o.CargoID.String(),
+				"carrier_id":       o.CarrierID.String(),
+				"status":           o.Status,
+				"proposed_by":      o.ProposedBy,
+				"price":            o.Price,
+				"invitation_price": o.Price,
+				"currency":         o.Currency,
+				"comment":          o.Comment,
+				"rejection_reason": o.RejectionReason,
+				"created_at":       o.CreatedAt,
+			},
+		})
+	}
+	rejected, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, "REJECTED", "all", nil, limit, 0)
+	for i := range rejected {
+		o := rejected[i]
+		items = append(items, gin.H{
+			"event_type": "offer_rejected",
+			"event_at":   o.CreatedAt,
+			"offer": gin.H{
+				"id":               o.ID.String(),
+				"cargo_id":         o.CargoID.String(),
+				"carrier_id":       o.CarrierID.String(),
+				"status":           o.Status,
+				"proposed_by":      o.ProposedBy,
+				"price":            o.Price,
+				"invitation_price": o.Price,
+				"currency":         o.Currency,
+				"comment":          o.Comment,
+				"rejection_reason": o.RejectionReason,
+				"created_at":       o.CreatedAt,
+			},
+		})
+	}
+	resp.OKLang(c, "ok", gin.H{"items": items, "total": len(items), "limit": limit})
 }
 
 // ListMyActive GET /v1/driver/trips/active — только активные рейсы (не COMPLETED/CANCELLED) с полными данными trip + cargo (как карточка груза: route_points, payment).

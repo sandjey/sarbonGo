@@ -274,6 +274,63 @@ func HintCargoTypes(pg *pgxpool.Pool) gin.HandlerFunc {
 	}
 }
 
+// ListCargoTypesForCargoManager returns all cargo types for Cargo Manager CRUD forms.
+// Only `name` is returned, chosen from DB columns by X-Language (ru/uz/en/tr/zh).
+func ListCargoTypesForCargoManager(pg *pgxpool.Pool) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		lang := refLang(c)
+		rows, err := pg.Query(
+			c.Request.Context(),
+			`SELECT id, code, COALESCE(name_ru,''), COALESCE(name_uz,''), COALESCE(name_en,''), COALESCE(name_tr,''), COALESCE(name_zh,'')
+			 FROM cargo_types
+			 ORDER BY name_ru`,
+		)
+		if err != nil {
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+			return
+		}
+		defer rows.Close()
+
+		type item struct {
+			ID   string `json:"id"`
+			Code string `json:"code"`
+			Name string `json:"name"`
+		}
+		pick := func(vals ...string) string {
+			for _, v := range vals {
+				if strings.TrimSpace(v) != "" {
+					return v
+				}
+			}
+			return ""
+		}
+		items := make([]item, 0)
+		for rows.Next() {
+			var id, code string
+			var nameRU, nameUZ, nameEN, nameTR, nameZH string
+			if err := rows.Scan(&id, &code, &nameRU, &nameUZ, &nameEN, &nameTR, &nameZH); err != nil {
+				resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+				return
+			}
+			var name string
+			switch lang {
+			case "ru":
+				name = pick(nameRU, nameEN, code)
+			case "uz":
+				name = pick(nameUZ, nameRU, nameEN, code)
+			case "tr":
+				name = pick(nameTR, nameEN, nameRU, code)
+			case "zh":
+				name = pick(nameZH, nameEN, nameRU, code)
+			default:
+				name = pick(nameEN, nameRU, code)
+			}
+			items = append(items, item{ID: id, Code: code, Name: name})
+		}
+		resp.OKLang(c, "ok", gin.H{"items": items})
+	}
+}
+
 // GetReferenceAdmin возвращает справочник для раздела Admin. value — верхний регистр, label — по X-Language.
 func GetReferenceAdmin(c *gin.Context) {
 	lang := refLang(c)

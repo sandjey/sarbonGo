@@ -233,9 +233,8 @@ func (h *CargoRecommendationsHandler) AcceptRecommendation(c *gin.Context) {
 	}
 	_, _ = h.recRepo.Accept(c.Request.Context(), cargoID, driverID)
 	if h.tripsRepo != nil {
-		tripID, _ := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, price, currency)
+		tripID, _ := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, carrierID, price, currency)
 		if tripID != uuid.Nil {
-			_ = h.tripsRepo.AssignDriver(c.Request.Context(), tripID, carrierID)
 			resp.SuccessLang(c, http.StatusOK, "accepted", gin.H{"cargo_id": cargoID.String(), "trip_id": tripID.String(), "driver_id": carrierID.String()})
 			return
 		}

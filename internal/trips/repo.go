@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,6 +46,12 @@ type Repo struct {
 	pg *pgxpool.Pool
 }
 
+type ArchivedTrip struct {
+	Trip
+	ArchivedAt      time.Time
+	CancelledByRole *string
+}
+
 func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
@@ -53,7 +61,7 @@ func (r *Repo) BeginTx(ctx context.Context) (pgx.Tx, error) {
 }
 
 // Create creates trip with status IN_PROGRESS (after offer accepted). agreedPrice/currency — договор с этим водителем.
-func (r *Repo) Create(ctx context.Context, cargoID, offerID uuid.UUID, agreedPrice float64, agreedCurrency string) (uuid.UUID, error) {
+func (r *Repo) Create(ctx context.Context, cargoID, offerID, driverID uuid.UUID, agreedPrice float64, agreedCurrency string) (uuid.UUID, error) {
 	if math.IsNaN(agreedPrice) || math.IsInf(agreedPrice, 0) || math.Abs(agreedPrice) > maxAgreedPriceNumeric18_2 {
 		return uuid.Nil, ErrAgreedPriceOutOfRange
 	}
@@ -63,8 +71,8 @@ func (r *Repo) Create(ctx context.Context, cargoID, offerID uuid.UUID, agreedPri
 	}
 	var id uuid.UUID
 	err := r.pg.QueryRow(ctx,
-		`INSERT INTO trips (cargo_id, offer_id, status, agreed_price, agreed_currency) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-		cargoID, offerID, StatusInProgress, agreedPrice, cur).Scan(&id)
+		`INSERT INTO trips (cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		cargoID, offerID, driverID, StatusInProgress, agreedPrice, cur).Scan(&id)
 	return id, err
 }
 
@@ -340,6 +348,107 @@ func (r *Repo) ListByCargoIDs(ctx context.Context, cargoIDs []uuid.UUID) ([]Trip
 	return scanTripRows(rows)
 }
 
+// ListForCargoManager returns trips visible to a dispatcher (own cargo or selected company cargo via switch-company).
+// Supports optional filtering by cargo_id, driver_id, status and pagination/sorting.
+func (r *Repo) ListForCargoManager(
+	ctx context.Context,
+	dispatcherID uuid.UUID,
+	companyID *uuid.UUID,
+	cargoID *uuid.UUID,
+	driverID *uuid.UUID,
+	statuses []string,
+	limit, offset int,
+	sortField, sortOrder string,
+) (items []Trip, total int, err error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	orderBy := "t.created_at"
+	switch strings.ToLower(strings.TrimSpace(sortField)) {
+	case "", "created_at", "created":
+		orderBy = "t.created_at"
+	case "updated_at", "updated":
+		orderBy = "t.updated_at"
+	}
+	dir := "DESC"
+	switch strings.ToLower(strings.TrimSpace(sortOrder)) {
+	case "asc":
+		dir = "ASC"
+	case "", "desc":
+		dir = "DESC"
+	}
+
+	conds := []string{"c.deleted_at IS NULL"}
+	args := make([]any, 0, 8)
+	argN := 1
+
+	// Ownership scope: dispatcher cargo OR (if switched) company cargo.
+	own := "(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $" + strconv.Itoa(argN) + ")"
+	args = append(args, dispatcherID)
+	argN++
+	if companyID != nil && *companyID != uuid.Nil {
+		own = "(" + own + " OR (UPPER(COALESCE(c.created_by_type,'')) = 'COMPANY' AND c.company_id = $" + strconv.Itoa(argN) + "))"
+		args = append(args, *companyID)
+		argN++
+	} else {
+		own = "(" + own + ")"
+	}
+	conds = append(conds, own)
+
+	if cargoID != nil && *cargoID != uuid.Nil {
+		conds = append(conds, "t.cargo_id = $"+strconv.Itoa(argN))
+		args = append(args, *cargoID)
+		argN++
+	}
+	if driverID != nil && *driverID != uuid.Nil {
+		conds = append(conds, "t.driver_id = $"+strconv.Itoa(argN))
+		args = append(args, *driverID)
+		argN++
+	}
+	if len(statuses) > 0 {
+		conds = append(conds, "t.status = ANY($"+strconv.Itoa(argN)+")")
+		args = append(args, statuses)
+		argN++
+	}
+	where := strings.Join(conds, " AND ")
+
+	if err := r.pg.QueryRow(ctx,
+		`SELECT COUNT(*)
+		 FROM trips t
+		 INNER JOIN cargo c ON c.id = t.cargo_id
+		 WHERE `+where,
+		args...,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	// Select the exact trip fields expected by scanTrip.
+	q := `SELECT
+  t.id, t.cargo_id, t.offer_id, t.driver_id, t.status, t.agreed_price, t.agreed_currency, t.created_at, t.updated_at,
+  t.pending_confirm_to, t.driver_confirmed_at, t.dispatcher_confirmed_at
+FROM trips t
+INNER JOIN cargo c ON c.id = t.cargo_id
+WHERE ` + where + ` ORDER BY ` + orderBy + ` ` + dir + ` LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.pg.Query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items, err = scanTripRows(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 func scanTripRows(rows pgx.Rows) ([]Trip, error) {
 	var list []Trip
 	for rows.Next() {
@@ -348,6 +457,87 @@ func scanTripRows(rows pgx.Rows) ([]Trip, error) {
 			&t.AgreedPrice, &t.AgreedCurrency,
 			&t.CreatedAt, &t.UpdatedAt,
 			&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, t)
+	}
+	return list, rows.Err()
+}
+
+// ListArchivedByDriver returns cancelled trips from archived_trips for a specific driver.
+func (r *Repo) ListArchivedByDriver(ctx context.Context, driverID uuid.UUID, limit int) ([]ArchivedTrip, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := r.pg.Query(ctx, `
+SELECT id, cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency, created_at, updated_at, archived_at, cancelled_by_role
+FROM archived_trips
+WHERE driver_id = $1
+ORDER BY archived_at DESC
+LIMIT $2`, driverID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []ArchivedTrip
+	for rows.Next() {
+		var t ArchivedTrip
+		err := rows.Scan(
+			&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status,
+			&t.AgreedPrice, &t.AgreedCurrency,
+			&t.CreatedAt, &t.UpdatedAt,
+			&t.ArchivedAt, &t.CancelledByRole,
+		)
+		if err != nil {
+			return nil, err
+		}
+		list = append(list, t)
+	}
+	return list, rows.Err()
+}
+
+// ListArchivedForCargoManager returns cancelled trips visible to dispatcher/company.
+func (r *Repo) ListArchivedForCargoManager(ctx context.Context, dispatcherID uuid.UUID, companyID *uuid.UUID, limit int) ([]ArchivedTrip, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	ownWhere := "(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1)"
+	args := []any{dispatcherID}
+	if companyID != nil && *companyID != uuid.Nil {
+		ownWhere = "(" + ownWhere + " OR (UPPER(COALESCE(c.created_by_type,'')) = 'COMPANY' AND c.company_id = $2))"
+		args = append(args, *companyID)
+		args = append(args, limit)
+	} else {
+		args = append(args, limit)
+	}
+	q := `
+SELECT t.id, t.cargo_id, t.offer_id, t.driver_id, t.status, t.agreed_price, t.agreed_currency, t.created_at, t.updated_at, t.archived_at, t.cancelled_by_role
+FROM archived_trips t
+INNER JOIN cargo c ON c.id = t.cargo_id
+WHERE c.deleted_at IS NULL AND ` + ownWhere + `
+ORDER BY t.archived_at DESC
+LIMIT $` + strconv.Itoa(len(args))
+	rows, err := r.pg.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []ArchivedTrip
+	for rows.Next() {
+		var t ArchivedTrip
+		err := rows.Scan(
+			&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status,
+			&t.AgreedPrice, &t.AgreedCurrency,
+			&t.CreatedAt, &t.UpdatedAt,
+			&t.ArchivedAt, &t.CancelledByRole,
+		)
 		if err != nil {
 			return nil, err
 		}
