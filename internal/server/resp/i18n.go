@@ -352,6 +352,13 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Sefer bulunamadı veya size atanmamış",
 		"zh": "未找到行程或未分配给您",
 	},
+	"trip_cancel_only_in_progress": {
+		"en": "Trip can only be cancelled while status is IN_PROGRESS (before IN_TRANSIT). Use reject to withdraw later.",
+		"ru": "Отмена (cancel) доступна только в статусе IN_PROGRESS (до IN_TRANSIT). После — используйте reject.",
+		"uz": "Bekor qilish (cancel) faqat IN_PROGRESS holatida (IN_TRANSIT dan oldin). Keyin — reject.",
+		"tr": "İptal (cancel) yalnızca IN_PROGRESS iken (IN_TRANSIT öncesi). Sonrası için reject kullanın.",
+		"zh": "取消（cancel）仅在 IN_PROGRESS（进入 IN_TRANSIT 前）。之后请使用 reject。",
+	},
 	"invalid_status_transition": {
 		"en": "Invalid status transition",
 		"ru": "Недопустимый переход статуса",

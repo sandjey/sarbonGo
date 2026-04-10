@@ -1904,7 +1904,7 @@ func isValidRejectReason(s string) bool {
 	return reasonMinWordRe.MatchString(trimmed)
 }
 
-// RejectOfferDispatcher rejects an offer (cargo manager / company dispatcher). Reason required.
+// RejectOfferDispatcher POST .../offers/:id/reject — отклонить входящий оффер водителя или отозвать свой исходящий водителю (proposed_by=DISPATCHER) по своему грузу. Reason required.
 func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
 	var companyID *uuid.UUID
@@ -1923,7 +1923,11 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
 		return
 	}
-	if offer.ProposedBy != cargo.OfferProposedByDriver {
+	pb := strings.ToUpper(strings.TrimSpace(offer.ProposedBy))
+	if pb == "" {
+		pb = cargo.OfferProposedByDriver
+	}
+	if pb != cargo.OfferProposedByDriver && pb != cargo.OfferProposedByDispatcher {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
@@ -1956,7 +1960,7 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 	resp.OKLang(c, "ok", gin.H{"status": "rejected"})
 }
 
-// RejectOfferDriver POST /v1/driver/offers/:id/reject — driver rejects dispatcher invitation; reason required.
+// RejectOfferDriver POST /v1/driver/offers/:id/reject — отклонить входящий оффер диспетчера или отозвать свой исходящий (proposed_by=DRIVER); reason required.
 func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
 	offerID, err := uuid.Parse(c.Param("id"))
@@ -1969,7 +1973,15 @@ func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
 		return
 	}
-	if offer.ProposedBy != cargo.OfferProposedByDispatcher || offer.CarrierID != driverID {
+	if offer.CarrierID != driverID {
+		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
+		return
+	}
+	pb := strings.ToUpper(strings.TrimSpace(offer.ProposedBy))
+	if pb == "" {
+		pb = cargo.OfferProposedByDriver
+	}
+	if pb != cargo.OfferProposedByDispatcher && pb != cargo.OfferProposedByDriver {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
 		return
 	}

@@ -103,7 +103,7 @@ tags:
     description: |
       Офферы Cargo Manager.
       - `/v1/dispatchers/offers/all` — единый список по `direction=all|incoming|outgoing` + `status` + `counterparty_id`.
-      - `/v1/dispatchers/offers/{id}/accept|reject` — действия по офферу.
+      - `/v1/dispatchers/offers/{id}/accept|reject` — принять входящий оффер водителя или отклонить входящий; **reject** также снимает **свой исходящий** оффер водителю (`proposed_by=DISPATCHER`, PENDING).
       В ответе списка есть `counts.incoming/outgoing`.
   - name: "Cargo Manager / Trips"
     description: |
@@ -113,7 +113,7 @@ tags:
         Фильтры: `cargo_id`, `driver_id`, `status` (через запятую), пагинация `limit`, `offset`,
         сортировка `sort=created_at|updated_at` + `order=asc|desc`.
       - **GET /v1/dispatchers/cargo/{id}/trips** — рейсы конкретного груза по `cargo_id` (только если груз ваш).
-      - **GET /v1/dispatchers/trips/history** — история событий: `offer_accepted`, `offer_rejected`, `trip_completed`, `trip_cancelled`.
+      - **GET /v1/dispatchers/trips/history** — лента событий (новые сверху): `trip_active`, `trip_completed`, `trip_cancelled`, `offer_accepted` (`has_open_trip`), `offer_rejected`.
       - **GET /v1/dispatchers/trips/{id}** — получить рейс по `trip_id` (только если груз ваш).
       - **POST /v1/dispatchers/trips/{id}/confirm-transition** — следующий шаг статуса рейса.
       - **POST /v1/dispatchers/trips/{id}/cancel** — отменить рейс по `trip_id`.
@@ -140,15 +140,14 @@ tags:
       **Диспетчер компании — только через приглашение.** GET /v1/dispatchers/companies (мои компании), POST /v1/dispatchers/auth/switch-company. Приглашение: POST /v1/dispatchers/companies/:companyId/invitations, accept, decline.
   - name: Drivers / Trips
     description: |
-      **Рейсы водителя (отдельная группа).** Требуется X-User-Token (driver).
+      **Рейсы водителя.** Требуется X-User-Token (driver).
 
-      - **GET /v1/driver/trips/active** — только **активные** рейсы (статусы `IN_PROGRESS`, `IN_TRANSIT`, `DELIVERED`; без `COMPLETED` и `CANCELLED`). В каждом элементе: полные поля рейса + вложенный объект **cargo** как в карточке груза (`route_points`, `payment` и остальные поля груза).
-      - **GET /v1/driver/trips** — все рейсы водителя (история + активные), опционально `limit`.
-      - **GET /v1/driver/trips/history** — история событий: `offer_accepted`, `offer_rejected`, `trip_completed`, `trip_cancelled`.
-      - **GET /v1/driver/trips/{id}** — получить рейс по `trip_id` (только если он назначен на вас).
-      - **POST** …/confirm, …/confirm-transition — следующий шаг статуса рейса.
-      - **POST** …/reject — снять назначение; **POST** …/cancel — отменить рейс.
-      - **GET** …/state — краткое состояние рейса и груза.
+      - **GET /v1/driver/trips/history** — лента событий (новые сверху): `trip_active` (текущий незавершённый рейс), `trip_completed`, `trip_cancelled`, `offer_accepted` (поле `has_open_trip`), `offer_rejected`.
+      - **GET /v1/driver/trips/me** — один текущий исполняемый рейс (в `trips`, статус не `COMPLETED`/`CANCELLED`, последний по `updated_at`); если нет — `data.trip: null`.
+      - **GET /v1/driver/trips/{id}/state** — статус рейса и кратко по грузу.
+      - **POST /v1/driver/trips/{id}/confirm** — подтвердить шаг (следующий статус рейса).
+      - **POST /v1/driver/trips/{id}/reject** — отказ от рейса на **любом** этапе до `COMPLETED`: рейс уходит в архив и удаляется из `trips` (как полный сброс слота).
+      - **POST /v1/driver/trips/{id}/cancel** — только при **`IN_PROGRESS`** (до `IN_TRANSIT`): архив + удаление строки рейса; не используйте для этапов после выезда — там **`reject`**.
   - name: Drivers / Cargo view
     description: |
       Просмотр и поиск грузов для водителя:
@@ -166,7 +165,8 @@ tags:
       Офферы водителя:
       - `/v1/driver/offers/all` — единый список по `direction=all|incoming|outgoing`, фильтры `status`, `counterparty_id`.
       - `/v1/driver/cargo/{id}/offers` — отправить оффер.
-      - `/v1/driver/offers/{id}/accept|reject` — принять/отклонить. Отмена **рейса** только по `trip_id`: `POST /v1/driver/trips/{trip_id}/cancel` (не по `offer_id`).
+      - `/v1/driver/offers/{id}/accept` — принять входящий оффер диспетчера (`proposed_by=DISPATCHER`).
+      - `/v1/driver/offers/{id}/reject` — отклонить входящий оффер диспетчера **или** отозвать **свой исходящий** (`proposed_by=DRIVER`, PENDING). Отмена рейса: `POST /v1/driver/trips/{trip_id}/cancel`. Текущий рейс: `GET /v1/driver/trips/me`.
       Для `/offers/all` сервер возвращает `counts.incoming/outgoing`.
   - name: Drivers / Driver invitations
     description: |
@@ -3698,12 +3698,9 @@ paths:
       tags: ["Cargo Manager / Trips"]
       summary: "История trips/offers (cargo manager)"
       description: |
-        Лента событий для cargo manager:
-        - `offer_accepted` (оффер принят),
-        - `offer_rejected` (оффер отклонён),
-        - `trip_completed` (рейс завершён),
-        - `trip_cancelled` (рейс отменён и ушёл в архив).
-        Параметр `limit` ограничивает количество записей каждого источника.
+        Лента для cargo manager; `items` по `event_at` (новые первые).
+        Типы: `trip_active`, `trip_completed`, `trip_cancelled`, `offer_accepted` (+ `has_open_trip`), `offer_rejected`.
+        Параметр `limit` ограничивает выборку по каждому источнику.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: limit
@@ -3826,10 +3823,13 @@ paths:
   /v1/dispatchers/offers/{id}/reject:
     post:
       tags: ["Cargo Manager / Offers"]
-      summary: "Отклонить оффер водителя (диспетчер)"
+      summary: "Отклонить оффер водителя или отозвать своё приглашение (диспетчер)"
       description: |
-        Отклоняет оффер с **proposed_by=DRIVER** по своему грузу (включая груз компании). **reason обязателен** (текст причины отказа).
-        en: Reject driver offer; reason required. uz: Haydovchi taklifini rad etish; sabab majburiy. tr: Sürücü teklifini reddet; neden zorunlu. zh: 拒绝司机报价；必须填写原因。
+        Для **своего груза** (создатель-диспетчер или компания после switch-company), оффер **PENDING**:
+        - **proposed_by=DRIVER** — отклонить входящую заявку водителя;
+        - **proposed_by=DISPATCHER** — отозвать своё исходящее приглашение этому водителю.
+        **reason обязателен** (текст причины).
+        en: Reject driver offer or withdraw your dispatcher offer; reason required.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -3847,9 +3847,9 @@ paths:
                 reason: { type: string, minLength: 3, description: "Причина отказа: минимум 1 слово и минимум 3 буквы" }
       responses:
         "200": { description: "data.status = rejected" }
-        "400": { description: rejection_reason_required / rejection_reason_too_short }
-        "403": { description: not your cargo }
-        "404": { description: offer not found }
+        "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
+        "403": { description: not_your_cargo }
+        "404": { description: offer_not_found }
 
   /v1/dispatchers/offers/all:
     get:
@@ -4760,10 +4760,12 @@ paths:
   /v1/driver/offers/{id}/reject:
     post:
       tags: ["Drivers / Offers"]
-      summary: "Отклонить приглашение диспетчера (своё предложение DISPATCHER)"
+      summary: "Отклонить приглашение диспетчера или отозвать свой оффер (водитель)"
       description: |
-        Для офферов **proposed_by=DISPATCHER** на вас (**carrier_id**). **reason обязателен.**
-        en: Reject dispatcher invitation; reason required. uz: Dispetcher taklifini rad etish. tr: Davet reddi. zh: 拒绝调度员邀请。
+        Оффер с **carrier_id** = вы, статус **PENDING**:
+        - **proposed_by=DISPATCHER** — отклонить приглашение диспетчера;
+        - **proposed_by=DRIVER** — отозвать **свой** исходящий оффер по грузу.
+        **reason обязателен.**
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4781,8 +4783,9 @@ paths:
                 reason: { type: string, minLength: 3, description: "Причина отказа: минимум 1 слово и минимум 3 буквы" }
       responses:
         "200": { description: status rejected }
-        "400": { description: rejection_reason_required / rejection_reason_too_short }
+        "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
         "403": { description: not_your_offer }
+        "404": { description: offer_not_found }
 
   /v1/driver/active-cargo:
     get:
@@ -4874,54 +4877,15 @@ paths:
         "401": { description: unauthorized }
         "404": { description: driver not found }
 
-  /v1/driver/trips/active:
-    get:
-      tags: ["Drivers / Trips"]
-      summary: "Мои активные рейсы (полные данные)"
-      description: |
-        Возвращает только незавершённые рейсы: `IN_PROGRESS`, `IN_TRANSIT`, `DELIVERED` (без `COMPLETED` и `CANCELLED`).
-        Каждый элемент `data.items[]` — объект рейса (id, cargo_id, offer_id, status, agreed_price, agreed_currency, next_status, …) и **`cargo`** — полная карточка груза с `route_points` и `payment` (как в GET /api/cargo/:id).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
-          description: "Максимум записей (по умолчанию 50, макс. 100)"
-      responses:
-        "200":
-          description: "data.items — массив; data.total — число элементов; data.limit"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
-        "401": { description: unauthorized }
-        "500": { description: failed_to_list }
-
-  /v1/driver/trips:
-    get:
-      tags: ["Drivers / Trips"]
-      summary: "Список всех моих рейсов"
-      description: "Все рейсы, назначенные текущему водителю (включая завершённые и отменённые), новые сверху. Опционально limit."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: limit
-          in: query
-          schema: { type: integer, default: 50 }
-      responses:
-        "200": { description: data.items — массив рейсов (поля рейса без вложенного cargo) }
-        "401": { description: unauthorized }
-        "500": { description: failed_to_list }
-
   /v1/driver/trips/history:
     get:
       tags: ["Drivers / Trips"]
       summary: "История trips/offers (водитель)"
       description: |
-        Лента событий для водителя:
-        - `offer_accepted` (оффер принят),
-        - `offer_rejected` (оффер отклонён),
-        - `trip_completed` (рейс завершён),
-        - `trip_cancelled` (рейс отменён и ушёл в архив).
-        Параметр `limit` ограничивает количество записей каждого источника.
+        Лента для водителя; `items` отсортированы по `event_at` (новые первые).
+        Типы: `trip_active` (рейс не `COMPLETED` в таблице `trips`), `trip_completed`, `trip_cancelled` (архив),
+        `offer_accepted` (+ `has_open_trip` — есть ли живой рейс по этому офферу), `offer_rejected`.
+        Параметр `limit` ограничивает выборку по каждому источнику до объединения.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: limit
@@ -4932,34 +4896,43 @@ paths:
         "200": { description: "data.items[]: event_type, event_at, offer?/trip?" }
         "401": { description: unauthorized }
 
-  /v1/driver/trips/{id}:
+  /v1/driver/trips/me:
     get:
       tags: ["Drivers / Trips"]
-      summary: "Получить рейс по trip_id (водитель)"
-      description: "Возвращает рейс по `trip_id`. Доступно только если рейс назначен текущему водителю."
+      summary: "Мой текущий рейс (водитель)"
+      description: |
+        Одна строка из `trips` для текущего водителя: статус **не** `COMPLETED` и **не** `CANCELLED`, выбирается по наибольшему `updated_at`.
+        Если такого рейса нет — `data.trip` равен `null` (не 404).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: UUID рейса (trip_id)
-          schema: { type: string, format: uuid }
       responses:
-        "200": { description: "data — объект рейса" }
-        "403": { description: trip_not_assigned_to_you }
-        "404": { description: trip_not_found }
+        "200":
+          description: |
+            Стандартный `Envelope` (`status`: success, `code`: 200, `description` по `X-Language`).
+            `data.trip` — объект `Trip` или `null`, если активного рейса нет.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Envelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          trip:
+                            nullable: true
+                            allOf:
+                              - $ref: "#/components/schemas/Trip"
+        "401": { description: unauthorized }
+        "500": { description: failed_to_list }
 
   /v1/driver/trips/{id}/confirm:
     post:
       tags: ["Drivers / Trips"]
-      summary: "Подтвердить шаг рейса (водитель, алиас confirm-transition)"
+      summary: "Подтвердить шаг рейса (водитель)"
       description: |
-        Двустороннее подтверждение: один шаг со стороны водителя; диспетчер должен вызвать POST /v1/dispatchers/trips/:id/confirm-transition для того же перехода.
-        Один вызов подтверждения переводит рейс на следующий шаг (IN_PROGRESS → IN_TRANSIT → DELIVERED → COMPLETED).
-        **en:** Driver side of bilateral confirmation (same as confirm-transition).
-        **uz:** Haydovchi tomonidan ikkala tomonlama tasdiqlash qadami.
-        **tr:** Karşılıklı onayın sürücü tarafı.
-        **zh:** 双方确认之司机侧步骤。
+        Переводит рейс на следующий операционный статус: `IN_PROGRESS` → `IN_TRANSIT` → `DELIVERED` → `COMPLETED` (один вызов — один шаг).
+        Диспетчер для того же груза может вызывать POST /v1/dispatchers/trips/:id/confirm-transition (см. спецификацию Cargo Manager / Trips).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4967,36 +4940,18 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: поля рейса (status может остаться прежним до подтверждения диспетчером) }
-        "403": { description: trip not assigned to you }
-        "404": { description: trip not found }
-
-  /v1/driver/trips/{id}/confirm-transition:
-    post:
-      tags: ["Drivers / Trips"]
-      summary: "Подтвердить следующий статус рейса (водитель)"
-      description: |
-        См. POST /v1/driver/trips/:id/confirm — та же логика двустороннего подтверждения.
-        **en:** Driver confirms the pending transition (bilateral).
-        **uz:** Haydovchi navbatdagi o'tishni tasdiqlaydi.
-        **tr:** Sürücü bekleyen geçişi onaylar.
-        **zh:** 司机确认待处理的状态转换。
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        "200": { description: OK }
+        "200": { description: поля рейса после перехода }
+        "400": { description: invalid_status_transition }
         "403": { description: trip not assigned to you }
         "404": { description: trip not found }
 
   /v1/driver/trips/{id}/reject:
     post:
       tags: ["Drivers / Trips"]
-      summary: "Отклонить назначение на рейс"
-      description: "Снимает водителя с рейса; диспетчер может назначить другого."
+      summary: "Отказ от рейса на любом этапе (водитель)"
+      description: |
+        Для статусов `IN_PROGRESS`, `IN_TRANSIT`, `DELIVERED`: рейс копируется в `archived_trips`, строка **удаляется** из `trips`, оффер снова `PENDING`, откат `cargo_drivers` / `vehicles_left` по правилам отмены.
+        Не завершает рейс как `COMPLETED` — это полный выход из сделки после принятия оффера.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -5004,20 +4959,19 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: status IN_PROGRESS }
+        "200": { description: "Как POST /cancel: data.status, trip_id, cargo_id, offer_id" }
+        "400": { description: trip_already_completed }
+        "403": { description: trip not assigned to you }
         "404": { description: trip not found }
 
   /v1/driver/trips/{id}/cancel:
     post:
       tags: ["Drivers / Trips"]
-      summary: "Отменить рейс (водитель)"
+      summary: "Отменить рейс до выезда (водитель)"
       description: |
-        Отмена без согласия второй стороны: рейс архивируется; груз остаётся.
-        Параметр пути **`id`** — UUID **рейса** (`trip_id`). Отмена по `offer_id` не поддерживается; для отклонения приглашения до принятия используйте `POST /v1/driver/offers/{id}/reject`.
-        **en:** Driver cancels trip; trip archived.
-        **uz:** Haydovchi reysni bekor qiladi.
-        **tr:** Sürücü seferi iptal eder.
-        **zh:** 司机取消行程。
+        Только **`IN_PROGRESS`** (ещё не `IN_TRANSIT`): архив + **удаление** строки из `trips` (без отдельного UPDATE `driver_id = NULL` — рейс целиком снимается с доски).
+        После `IN_TRANSIT` используйте **`POST .../reject`**.
+        До принятия оффера: `POST /v1/driver/offers/{id}/reject` (входящий диспетчера или отзыв своего DRIVER).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -5027,7 +4981,7 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: "data.status=cancelled, data.trip_id, data.cargo_id, data.offer_id" }
-        "400": { description: trip already completed }
+        "400": { description: "trip already completed | trip_cancel_only_in_progress (не IN_PROGRESS)" }
         "403": { description: trip not assigned to you }
         "404": { description: trip not found }
 

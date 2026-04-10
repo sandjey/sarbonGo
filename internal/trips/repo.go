@@ -183,23 +183,6 @@ func (r *Repo) AssignDriver(ctx context.Context, tripID, driverID uuid.UUID) err
 	return nil
 }
 
-// DriverReject clears driver assignment so dispatcher can assign another driver.
-func (r *Repo) DriverReject(ctx context.Context, tripID, driverID uuid.UUID) error {
-	res, err := r.pg.Exec(ctx,
-		`UPDATE trips SET driver_id = NULL,
-			pending_confirm_to = NULL, driver_confirmed_at = NULL, dispatcher_confirmed_at = NULL,
-			updated_at = now()
-		 WHERE id = $1 AND driver_id = $2 AND status = $3`,
-		tripID, driverID, StatusInProgress)
-	if err != nil {
-		return err
-	}
-	if res.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
 // ConfirmTransitionTx advances trip one step (unilateral: driver or dispatcher may call).
 func (r *Repo) ConfirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.UUID, driverID uuid.UUID, asDispatcher bool) (*Trip, error) {
 	return r.confirmTransitionTx(ctx, tx, tripID, driverID, asDispatcher)
@@ -331,6 +314,20 @@ func (r *Repo) ListActiveByDriver(ctx context.Context, driverID uuid.UUID, limit
 	}
 	defer rows.Close()
 	return scanTripRows(rows)
+}
+
+// GetCurrentActiveTripForDriver returns the driver's current executing trip (not COMPLETED/CANCELLED), latest by updated_at, or nil.
+func (r *Repo) GetCurrentActiveTripForDriver(ctx context.Context, driverID uuid.UUID) (*Trip, error) {
+	t, err := scanTrip(r.pg.QueryRow(ctx,
+		tripSelect+`WHERE driver_id = $1 AND status NOT IN ($2, $3) ORDER BY updated_at DESC NULLS LAST LIMIT 1`,
+		driverID, StatusCompleted, StatusCancelled))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return t, nil
 }
 
 // ListByCargoIDs returns trips for given cargo IDs (for dispatcher listing by cargo).

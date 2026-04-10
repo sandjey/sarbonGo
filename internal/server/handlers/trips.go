@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,7 +22,7 @@ type TripsHandler struct {
 	logger    *zap.Logger
 	repo      *trips.Repo
 	cargoRepo *cargo.Repo
-	drivers   *drivers.Repo
+	drivers *drivers.Repo
 }
 
 func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo) *TripsHandler {
@@ -103,41 +105,20 @@ func tripCargoMini(cg *cargo.Cargo) gin.H {
 	}
 }
 
-// ListMy for GET /v1/driver/trips (driver): returns trips assigned to current driver.
-func (h *TripsHandler) ListMy(c *gin.Context) {
+// GetMyCurrentTrip GET /v1/driver/trips/me — один текущий исполняемый рейс (IN_PROGRESS / IN_TRANSIT / DELIVERED), иначе trip: null.
+func (h *TripsHandler) GetMyCurrentTrip(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	list, err := h.repo.ListByDriver(c.Request.Context(), driverID, limit)
+	t, err := h.repo.GetCurrentActiveTripForDriver(c.Request.Context(), driverID)
 	if err != nil {
-		h.logger.Error("trips list my", zap.Error(err))
+		h.logger.Error("get current trip for driver", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	out := make([]interface{}, 0, len(list))
-	for i := range list {
-		out = append(out, toTripResp(&list[i]))
-	}
-	resp.OKLang(c, "ok", gin.H{"items": out})
-}
-
-// GetMy returns a single trip for the assigned driver.
-func (h *TripsHandler) GetMy(c *gin.Context) {
-	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
+	if t == nil {
+		resp.OKLang(c, "ok", gin.H{"trip": nil})
 		return
 	}
-	t, err := h.repo.GetByID(c.Request.Context(), id)
-	if err != nil || t == nil {
-		resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
-		return
-	}
-	if t.DriverID == nil || *t.DriverID != driverID {
-		resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
-		return
-	}
-	resp.OKLang(c, "ok", toTripResp(t))
+	resp.OKLang(c, "ok", gin.H{"trip": toTripResp(t)})
 }
 
 // ListForCargoManager GET /v1/dispatchers/trips — list trips for dispatcher-owned cargo (or switched company cargo).
@@ -287,7 +268,14 @@ func (h *TripsHandler) ListMyHistory(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	items := make([]gin.H, 0, len(activeAndDone)+len(archived))
+	openOfferByID := make(map[uuid.UUID]struct{})
+	for i := range activeAndDone {
+		t := &activeAndDone[i]
+		if t.Status != trips.StatusCompleted {
+			openOfferByID[t.OfferID] = struct{}{}
+		}
+	}
+	items := make([]gin.H, 0, len(activeAndDone)+len(archived)+limit*4)
 	for i := range activeAndDone {
 		t := &activeAndDone[i]
 		if t.Status == trips.StatusCompleted {
@@ -296,7 +284,13 @@ func (h *TripsHandler) ListMyHistory(c *gin.Context) {
 				"event_at":   t.UpdatedAt,
 				"trip":       toTripResp(t),
 			})
+			continue
 		}
+		items = append(items, gin.H{
+			"event_type": "trip_active",
+			"event_at":   t.UpdatedAt,
+			"trip":       toTripResp(t),
+		})
 	}
 	for i := range archived {
 		t := &archived[i]
@@ -310,9 +304,11 @@ func (h *TripsHandler) ListMyHistory(c *gin.Context) {
 	accepted, _ := h.cargoRepo.ListDriverOffersAll(c.Request.Context(), driverID, "ACCEPTED", "all", nil, limit, 0)
 	for i := range accepted {
 		o := accepted[i]
+		_, hasOpen := openOfferByID[o.ID]
 		items = append(items, gin.H{
-			"event_type": "offer_accepted",
-			"event_at":   o.CreatedAt,
+			"event_type":    "offer_accepted",
+			"event_at":      o.CreatedAt,
+			"has_open_trip": hasOpen,
 			"offer": gin.H{
 				"id":               o.ID.String(),
 				"cargo_id":         o.CargoID.String(),
@@ -349,6 +345,7 @@ func (h *TripsHandler) ListMyHistory(c *gin.Context) {
 			},
 		})
 	}
+	sortHistoryByEventAtDesc(items)
 	resp.OKLang(c, "ok", gin.H{"items": items, "total": len(items), "limit": limit})
 }
 
@@ -374,7 +371,14 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	items := make([]gin.H, 0, len(current)+len(archived))
+	openOfferByID := make(map[uuid.UUID]struct{})
+	for i := range current {
+		t := &current[i]
+		if t.Status != trips.StatusCompleted {
+			openOfferByID[t.OfferID] = struct{}{}
+		}
+	}
+	items := make([]gin.H, 0, len(current)+len(archived)+limit*4)
 	for i := range current {
 		t := &current[i]
 		if t.Status == trips.StatusCompleted {
@@ -383,7 +387,13 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 				"event_at":   t.UpdatedAt,
 				"trip":       toTripResp(t),
 			})
+			continue
 		}
+		items = append(items, gin.H{
+			"event_type": "trip_active",
+			"event_at":   t.UpdatedAt,
+			"trip":       toTripResp(t),
+		})
 	}
 	for i := range archived {
 		t := &archived[i]
@@ -397,9 +407,11 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 	accepted, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, "ACCEPTED", "all", nil, limit, 0)
 	for i := range accepted {
 		o := accepted[i]
+		_, hasOpen := openOfferByID[o.ID]
 		items = append(items, gin.H{
-			"event_type": "offer_accepted",
-			"event_at":   o.CreatedAt,
+			"event_type":    "offer_accepted",
+			"event_at":      o.CreatedAt,
+			"has_open_trip": hasOpen,
 			"offer": gin.H{
 				"id":               o.ID.String(),
 				"cargo_id":         o.CargoID.String(),
@@ -436,40 +448,8 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 			},
 		})
 	}
+	sortHistoryByEventAtDesc(items)
 	resp.OKLang(c, "ok", gin.H{"items": items, "total": len(items), "limit": limit})
-}
-
-// ListMyActive GET /v1/driver/trips/active — только активные рейсы (не COMPLETED/CANCELLED) с полными данными trip + cargo (как карточка груза: route_points, payment).
-func (h *TripsHandler) ListMyActive(c *gin.Context) {
-	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	list, err := h.repo.ListActiveByDriver(c.Request.Context(), driverID, limit)
-	if err != nil {
-		h.logger.Error("trips list my active", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
-		return
-	}
-	out := make([]gin.H, 0, len(list))
-	for i := range list {
-		t := &list[i]
-		item := toTripResp(t)
-		if h.cargoRepo != nil {
-			cobj, _ := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false)
-			if cobj != nil {
-				pts, _ := h.cargoRepo.GetRoutePoints(c.Request.Context(), t.CargoID)
-				pay, _ := h.cargoRepo.GetPayment(c.Request.Context(), t.CargoID)
-				item["cargo"] = toCargoDetail(cobj, pts, pay, nil)
-			} else {
-				item["cargo"] = nil
-			}
-		}
-		out = append(out, item)
-	}
-	resp.OKLang(c, "ok", gin.H{
-		"items": out,
-		"total": len(out),
-		"limit": limit,
-	})
 }
 
 // AssignDriverReq body for PATCH /v1/dispatchers/trips/:id/assign-driver (dispatcher).
@@ -597,41 +577,25 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 	resp.OKLang(c, "ok", toTripResp(tr))
 }
 
-// ConfirmTransitionDriver POST /v1/driver/trips/:id/confirm-transition — bilateral next step (with dispatcher).
-func (h *TripsHandler) ConfirmTransitionDriver(c *gin.Context) {
-	h.runConfirmTransition(c, false)
-}
-
 // ConfirmTransitionDispatcher POST /v1/dispatchers/trips/:id/confirm-transition.
 func (h *TripsHandler) ConfirmTransitionDispatcher(c *gin.Context) {
 	h.runConfirmTransition(c, true)
 }
 
-// DriverConfirm is an alias for the first bilateral step (backward compatible with POST .../confirm).
+// DriverConfirm POST /v1/driver/trips/:id/confirm — подтвердить следующий шаг рейса (переход статуса).
 func (h *TripsHandler) DriverConfirm(c *gin.Context) {
 	h.runConfirmTransition(c, false)
 }
 
-// DriverReject clears driver assignment so dispatcher can assign another.
+// DriverReject POST /v1/driver/trips/:id/reject — полный отказ от рейса на любом этапе до COMPLETED:
+// рейс архивируется и удаляется из trips (как раньше cancel), оффер и слоты откатываются через OnTripCancelledTx.
 func (h *TripsHandler) DriverReject(c *gin.Context) {
-	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
-	tripID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
-		return
-	}
-	if err := h.repo.DriverReject(c.Request.Context(), tripID, driverID); err != nil {
-		if err == trips.ErrNotFound {
-			resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
-			return
-		}
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
-		return
-	}
-	resp.OKLang(c, "ok", gin.H{"status": trips.StatusInProgress})
+	h.runCancelTrip(c, false, false)
 }
 
-func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool) {
+// runCancelTrip archives the trip (удаление из trips) и откатывает оффер/водителя.
+// driverRestrictToInProgress: для водителя — разрешено только при статусе IN_PROGRESS (до выхода в IN_TRANSIT); диспетчер без ограничения.
+func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool, driverRestrictToInProgress bool) {
 	ctx := c.Request.Context()
 	tripID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -688,6 +652,10 @@ func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool) {
 		resp.ErrorLang(c, http.StatusBadRequest, "trip_already_completed")
 		return
 	}
+	if !asDispatcher && driverRestrictToInProgress && t.Status != trips.StatusInProgress {
+		resp.ErrorLang(c, http.StatusBadRequest, "trip_cancel_only_in_progress")
+		return
+	}
 
 	if err := h.repo.ArchiveTripAndDeleteTx(ctx, tx, tripID, role); err != nil {
 		if err == trips.ErrNotFound {
@@ -716,14 +684,14 @@ func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool) {
 	})
 }
 
-// CancelTripDriver POST /v1/driver/trips/:id/cancel
+// CancelTripDriver POST /v1/driver/trips/:id/cancel — только IN_PROGRESS: архив + удаление строки рейса (без отдельного «снятия» водителя через NULL).
 func (h *TripsHandler) CancelTripDriver(c *gin.Context) {
-	h.runCancelTrip(c, false)
+	h.runCancelTrip(c, false, true)
 }
 
 // CancelTripDispatcher POST /v1/dispatchers/trips/:id/cancel
 func (h *TripsHandler) CancelTripDispatcher(c *gin.Context) {
-	h.runCancelTrip(c, true)
+	h.runCancelTrip(c, true, false)
 }
 
 func (h *TripsHandler) runTripState(c *gin.Context, asDispatcher bool) {
@@ -777,6 +745,25 @@ func (h *TripsHandler) TripStateDriver(c *gin.Context) {
 // TripStateDispatcher GET /v1/dispatchers/trips/:id/state
 func (h *TripsHandler) TripStateDispatcher(c *gin.Context) {
 	h.runTripState(c, true)
+}
+
+func eventAtFromHistoryItem(it gin.H) time.Time {
+	v, ok := it["event_at"]
+	if !ok {
+		return time.Time{}
+	}
+	switch t := v.(type) {
+	case time.Time:
+		return t
+	default:
+		return time.Time{}
+	}
+}
+
+func sortHistoryByEventAtDesc(items []gin.H) {
+	sort.Slice(items, func(i, j int) bool {
+		return eventAtFromHistoryItem(items[i]).After(eventAtFromHistoryItem(items[j]))
+	})
 }
 
 func toTripResp(t *trips.Trip) gin.H {
