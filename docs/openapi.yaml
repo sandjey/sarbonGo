@@ -7,7 +7,7 @@ info:
 
     **Как пользоваться Swagger:**
     1. Нажмите **Authorize** и укажите заголовки: **X-Device-Type** (web / ios / android), **X-Language** (ru / uz / en / tr / zh), **X-Client-Token**. Они обязательны для всех запросов к /v1 и /api.
-    2. Для методов, требующих авторизации, дополнительно укажите **X-User-Token** (JWT access_token после входа водителя, диспетчера или админа).
+    2. Для методов, требующих авторизации, дополнительно укажите **X-User-Token** (JWT access_token после входа водителя, диспетчера или админа). Для **SSE** (`GET /v1/driver/sse/...`, `GET /v1/dispatchers/sse/...`) в браузере можно передать тот же JWT в query **`token`** (см. описания этих путей), если нельзя задать заголовок.
     3. Вкладки (теги) сверху группируют методы по ролям: водители, Cargo Manager, Driver Manager, админ, чат, компании, справочники (Reference).
 
     **Категории API:** Водители (Drivers) — регистрация, профиль, KYC, рейсы; Cargo Manager — грузы, офферы, переговоры и связанные рейсы; Driver Manager — водители, приглашения и подбор грузов для водителей; Админ — компании и владельцы; Справочники (Reference) — города, типы кузова, статусы.
@@ -167,6 +167,24 @@ tags:
       **Уведомления:** те же события, плюс отдельное уведомление `COMPLETION_PENDING_MANAGER`, когда водитель запросил закрытие рейса и ждёт вашего `POST /v1/dispatchers/trips/{id}/confirm-transition` с переводом в `COMPLETED`. Список: `GET /v1/dispatchers/trip-notifications` — в каждом элементе **`message`** по **`X-Language`**.
 
       **Оценка (профиль водителя):** после `COMPLETED` — `POST /v1/dispatchers/drivers/{driver_id}/rating` с `{"trip_id":"…","stars":1..5}` (шаг **0.5**). В пути — оцениваемый **водитель**; `trip_id` — контекст завершённого рейса. Агрегат пишется в `drivers.rating`.
+  - name: SSE / Driver — Trip notifications
+    description: |
+      **Server-Sent Events (водитель):** поток новых записей уведомлений по рейсу (те же события, что попадают в `GET /v1/driver/trip-notifications`), без опроса списка.
+
+      **Авторизация:** заголовок **X-User-Token** или query **`?token=`** (JWT access) — в браузере `EventSource` нельзя задать произвольные заголовки, поэтому для веба используйте `?token=...` вместе с базовыми заголовками (`X-Device-Type`, `X-Language`, `X-Client-Token`).
+
+      **Формат:** ответ `200`, `Content-Type: text/event-stream`. Каждое событие — строки `data: {JSON}\n\n`. В JSON поле **`kind`** = `trip_notification` (см. схему `SSETripNotificationEvent`). Периодически приходит комментарий `: ping` для поддержания соединения.
+
+      **Один инстанс API:** хаб в памяти процесса; при нескольких подах за балансировщиком подключите общий брокер (например Redis Pub/Sub), иначе клиент не получит события с другого пода.
+  - name: SSE / Driver — Trip status
+    description: |
+      **SSE (водитель):** поток снимков статуса рейса (`kind: trip_status`) при переходах, отмене, появлении нового рейса после принятия оффера и т.д. Детали полей — схема `SSETripStatusEvent`. Авторизация и ограничения — как у **SSE / Driver — Trip notifications**.
+  - name: SSE / Cargo manager — Trip notifications
+    description: |
+      **SSE (диспетчер / cargo manager):** поток уведомлений по рейсу для JWT диспетчера (аналог `GET /v1/dispatchers/trip-notifications`). **`?token=`** или **X-User-Token**; базовые заголовки обязательны.
+  - name: SSE / Cargo manager — Trip status
+    description: |
+      **SSE (диспетчер):** поток `trip_status` для грузов, где вы фриланс-автор (`created_by_type=DISPATCHER` и ваш `created_by_id`) — та же аудитория, что и push уведомлений по рейсу для диспетчера. Для грузов только компании событие уходит водителю на рейсе; диспетчеру компании этот поток может не приходить (как и записи в `trip_user_notifications`).
   - name: Drivers / Cargo view
     description: |
       Просмотр и поиск грузов для водителя:
@@ -1001,7 +1019,9 @@ components:
                 to_drivers_pending: { type: integer, example: 0 }
     Trip:
       type: object
-      description: "Рейс по грузу. Линейный поток IN_PROGRESS → IN_TRANSIT → DELIVERED → COMPLETED (или CANCELLED)."
+      description: |
+        Рейс по грузу. Линейный поток IN_PROGRESS → IN_TRANSIT → DELIVERED → COMPLETED (или CANCELLED).
+        После оценки по рейсу: **`rating_from_driver`** — звёзды, которые водитель поставил cargo manager (если уже оценил); **`rating_from_dispatcher`** — звёзды от cargo manager водителю. Дублируют `trip_ratings` для удобства клиента.
       properties:
         id: { type: string, format: uuid }
         cargo_id: { type: string, format: uuid }
@@ -1010,6 +1030,22 @@ components:
         status: { type: string, enum: [IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED] }
         agreed_price: { type: number }
         agreed_currency: { type: string }
+        rating_from_driver:
+          type: number
+          format: double
+          nullable: true
+          minimum: 1
+          maximum: 5
+          multipleOf: 0.5
+          description: "Оценка водителя cargo manager по этому рейсу (если выставлена)."
+        rating_from_dispatcher:
+          type: number
+          format: double
+          nullable: true
+          minimum: 1
+          maximum: 5
+          multipleOf: 0.5
+          description: "Оценка cargo manager водителю по этому рейсу (если выставлена)."
         next_status: { type: string, nullable: true, description: "Следующий шаг после текущего статуса (из DELIVERED обычно COMPLETED)" }
         completion_awaiting_dispatcher_confirm:
           type: boolean
@@ -1020,6 +1056,43 @@ components:
         dispatcher_confirmed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    SSETripNotificationEvent:
+      type: object
+      description: Одна строка в потоке GET .../sse/trip-notifications (поле `data` в SSE).
+      required: [kind, notification_id, trip_id, event_kind, created_at]
+      properties:
+        kind:
+          type: string
+          enum: [trip_notification]
+        notification_id: { type: string, format: uuid }
+        trip_id: { type: string, format: uuid }
+        event_kind: { type: string, description: "Например IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED, COMPLETION_PENDING_MANAGER" }
+        from_status: { type: string, nullable: true }
+        to_status: { type: string, nullable: true }
+        created_at: { type: string, description: "Время генерации push (RFC3339 nano)" }
+
+    SSETripStatusEvent:
+      type: object
+      description: Одна строка в потоке GET .../sse/trip-status.
+      required: [kind, trip_id, cargo_id, offer_id, status, agreed_price, agreed_currency, updated_at, created_at]
+      properties:
+        kind:
+          type: string
+          enum: [trip_status]
+        trip_id: { type: string, format: uuid }
+        cargo_id: { type: string, format: uuid }
+        offer_id: { type: string, format: uuid }
+        driver_id: { type: string, format: uuid, nullable: true }
+        status:
+          type: string
+          enum: [IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED]
+        agreed_price: { type: number }
+        agreed_currency: { type: string }
+        pending_confirm_to: { type: string, nullable: true }
+        completion_awaiting_dispatcher_confirm: { type: boolean, nullable: true }
+        updated_at: { type: string }
+        created_at: { type: string }
 
     ProfileTripRatingRequest:
       type: object
@@ -1508,6 +1581,8 @@ paths:
         - С **X-User-Token** водителя: оффер считается предложением водителя (**proposed_by=DRIVER**); carrier_id должен совпадать с id водителя из JWT.
         - С **X-User-Token** диспетчера: оффер считается предложением диспетчера выбранному водителю (**proposed_by=DISPATCHER**); принять цену может только этот водитель (см. POST /api/offers/{id}/accept или POST /v1/driver/offers/{id}/accept).
 
+        **Ограничения:** у водителя не может быть второго оффера **DRIVER** по тому же грузу, пока предыдущий его оффер в статусе **PENDING** или **ACCEPTED** (после **REJECTED** можно снова). У диспетчера не может быть двух **одновременно ожидающих** (**PENDING**) исходящих офферов (**DISPATCHER**) одному и тому же водителю на тот же груз — после отклонения/снятия можно отправить новый.
+
         Удобный путь для водителя без ручного carrier_id: **POST /v1/driver/cargo/{id}/offers** (только price, currency, comment).
 
         Для грузов SEARCHING_COMPANY оффер могут отправить только водители той же компании.
@@ -1538,7 +1613,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
         "409":
-          description: "dispatcher_offer_already_exists / cargo_slots_full"
+          description: "dispatcher_offer_already_exists | driver_offer_already_exists | cargo_slots_full"
   /api/offers/{id}/accept:
     post:
       tags: ["Legacy / Deprecated"]
@@ -3810,7 +3885,7 @@ paths:
       tags: ["Cargo Manager / Trips"]
       summary: "Состояние рейса и подтверждений (диспетчер)"
       description: |
-        Рейс, next_status, pending_confirm_to, метки подтверждений, кратко cargo (id, status).
+        Рейс, next_status, pending_confirm_to, метки подтверждений, при наличии — **rating_from_driver** / **rating_from_dispatcher** (кто уже оценил по рейсу), кратко cargo (id, status).
         **en:** Trip state and bilateral confirmation progress.
         **uz:** Reys holati va tasdiqlar.
         **tr:** Sefer durumu ve onaylar.
@@ -3865,6 +3940,51 @@ paths:
       responses:
         "200": { description: ok }
         "404": { description: trip_notification_not_found }
+
+  /v1/dispatchers/sse/trip-notifications:
+    get:
+      tags: ["SSE / Cargo manager — Trip notifications"]
+      summary: "SSE: поток новых уведомлений по рейсу (диспетчер)"
+      description: |
+        Аналог `GET /v1/dispatchers/trip-notifications`, но события приходят в реальном времени (`text/event-stream`).
+
+        **JWT:** заголовок **X-User-Token** или query **`token`** для EventSource. Базовые заголовки обязательны.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+          description: JWT access при отсутствии X-User-Token.
+      responses:
+        "200":
+          description: "text/event-stream; `data:` — #/components/schemas/SSETripNotificationEvent"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
+
+  /v1/dispatchers/sse/trip-status:
+    get:
+      tags: ["SSE / Cargo manager — Trip status"]
+      summary: "SSE: изменения статуса рейса (диспетчер)"
+      description: |
+        Поток `trip_status` для грузов с фриланс-автором-вами (см. тег **SSE / Cargo manager — Trip status** в списке tags). Иначе события могут не приходить — как для строк в `trip_user_notifications`.
+
+        **JWT:** как у `/v1/dispatchers/sse/trip-notifications`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream; `data:` — #/components/schemas/SSETripStatusEvent"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
 
   /v1/dispatchers/drivers/{driverId}/rating:
     post:
@@ -4826,7 +4946,7 @@ paths:
       responses:
         "201": { description: "data.id, data.proposed_by=DRIVER" }
         "400": { description: cargo_not_searching / validation }
-        "409": { description: "cargo_slots_full (vehicles_left=0, машины уже собраны)" }
+        "409": { description: "cargo_slots_full | driver_offer_already_exists" }
         "401": { description: unauthorized }
         "403": { description: SEARCHING_COMPANY — не водитель компании }
 
@@ -5142,6 +5262,58 @@ paths:
         "200": { description: ok }
         "404": { description: trip_notification_not_found }
 
+  /v1/driver/sse/trip-notifications:
+    get:
+      tags: ["SSE / Driver — Trip notifications"]
+      summary: "SSE: поток новых уведомлений по рейсу (водитель)"
+      description: |
+        **Server-Sent Events.** Держите один GET открытым; сервер пушит строки `data: {JSON}\n\n` при каждой новой записи в `trip_user_notifications` для вашего `driver_id`.
+
+        **Авторизация:** обычно **X-User-Token**. В браузере с `EventSource` передайте тот же JWT в query **`token`** (см. параметр ниже).
+
+        После события при необходимости обновите ленту: `GET /v1/driver/trip-notifications` (там есть `message` по языку).
+
+        **Масштабирование:** один процесс API — при нескольких репликах нужен общий pub/sub.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+          description: "Дублирует JWT из X-User-Token (для EventSource, где нет кастомных заголовков)."
+      responses:
+        "200":
+          description: "text/event-stream; фрагменты `data:` — см. #/components/schemas/SSETripNotificationEvent; комментарии `: ping`"
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: "data: {\"kind\":\"trip_notification\",\"notification_id\":\"...\",\"trip_id\":\"...\",\"event_kind\":\"IN_TRANSIT\",\"created_at\":\"2026-04-10T12:00:00Z\"}\n\n"
+        "401": { description: unauthorized }
+
+  /v1/driver/sse/trip-status:
+    get:
+      tags: ["SSE / Driver — Trip status"]
+      summary: "SSE: изменения статуса рейса (водитель)"
+      description: |
+        Поток JSON-снимков рейса (`kind: trip_status`) при переходах статуса, отмене, создании рейса после accept оффера и т.д. Поля совместимы с REST-состоянием рейса; при сомнении вызовите `GET /v1/driver/trips/{id}/state`.
+
+        **Авторизация:** как у `/v1/driver/sse/trip-notifications`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+          description: JWT access при отсутствии заголовка X-User-Token.
+      responses:
+        "200":
+          description: "text/event-stream; `data:` — #/components/schemas/SSETripStatusEvent"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
+
   /v1/driver/dispatchers/{dispatcherId}/rating:
     post:
       tags: ["Notifications and ratings / Driver"]
@@ -5172,7 +5344,7 @@ paths:
       tags: ["Drivers / Trips"]
       summary: "Состояние рейса и подтверждений (водитель)"
       description: |
-        См. GET /v1/dispatchers/trips/:id/state — те же поля для назначенного водителя.
+        См. GET /v1/dispatchers/trips/:id/state — те же поля для назначенного водителя (в т.ч. оценки по рейсу, если уже выставлены).
         **en:** Trip state for assigned driver.
         **uz:** Haydovchi uchun reys holati.
         **tr:** Atanmış sürücü için sefer durumu.
