@@ -511,11 +511,15 @@ const swaggerHTML = `<!doctype html>
           'Drivers / My dispatchers',
           'Drivers / Invite dispatcher',
         ]);
-        const DRIVERS_MOBILE_HIDDEN_PATH_PREFIXES = [
-          '/v1/driver/driver-invitations',
-          '/v1/driver/dispatchers',
-          '/v1/driver/dispatcher-invitations',
-        ];
+        // Do not hide POST /v1/driver/dispatchers/.../rating (cargo manager rating) with a blanket dispatchers prefix.
+        function hideDriverMobilePath(pathText) {
+          if (!pathText) return false;
+          if (pathText.indexOf('/v1/driver/driver-invitations') !== -1) return true;
+          if (pathText.indexOf('/v1/driver/dispatcher-invitations') !== -1) return true;
+          if (pathText.indexOf('/v1/driver/dispatchers/') !== -1 && pathText.indexOf('/rating') !== -1) return false;
+          if (pathText.indexOf('/v1/driver/dispatchers') !== -1) return true;
+          return false;
+        }
 
         const TAG_ORDER = [
           'Drivers / Auth',
@@ -627,14 +631,7 @@ const swaggerHTML = `<!doctype html>
             }
             const pathEl = op.querySelector('.opblock-summary-path');
             const pathText = normalizeSwaggerPath(pathEl && pathEl.textContent);
-            let hideByPath = false;
-            for (let i = 0; i < DRIVERS_MOBILE_HIDDEN_PATH_PREFIXES.length; i++) {
-              const p = DRIVERS_MOBILE_HIDDEN_PATH_PREFIXES[i];
-              if (pathText.indexOf(p) !== -1) {
-                hideByPath = true;
-                break;
-              }
-            }
+            const hideByPath = hideDriverMobilePath(pathText);
             op.style.display = hideByPath ? 'none' : '';
           });
         }

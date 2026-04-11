@@ -118,7 +118,7 @@ tags:
       - **POST /v1/dispatchers/trips/{id}/confirm-transition** — следующий шаг статуса рейса; **на `DELIVERED` после запроса водителя** — этим вызовом вы переводите рейс в `COMPLETED`.
       - **POST /v1/dispatchers/trips/{id}/cancel** — отменить рейс по `trip_id`.
       - **GET /v1/dispatchers/trips/{id}/state** — состояние рейса (включая next_status и `completion_awaiting_dispatcher_confirm`).
-      - **Уведомления и оценки:** см. **Notifications and ratings / Cargo manager** (`trip-notifications`, `trips/{id}/rating`).
+      - **Уведомления и оценки:** см. **Notifications and ratings / Cargo manager** (`trip-notifications`, `drivers/{driverId}/rating`).
   - name: "Cargo Manager / Cargo likes"
     description: |
       **Избранные грузы (Cargo Manager).** Добавить/удалить/список по JWT диспетчера. Можно сохранить **любой** существующий груз (свой или чужой): `POST /v1/dispatchers/cargo-likes` + `cargo_id`, `DELETE /cargo-likes/{cargoId}`, `GET` + `limit`.
@@ -150,21 +150,23 @@ tags:
       - **POST /v1/driver/trips/{id}/reject** — отказ от рейса на **любом** этапе до `COMPLETED`: рейс уходит в архив и удаляется из `trips` (как полный сброс слота).
       - **POST /v1/driver/trips/{id}/cancel** — только при **`IN_PROGRESS`** (до `IN_TRANSIT`): архив + удаление строки рейса; не используйте для этапов после выезда — там **`reject`**.
       - **Завершение рейса:** на шаге `DELIVERED` водитель вызывает `POST .../confirm` — рейс **остаётся** `DELIVERED`, выставляется `completion_awaiting_dispatcher_confirm`; cargo manager затем подтверждает `COMPLETED` своим `confirm-transition`.
-      - **Уведомления и оценки:** см. тег **Notifications and ratings / Driver** — `GET /v1/driver/trip-notifications`, `POST /v1/driver/trips/{id}/rating`.
+      - **Уведомления и оценки:** см. тег **Notifications and ratings / Driver** — `GET /v1/driver/trip-notifications`, вы оцениваете менеджера: `POST /v1/driver/dispatchers/{dispatcherId}/rating`; **ваш** рейтинг на профиле после рейса выставляет cargo manager (см. тот же тег — входящая оценка).
   - name: Notifications and ratings / Driver
     description: |
-      **Уведомления по рейсу и оценка cargo manager (водитель).**
+      **Уведомления по рейсу и оценки (водитель):** вы оцениваете cargo manager; cargo manager оценивает **ваш** профиль водителя.
 
       **Уведомления:** при смене статуса рейса (`IN_TRANSIT`, `DELIVERED`, `COMPLETED`, отмена) и когда завершение ждёт cargo manager — в ленте `GET /v1/driver/trip-notifications` каждый элемент содержит `step`, `event_kind`, `message` (одна строка по **`X-Language`**: ru, uz, en, tr, zh). Отметить прочитанным: `POST .../trip-notifications/{id}/read`, `POST .../trip-notifications/read-all`.
 
-      **Оценка:** после статуса рейса `COMPLETED` — `POST /v1/driver/trips/{trip_id}/rating` с телом `{"stars":1..10}` на **cargo manager** груза (`created_by_type=DISPATCHER`). Для грузов компании без фриланс-владельца оценка может быть недоступна (см. ошибку `trip_rating_cargo_manager_unknown`).
+      **Исходящая оценка (профиль cargo manager):** после `COMPLETED` — `POST /v1/driver/dispatchers/{dispatcher_id}/rating` с телом `{"trip_id":"…","stars":1..5}` (шаг **0.5**). В пути — оцениваемый **менеджер по грузам**; `trip_id` в теле — за какой совместный завершённый рейс. Агрегат — `freelance_dispatchers.rating`. Для грузов компании без фриланс-владельца см. `trip_rating_cargo_manager_unknown`.
+
+      **Входящая оценка вашего профиля:** тот же завершённый рейс — cargo manager с **JWT диспетчера** вызывает `POST /v1/dispatchers/drivers/{driver_id}/rating` с `{"trip_id":"…","stars":1..5}` (шаг **0.5**). Результат агрегируется в **`drivers.rating`** (поле в профиле водителя). Водитель этот запрос не отправляет — его отправляет менеджер по грузам.
   - name: Notifications and ratings / Cargo manager
     description: |
       **Уведомления по рейсу и оценка водителя (cargo manager / диспетчер).**
 
       **Уведомления:** те же события, плюс отдельное уведомление `COMPLETION_PENDING_MANAGER`, когда водитель запросил закрытие рейса и ждёт вашего `POST /v1/dispatchers/trips/{id}/confirm-transition` с переводом в `COMPLETED`. Список: `GET /v1/dispatchers/trip-notifications` — в каждом элементе **`message`** по **`X-Language`**.
 
-      **Оценка:** после `COMPLETED` — `POST /v1/dispatchers/trips/{trip_id}/rating` с `{"stars":1..10}` на водителя рейса.
+      **Оценка (профиль водителя):** после `COMPLETED` — `POST /v1/dispatchers/drivers/{driver_id}/rating` с `{"trip_id":"…","stars":1..5}` (шаг **0.5**). В пути — оцениваемый **водитель**; `trip_id` — контекст завершённого рейса. Агрегат пишется в `drivers.rating`.
   - name: Drivers / Cargo view
     description: |
       Просмотр и поиск грузов для водителя:
@@ -1019,11 +1021,23 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
-    TripRatingRequest:
+    ProfileTripRatingRequest:
       type: object
-      required: [stars]
+      required: [trip_id, stars]
       properties:
-        stars: { type: integer, minimum: 1, maximum: 10, description: "Оценка по шкале 1–10" }
+        trip_id:
+          type: string
+          format: uuid
+          description: |
+            Завершённый рейс (`COMPLETED`), в котором участвовали вы и оцениваемый; одна строка оценки в `trip_ratings` на пару (рейс, кто оценивает).
+            Итоговое число на карточке пользователя — агрегат по всем таким оценкам на **профиль** получателя.
+        stars:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 5
+          multipleOf: 0.5
+          description: "Оценка по шкале 1.0–5.0 с шагом 0.5 (например 3.5, 5)."
 
 paths:
   /health:
@@ -3852,24 +3866,28 @@ paths:
         "200": { description: ok }
         "404": { description: trip_notification_not_found }
 
-  /v1/dispatchers/trips/{id}/rating:
+  /v1/dispatchers/drivers/{driverId}/rating:
     post:
       tags: ["Notifications and ratings / Cargo manager"]
-      summary: "Оценить водителя по завершённому рейсу (1–10)"
+      summary: "Оценить водителя по завершённому рейсу (профиль, 1–5 шаг 0.5)"
+      description: |
+        Путь: **водитель** (`driver_id`), которого оцениваете. Тело: **`trip_id`** завершённого рейса и **`stars`**.
+        Проверяется, что рейс `COMPLETED`, груз ваш, и на рейсе назначен этот водитель. Оценка сохраняется в `trip_ratings` и участвует в агрегате **`drivers.rating`**.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
-        - name: id
+        - name: driverId
           in: path
           required: true
           schema: { type: string, format: uuid }
+          description: UUID водителя (получатель оценки)
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/TripRatingRequest" }
+            schema: { $ref: "#/components/schemas/ProfileTripRatingRequest" }
       responses:
         "200": { description: ok }
-        "400": { description: trip_rating_not_completed | trip_rating_invalid_stars }
+        "400": { description: trip_rating_not_completed | trip_rating_invalid_stars | trip_rating_ratee_mismatch }
         "403": { description: not your cargo }
         "404": { description: trip not found }
 
@@ -5124,27 +5142,28 @@ paths:
         "200": { description: ok }
         "404": { description: trip_notification_not_found }
 
-  /v1/driver/trips/{id}/rating:
+  /v1/driver/dispatchers/{dispatcherId}/rating:
     post:
       tags: ["Notifications and ratings / Driver"]
-      summary: "Оценить cargo manager по завершённому рейсу (1–10)"
+      summary: "Оценить cargo manager по завершённому рейсу (профиль, 1–5 шаг 0.5)"
       description: |
-        Доступно только если рейс в статусе `COMPLETED` и груз создан диспетчером (`created_by_type=DISPATCHER`), чтобы определить получателя оценки.
+        Путь: **cargo manager** (`dispatcher_id`), которого оцениваете. Тело: **`trip_id`** завершённого рейса и **`stars`**.
+        Проверяется `COMPLETED`, вы назначены водителем на этот рейс, и в пути указан именно диспетчер-владелец груза. Оценка в `trip_ratings` и агрегат **`freelance_dispatchers.rating`**.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
-        - name: id
+        - name: dispatcherId
           in: path
           required: true
           schema: { type: string, format: uuid }
-          description: trip_id
+          description: UUID диспетчера (cargo manager), получатель оценки
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/TripRatingRequest" }
+            schema: { $ref: "#/components/schemas/ProfileTripRatingRequest" }
       responses:
         "200": { description: ok }
-        "400": { description: "trip_rating_not_completed | trip_rating_invalid_stars | trip_rating_cargo_manager_unknown" }
+        "400": { description: "trip_rating_not_completed | trip_rating_invalid_stars | trip_rating_cargo_manager_unknown | trip_rating_ratee_mismatch" }
         "403": { description: trip not assigned to you }
         "404": { description: trip not found }
 

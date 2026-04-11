@@ -1579,11 +1579,18 @@ var apiMessages = map[string]map[string]string{
 		"zh": "货运经理只能在司机请求完成后关闭运单（COMPLETED），不能确认更早的行程状态；中间状态由司机或司机经理确认。",
 	},
 	"trip_rating_invalid_stars": {
-		"en": "stars must be an integer from 1 to 10",
-		"ru": "stars — целое число от 1 до 10",
-		"uz": "stars 1 dan 10 gacha butun son bo'lishi kerak",
-		"tr": "stars 1 ile 10 arasında tam sayı olmalı",
-		"zh": "stars 必须为 1 到 10 的整数",
+		"en": "stars must be between 1 and 5 in steps of 0.5 (e.g. 1, 3.5, 5).",
+		"ru": "stars — от 1 до 5 с шагом 0.5 (например 1, 3.5, 5).",
+		"uz": "stars 1 dan 5 gacha, 0.5 qadam bilan (masalan 1, 3.5, 5).",
+		"tr": "stars 1 ile 5 arasında 0.5 adımlarla olmalı (ör. 1, 3.5, 5).",
+		"zh": "stars 必须为 1 到 5，步长 0.5（如 1、3.5、5）。",
+	},
+	"trip_rating_ratee_mismatch": {
+		"en": "The person in the URL does not match this completed trip (wrong dispatcher or driver id).",
+		"ru": "Указанный в пути получатель оценки не совпадает с этим завершённым рейсом (неверный id диспетчера или водителя).",
+		"uz": "URL dagi baholanuvchi ushbu tugagan reys bilan mos kelmaydi.",
+		"tr": "Yoldaki değerlendirilen kişi bu tamamlanan sevkiyatla eşleşmiyor.",
+		"zh": "路径中的被评分人与该已完成行程不匹配。",
 	},
 	"trip_rating_not_completed": {
 		"en": "You can rate only after the trip is completed.",

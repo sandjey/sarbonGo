@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -11,7 +12,7 @@ import (
 )
 
 var ErrNotFound = errors.New("trip rating not found")
-var ErrInvalidStars = errors.New("stars must be 1..10")
+var ErrInvalidStars = errors.New("stars must be 1..5 in steps of 0.5")
 
 type Repo struct {
 	pg *pgxpool.Pool
@@ -21,10 +22,22 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
 
-// Upsert inserts or updates the single rating for (trip_id, rater_kind).
-func (r *Repo) Upsert(ctx context.Context, tripID uuid.UUID, raterKind string, raterID uuid.UUID, rateeKind string, rateeID uuid.UUID, stars int) error {
-	if stars < 1 || stars > 10 {
+// ValidateStars checks allowed values 1.0, 1.5, …, 5.0 (half-star steps).
+func ValidateStars(s float64) error {
+	if s < 1-1e-6 || s > 5+1e-6 {
 		return ErrInvalidStars
+	}
+	x := s * 2
+	if math.Abs(x-math.Round(x)) > 1e-3 {
+		return ErrInvalidStars
+	}
+	return nil
+}
+
+// Upsert inserts or updates the single rating for (trip_id, rater_kind).
+func (r *Repo) Upsert(ctx context.Context, tripID uuid.UUID, raterKind string, raterID uuid.UUID, rateeKind string, rateeID uuid.UUID, stars float64) error {
+	if err := ValidateStars(stars); err != nil {
+		return err
 	}
 	_, err := r.pg.Exec(ctx, `
 INSERT INTO trip_ratings (trip_id, rater_kind, rater_id, ratee_kind, ratee_id, stars, created_at, updated_at)
@@ -51,9 +64,9 @@ ORDER BY created_at ASC, id ASC
 		return err
 	}
 	defer rows.Close()
-	var list []int
+	var list []float64
 	for rows.Next() {
-		var s int
+		var s float64
 		if err := rows.Scan(&s); err != nil {
 			return err
 		}
@@ -78,7 +91,7 @@ ORDER BY created_at ASC, id ASC
 	}
 }
 
-func (r *Repo) GetByTripAndRater(ctx context.Context, tripID uuid.UUID, raterKind string) (stars int, ok bool, err error) {
+func (r *Repo) GetByTripAndRater(ctx context.Context, tripID uuid.UUID, raterKind string) (stars float64, ok bool, err error) {
 	err = r.pg.QueryRow(ctx, `
 SELECT stars FROM trip_ratings WHERE trip_id = $1 AND rater_kind = $2
 `, tripID, raterKind).Scan(&stars)

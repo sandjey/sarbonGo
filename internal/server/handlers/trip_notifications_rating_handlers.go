@@ -160,25 +160,33 @@ func (h *TripsHandler) MarkAllTripNotificationsReadDispatcher(c *gin.Context) {
 	h.markAllTripNotificationsRead(c, tripnotif.RecipientDispatcher, dispID)
 }
 
-type tripRatingBody struct {
-	Stars int `json:"stars" binding:"required"`
+// profileTripRatingBody: trip_id — за какой завершённый рейс ставится оценка (аудит и проверка прав);
+// оцениваемый человек задаётся путём (/dispatchers/{id} или /drivers/{id}) — это рейтинг профиля.
+type profileTripRatingBody struct {
+	TripID uuid.UUID `json:"trip_id" binding:"required"`
+	Stars  float64   `json:"stars" binding:"required"`
 }
 
-// PostDriverTripRating POST /v1/driver/trips/:id/rating — оценить cargo manager (1–10) после COMPLETED.
-func (h *TripsHandler) PostDriverTripRating(c *gin.Context) {
+// PostDriverRateDispatcher POST /v1/driver/dispatchers/:dispatcherId/rating — оценить cargo manager (1–5, шаг 0.5) после COMPLETED.
+func (h *TripsHandler) PostDriverRateDispatcher(c *gin.Context) {
 	if h.rating == nil {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
-	tripID, err := uuid.Parse(c.Param("id"))
-	if err != nil || tripID == uuid.Nil {
+	rateeDispID, err := uuid.Parse(c.Param("dispatcherId"))
+	if err != nil || rateeDispID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
-	var body tripRatingBody
+	var body profileTripRatingBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	tripID := body.TripID
+	if tripID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
 	t, err := h.repo.GetByID(c.Request.Context(), tripID)
@@ -196,12 +204,16 @@ func (h *TripsHandler) PostDriverTripRating(c *gin.Context) {
 		return
 	}
 	cg, _ := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false)
-	dispID := tripNotifyDispatcherID(cg)
-	if dispID == nil {
+	managerID := tripNotifyDispatcherID(cg)
+	if managerID == nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "trip_rating_cargo_manager_unknown")
 		return
 	}
-	if err := h.rating.Upsert(c.Request.Context(), tripID, tripnotif.RecipientDriver, driverID, tripnotif.RecipientDispatcher, *dispID, body.Stars); err != nil {
+	if *managerID != rateeDispID {
+		resp.ErrorLang(c, http.StatusBadRequest, "trip_rating_ratee_mismatch")
+		return
+	}
+	if err := h.rating.Upsert(c.Request.Context(), tripID, tripnotif.RecipientDriver, driverID, tripnotif.RecipientDispatcher, rateeDispID, body.Stars); err != nil {
 		if err == triprating.ErrInvalidStars {
 			resp.ErrorLang(c, http.StatusBadRequest, "trip_rating_invalid_stars")
 			return
@@ -210,11 +222,15 @@ func (h *TripsHandler) PostDriverTripRating(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"trip_id": tripID.String(), "stars": body.Stars, "ratee_dispatcher_id": dispID.String()})
+	resp.OKLang(c, "ok", gin.H{
+		"trip_id":               tripID.String(),
+		"stars":                 body.Stars,
+		"ratee_dispatcher_id":   rateeDispID.String(),
+	})
 }
 
-// PostDispatcherTripRating POST /v1/dispatchers/trips/:id/rating — оценить водителя (1–10) после COMPLETED.
-func (h *TripsHandler) PostDispatcherTripRating(c *gin.Context) {
+// PostDispatcherRateDriver POST /v1/dispatchers/drivers/:driverId/rating — оценить водителя (1–5, шаг 0.5) после COMPLETED.
+func (h *TripsHandler) PostDispatcherRateDriver(c *gin.Context) {
 	if h.rating == nil {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
@@ -226,14 +242,19 @@ func (h *TripsHandler) PostDispatcherTripRating(c *gin.Context) {
 			companyID = &u
 		}
 	}
-	tripID, err := uuid.Parse(c.Param("id"))
-	if err != nil || tripID == uuid.Nil {
+	rateeDriverID, err := uuid.Parse(c.Param("driverId"))
+	if err != nil || rateeDriverID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
-	var body tripRatingBody
+	var body profileTripRatingBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	tripID := body.TripID
+	if tripID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
 	t, err := h.repo.GetByID(c.Request.Context(), tripID)
@@ -246,8 +267,8 @@ func (h *TripsHandler) PostDispatcherTripRating(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 		return
 	}
-	if t.DriverID == nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+	if t.DriverID == nil || *t.DriverID != rateeDriverID {
+		resp.ErrorLang(c, http.StatusBadRequest, "trip_rating_ratee_mismatch")
 		return
 	}
 	ok, err := h.rating.TripCompleted(c.Request.Context(), tripID)
@@ -255,7 +276,7 @@ func (h *TripsHandler) PostDispatcherTripRating(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "trip_rating_not_completed")
 		return
 	}
-	if err := h.rating.Upsert(c.Request.Context(), tripID, tripnotif.RecipientDispatcher, dispID, tripnotif.RecipientDriver, *t.DriverID, body.Stars); err != nil {
+	if err := h.rating.Upsert(c.Request.Context(), tripID, tripnotif.RecipientDispatcher, dispID, tripnotif.RecipientDriver, rateeDriverID, body.Stars); err != nil {
 		if err == triprating.ErrInvalidStars {
 			resp.ErrorLang(c, http.StatusBadRequest, "trip_rating_invalid_stars")
 			return
@@ -264,5 +285,9 @@ func (h *TripsHandler) PostDispatcherTripRating(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"trip_id": tripID.String(), "stars": body.Stars, "ratee_driver_id": t.DriverID.String()})
+	resp.OKLang(c, "ok", gin.H{
+		"trip_id":            tripID.String(),
+		"stars":              body.Stars,
+		"ratee_driver_id":    rateeDriverID.String(),
+	})
 }

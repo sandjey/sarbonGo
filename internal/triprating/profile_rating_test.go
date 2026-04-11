@@ -9,33 +9,45 @@ func TestFoldTripRatingsToProfile_empty(t *testing.T) {
 	if v := FoldTripRatingsToProfile(nil); v != 0 {
 		t.Fatalf("empty: got %v want 0", v)
 	}
-	if v := FoldTripRatingsToProfile([]int{}); v != 0 {
-		t.Fatalf("empty slice: got %v want 0", v)
+	if v := FoldTripRatingsToProfile([]float64{}); v != 0 {
+		t.Fatalf("empty slice: got %v", v)
 	}
 }
 
 func TestFoldTripRatingsToProfile_firstIsExact(t *testing.T) {
-	if v := FoldTripRatingsToProfile([]int{10}); math.Abs(v-10) > 1e-9 {
-		t.Fatalf("single 10: got %v", v)
+	if v := FoldTripRatingsToProfile([]float64{5}); math.Abs(v-5) > 1e-9 {
+		t.Fatalf("single 5: got %v", v)
 	}
 }
 
 func TestFoldTripRatingsToProfile_gradualDrop(t *testing.T) {
-	// 10 then 5 should not become 5 immediately (user scenario).
-	v := FoldTripRatingsToProfile([]int{10, 5})
-	if v <= 5.01 || v >= 9.99 {
-		t.Fatalf("10 then 5: got %v, want between 5 and 10, not instant 5", v)
+	// 5 then 2.5 should not become 2.5 immediately (user scenario).
+	v := FoldTripRatingsToProfile([]float64{5, 2.5})
+	if v <= 2.51 || v >= 4.99 {
+		t.Fatalf("5 then 2.5: got %v, want between 2.5 and 5, not instant 2.5", v)
 	}
-	// Expected: 10 + 0.35*(5-10) = 8.25
-	want := 8.25
+	want := 5 + 0.35*(2.5-5)
 	if math.Abs(v-want) > 1e-6 {
-		t.Fatalf("10 then 5: got %v want %v", v, want)
+		t.Fatalf("5 then 2.5: got %v want %v", v, want)
 	}
 }
 
 func TestFoldTripRatingsToProfile_clamp(t *testing.T) {
-	v := FoldTripRatingsToProfile([]int{1})
+	v := FoldTripRatingsToProfile([]float64{1})
 	if v != 1 {
 		t.Fatalf("got %v", v)
+	}
+}
+
+func TestValidateStars(t *testing.T) {
+	for _, s := range []float64{1, 1.5, 3.5, 5, 4.5} {
+		if err := ValidateStars(s); err != nil {
+			t.Fatalf("%v: %v", s, err)
+		}
+	}
+	for _, s := range []float64{0.5, 5.5, 3.33, 2.25} {
+		if err := ValidateStars(s); err == nil {
+			t.Fatalf("%v: expected error", s)
+		}
 	}
 }
