@@ -307,12 +307,13 @@ func (r *Repo) SetStatus(ctx context.Context, tripID uuid.UUID, newStatus string
 }
 
 // ArchiveTripAndDeleteTx inserts into archived_trips and deletes the trip row (cancellation).
+// Снимок в архиве всегда со status=CANCELLED (до отмены рейс мог быть IN_PROGRESS и т.д. — иначе в /trips/history при event trip_cancelled поле trip.status вводило в заблуждение).
 func (r *Repo) ArchiveTripAndDeleteTx(ctx context.Context, tx pgx.Tx, tripID uuid.UUID, cancelledByRole string) error {
 	_, err := tx.Exec(ctx, `
 		INSERT INTO archived_trips (id, cargo_id, offer_id, driver_id, status, created_at, updated_at, archived_at, cancel_reason, cancelled_by_role, agreed_price, agreed_currency)
-		SELECT id, cargo_id, offer_id, driver_id, status, created_at, updated_at, now(), 'CANCELLED', $2, agreed_price, agreed_currency
+		SELECT id, cargo_id, offer_id, driver_id, $3, created_at, updated_at, now(), 'CANCELLED', $2, agreed_price, agreed_currency
 		FROM trips WHERE id = $1`,
-		tripID, cancelledByRole)
+		tripID, cancelledByRole, StatusCancelled)
 	if err != nil {
 		return err
 	}
