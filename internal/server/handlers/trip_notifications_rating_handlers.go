@@ -32,7 +32,7 @@ func tripNotifMessageKey(eventKind string) string {
 	}
 }
 
-func tripNotificationRowToGin(n tripnotif.Row) gin.H {
+func tripNotificationRowToGin(c *gin.Context, n tripnotif.Row) gin.H {
 	step := n.EventKind
 	if n.ToStatus != nil && strings.TrimSpace(*n.ToStatus) != "" {
 		step = strings.TrimSpace(*n.ToStatus)
@@ -54,7 +54,7 @@ func tripNotificationRowToGin(n tripnotif.Row) gin.H {
 			}
 			return *n.ToStatus
 		}(),
-		"messages":   resp.MsgAllLangs(tripNotifMessageKey(n.EventKind)),
+		"message":    resp.Msg(tripNotifMessageKey(n.EventKind), resp.Lang(c)),
 		"read":       n.ReadAt != nil,
 		"read_at":    n.ReadAt,
 		"created_at": n.CreatedAt,
@@ -82,7 +82,7 @@ func (h *TripsHandler) listTripNotifications(c *gin.Context, recipientKind strin
 	unread, _ := h.notif.CountUnread(c.Request.Context(), recipientKind, recipientID)
 	items := make([]gin.H, 0, len(list))
 	for i := range list {
-		items = append(items, tripNotificationRowToGin(list[i]))
+		items = append(items, tripNotificationRowToGin(c, list[i]))
 	}
 	resp.OKLang(c, "ok", gin.H{"items": items, "unread_count": unread})
 }

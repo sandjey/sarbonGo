@@ -155,14 +155,14 @@ tags:
     description: |
       **Уведомления по рейсу и оценка cargo manager (водитель).**
 
-      **Уведомления:** при смене статуса рейса (`IN_TRANSIT`, `DELIVERED`, `COMPLETED`, отмена) и когда завершение ждёт cargo manager — в ленте `GET /v1/driver/trip-notifications` каждый элемент содержит `step`, `event_kind`, `messages` (тексты на **ru, uz, en, tr, zh**). Отметить прочитанным: `POST .../trip-notifications/{id}/read`, `POST .../trip-notifications/read-all`.
+      **Уведомления:** при смене статуса рейса (`IN_TRANSIT`, `DELIVERED`, `COMPLETED`, отмена) и когда завершение ждёт cargo manager — в ленте `GET /v1/driver/trip-notifications` каждый элемент содержит `step`, `event_kind`, `message` (одна строка по **`X-Language`**: ru, uz, en, tr, zh). Отметить прочитанным: `POST .../trip-notifications/{id}/read`, `POST .../trip-notifications/read-all`.
 
       **Оценка:** после статуса рейса `COMPLETED` — `POST /v1/driver/trips/{trip_id}/rating` с телом `{"stars":1..10}` на **cargo manager** груза (`created_by_type=DISPATCHER`). Для грузов компании без фриланс-владельца оценка может быть недоступна (см. ошибку `trip_rating_cargo_manager_unknown`).
   - name: Notifications and ratings / Cargo manager
     description: |
       **Уведомления по рейсу и оценка водителя (cargo manager / диспетчер).**
 
-      **Уведомления:** те же события, плюс отдельное уведомление `COMPLETION_PENDING_MANAGER`, когда водитель запросил закрытие рейса и ждёт вашего `POST /v1/dispatchers/trips/{id}/confirm-transition` с переводом в `COMPLETED`. Список: `GET /v1/dispatchers/trip-notifications`.
+      **Уведомления:** те же события, плюс отдельное уведомление `COMPLETION_PENDING_MANAGER`, когда водитель запросил закрытие рейса и ждёт вашего `POST /v1/dispatchers/trips/{id}/confirm-transition` с переводом в `COMPLETED`. Список: `GET /v1/dispatchers/trip-notifications` — в каждом элементе **`message`** по **`X-Language`**.
 
       **Оценка:** после `COMPLETED` — `POST /v1/dispatchers/trips/{trip_id}/rating` с `{"stars":1..10}` на водителя рейса.
   - name: Drivers / Cargo view
@@ -3818,6 +3818,7 @@ paths:
       summary: "Список уведомлений по рейсам (cargo manager)"
       description: |
         Аналогично водителю; дополнительно приходит `COMPLETION_PENDING_MANAGER`, когда водитель запросил завершение и ждёт вашего `POST .../confirm-transition` для `COMPLETED`.
+        Текст уведомления в каждом элементе — поле **`message`** по заголовку **`X-Language`** (не все языки сразу).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: unread_only
@@ -5087,7 +5088,7 @@ paths:
       summary: "Список уведомлений по рейсам (водитель)"
       description: |
         Лента уведомлений для текущего водителя: смена статуса рейса, отмена, ожидание cargo manager при завершении.
-        Каждый элемент: `id`, `trip_id`, `event_kind`, `step`, `from_status`, `to_status`, `messages` (объект с ключами `en`,`ru`,`uz`,`tr`,`zh`), `read`, `read_at`, `created_at`.
+        Каждый элемент: `id`, `trip_id`, `event_kind`, `step`, `from_status`, `to_status`, `message` (строка по **`X-Language`**: en, ru, uz, tr, zh), `read`, `read_at`, `created_at`.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: unread_only
