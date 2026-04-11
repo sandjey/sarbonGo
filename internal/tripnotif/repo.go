@@ -15,12 +15,14 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
 
-func (r *Repo) Insert(ctx context.Context, tripID uuid.UUID, recipientKind string, recipientID uuid.UUID, eventKind string, fromStatus, toStatus *string) error {
-	_, err := r.pg.Exec(ctx, `
+func (r *Repo) Insert(ctx context.Context, tripID uuid.UUID, recipientKind string, recipientID uuid.UUID, eventKind string, fromStatus, toStatus *string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.pg.QueryRow(ctx, `
 INSERT INTO trip_user_notifications (trip_id, recipient_kind, recipient_id, event_kind, from_status, to_status)
 VALUES ($1, $2, $3, $4, $5, $6)
-`, tripID, recipientKind, recipientID, eventKind, fromStatus, toStatus)
-	return err
+RETURNING id
+`, tripID, recipientKind, recipientID, eventKind, fromStatus, toStatus).Scan(&id)
+	return id, err
 }
 
 func (r *Repo) List(ctx context.Context, recipientKind string, recipientID uuid.UUID, unreadOnly bool, limit int) ([]Row, error) {

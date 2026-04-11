@@ -386,3 +386,83 @@ func TestOnTripCancelledTx_NoRestoreBeforeInTransit(t *testing.T) {
 		t.Errorf("want vehicles_left still 3, got %d", cAfter.VehiclesLeft)
 	}
 }
+
+// TestCreateOffer_DriverCannotDuplicatePendingOrRejectedAllowsRetry — второй DRIVER-оффер по тому же грузу запрещён, пока PENDING/ACCEPTED; после REJECTED снова можно.
+func TestCreateOffer_DriverCannotDuplicatePendingOrRejectedAllowsRetry(t *testing.T) {
+	pool := testIntegrationPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	repo := NewRepo(pool)
+
+	cargoID := itestCreateCargo(t, repo, 3)
+	defer itestDeleteCargo(t, pool, cargoID)
+	driverID := itestInsertDriver(t, pool)
+
+	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDriver)
+	if err != nil {
+		t.Fatalf("CreateOffer1: %v", err)
+	}
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDriver)
+	if err != ErrDriverOfferAlreadyExists {
+		t.Fatalf("CreateOffer2 want ErrDriverOfferAlreadyExists, got %v", err)
+	}
+	if err := repo.RejectOffer(ctx, o1, "test"); err != nil {
+		t.Fatalf("RejectOffer: %v", err)
+	}
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 12, "USD", "", OfferProposedByDriver)
+	if err != nil {
+		t.Fatalf("CreateOffer after reject: %v", err)
+	}
+}
+
+// TestCreateOffer_DriverBlockedWhenAccepted — при ACCEPTED второй запрос водителя по тому же грузу запрещён.
+func TestCreateOffer_DriverBlockedWhenAccepted(t *testing.T) {
+	pool := testIntegrationPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	repo := NewRepo(pool)
+
+	cargoID := itestCreateCargo(t, repo, 2)
+	defer itestDeleteCargo(t, pool, cargoID)
+	driverID := itestInsertDriver(t, pool)
+
+	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDriver)
+	if err != nil {
+		t.Fatalf("CreateOffer: %v", err)
+	}
+	if _, _, err := repo.AcceptOffer(ctx, o1); err != nil {
+		t.Fatalf("AcceptOffer: %v", err)
+	}
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDriver)
+	if err != ErrDriverOfferAlreadyExists {
+		t.Fatalf("second CreateOffer want ErrDriverOfferAlreadyExists, got %v", err)
+	}
+}
+
+// TestCreateOffer_DispatcherPendingUniqueRepeatAfterReject — два PENDING DISPATCHER одному водителю нельзя; после REJECTED — снова можно.
+func TestCreateOffer_DispatcherPendingUniqueRepeatAfterReject(t *testing.T) {
+	pool := testIntegrationPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	repo := NewRepo(pool)
+
+	cargoID := itestCreateCargo(t, repo, 2)
+	defer itestDeleteCargo(t, pool, cargoID)
+	driverID := itestInsertDriver(t, pool)
+
+	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDispatcher)
+	if err != nil {
+		t.Fatalf("CreateOffer dispatcher1: %v", err)
+	}
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDispatcher)
+	if err != ErrDispatcherOfferAlreadyExists {
+		t.Fatalf("CreateOffer dispatcher2 want ErrDispatcherOfferAlreadyExists, got %v", err)
+	}
+	if err := repo.RejectOffer(ctx, o1, "test"); err != nil {
+		t.Fatalf("RejectOffer: %v", err)
+	}
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 12, "USD", "", OfferProposedByDispatcher)
+	if err != nil {
+		t.Fatalf("CreateOffer dispatcher after reject: %v", err)
+	}
+}

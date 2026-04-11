@@ -20,6 +20,7 @@ import (
 	"sarbonNew/internal/tripnotif"
 	"sarbonNew/internal/triprating"
 	"sarbonNew/internal/trips"
+	"sarbonNew/internal/userstream"
 )
 
 type TripsHandler struct {
@@ -30,10 +31,11 @@ type TripsHandler struct {
 	dispatchers *dispatchers.Repo
 	notif       *tripnotif.Repo
 	rating      *triprating.Repo
+	stream      *userstream.Hub
 }
 
-func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo, dispatchersRepo *dispatchers.Repo, notif *tripnotif.Repo, rating *triprating.Repo) *TripsHandler {
-	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo, drivers: driversRepo, dispatchers: dispatchersRepo, notif: notif, rating: rating}
+func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo, dispatchersRepo *dispatchers.Repo, notif *tripnotif.Repo, rating *triprating.Repo, stream *userstream.Hub) *TripsHandler {
+	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo, drivers: driversRepo, dispatchers: dispatchersRepo, notif: notif, rating: rating, stream: stream}
 }
 
 func dispatcherOwnsCargo(c *cargo.Cargo, dispatcherID uuid.UUID, companyID *uuid.UUID) bool {
@@ -829,6 +831,12 @@ func toTripResp(t *trips.Trip) gin.H {
 	}
 	if trips.CompletionPending(t) {
 		res["completion_awaiting_dispatcher_confirm"] = true
+	}
+	if t.RatingFromDriver != nil {
+		res["rating_from_driver"] = *t.RatingFromDriver
+	}
+	if t.RatingFromDispatcher != nil {
+		res["rating_from_dispatcher"] = *t.RatingFromDispatcher
 	}
 	res["next_status"] = trips.NextStatus(t.Status)
 	return res

@@ -30,6 +30,10 @@ type Trip struct {
 	PendingConfirmTo      *string
 	DriverConfirmedAt     *time.Time
 	DispatcherConfirmedAt *time.Time
+	// RatingFromDriver — звёзды, которые водитель поставил cargo manager по этому рейсу (зеркало trip_ratings).
+	RatingFromDriver *float64
+	// RatingFromDispatcher — звёзды, которые cargo manager поставил водителю по этому рейсу.
+	RatingFromDispatcher *float64
 }
 
 // CompletionPending returns true if the trip is DELIVERED and the driver has requested completion but the cargo manager has not confirmed yet.

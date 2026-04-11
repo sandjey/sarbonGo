@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -50,6 +51,12 @@ ON CONFLICT (trip_id, rater_kind) DO UPDATE SET
 `, tripID, raterKind, raterID, rateeKind, rateeID, stars)
 	if err != nil {
 		return err
+	}
+	switch strings.ToLower(strings.TrimSpace(raterKind)) {
+	case "driver":
+		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_from_driver = $1, updated_at = now() WHERE id = $2`, stars, tripID)
+	case "dispatcher":
+		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_from_dispatcher = $1, updated_at = now() WHERE id = $2`, stars, tripID)
 	}
 	return r.syncRateeProfileRating(ctx, rateeKind, rateeID)
 }

@@ -30,6 +30,7 @@ import (
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/trips"
+	"sarbonNew/internal/userstream"
 )
 
 const maxCargoPhotoSize = 10 * 1024 * 1024 // 10MB
@@ -57,10 +58,11 @@ type CargoHandler struct {
 	fav       *favorites.Repo
 	jwtm      *security.JWTManager
 	cfg       config.Config
+	stream    *userstream.Hub
 }
 
-func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, driversRepo *drivers.Repo, fav *favorites.Repo, jwtm *security.JWTManager, cfg config.Config) *CargoHandler {
-	return &CargoHandler{logger: logger, repo: repo, tripsRepo: tripsRepo, drivers: driversRepo, fav: fav, jwtm: jwtm, cfg: cfg}
+func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, driversRepo *drivers.Repo, fav *favorites.Repo, jwtm *security.JWTManager, cfg config.Config, stream *userstream.Hub) *CargoHandler {
+	return &CargoHandler{logger: logger, repo: repo, tripsRepo: tripsRepo, drivers: driversRepo, fav: fav, jwtm: jwtm, cfg: cfg, stream: stream}
 }
 
 // CreateCargoReq body for POST /api/cargo.
@@ -1107,6 +1109,10 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusConflict, "dispatcher_offer_already_exists")
 			return
 		}
+		if err == cargo.ErrDriverOfferAlreadyExists {
+			resp.ErrorLang(c, http.StatusConflict, "driver_offer_already_exists")
+			return
+		}
 		if err == cargo.ErrCargoSlotsFull {
 			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{
 				"cargo_id":        id.String(),
@@ -1517,6 +1523,10 @@ func (h *CargoHandler) DriverCreateOffer(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusBadRequest, "cargo_not_searching")
 			return
 		}
+		if err == cargo.ErrDriverOfferAlreadyExists {
+			resp.ErrorLang(c, http.StatusConflict, "driver_offer_already_exists")
+			return
+		}
 		h.logger.Error("driver create offer", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
 		return
@@ -1896,6 +1906,12 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			return
 		}
 		if tripID != uuid.Nil {
+			if h.stream != nil && h.tripsRepo != nil {
+				if tr, err := h.tripsRepo.GetByID(c.Request.Context(), tripID); err == nil && tr != nil {
+					cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
+					PublishTripStatusForCargoParticipants(h.stream, tr, cg)
+				}
+			}
 			resp.OKLang(c, "ok", gin.H{
 				"cargo_id":        cargoID.String(),
 				"offer_id":        offerID.String(),

@@ -438,7 +438,8 @@ var ErrOfferNotFoundOrNotPending = errors.New("cargo: offer not found or not pen
 var ErrCargoNotFound = errors.New("cargo: cargo not found")
 var ErrCargoNotSearching = errors.New("cargo: cargo not searching")
 var ErrCargoSlotsFull = errors.New("cargo: cargo has no vehicles_left")
-var ErrDispatcherOfferAlreadyExists = errors.New("cargo: dispatcher offer already exists for this cargo and driver")
+var ErrDispatcherOfferAlreadyExists = errors.New("cargo: pending dispatcher offer already exists for this cargo and driver")
+var ErrDriverOfferAlreadyExists = errors.New("cargo: driver already has a pending or accepted offer for this cargo")
 var ErrDriverBusy = errors.New("cargo: driver already has active cargo")
 var ErrOfferPriceOutOfRange = errors.New("cargo: offer price is out of NUMERIC(18,2) range")
 
@@ -1179,6 +1180,21 @@ WHERE id = $1 AND deleted_at IS NULL`, cargoID).Scan(&status, &vehiclesLeft); er
 	if vehiclesLeft <= 0 {
 		return uuid.Nil, ErrCargoSlotsFull
 	}
+	if proposedBy == OfferProposedByDriver {
+		var driverDup bool
+		if err := r.pg.QueryRow(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM offers
+  WHERE cargo_id = $1 AND carrier_id = $2
+    AND COALESCE(proposed_by, 'DRIVER') = 'DRIVER'
+    AND status IN ('PENDING', 'ACCEPTED')
+)`, cargoID, carrierID).Scan(&driverDup); err != nil {
+			return uuid.Nil, err
+		}
+		if driverDup {
+			return uuid.Nil, ErrDriverOfferAlreadyExists
+		}
+	}
 	if proposedBy == OfferProposedByDispatcher {
 		var alreadyExists bool
 		if err := r.pg.QueryRow(ctx, `
@@ -1186,6 +1202,7 @@ SELECT EXISTS(
   SELECT 1
   FROM offers
   WHERE cargo_id = $1 AND carrier_id = $2 AND COALESCE(proposed_by, 'DRIVER') = 'DISPATCHER'
+    AND status = 'PENDING'
 )`, cargoID, carrierID).Scan(&alreadyExists); err != nil {
 			return uuid.Nil, err
 		}

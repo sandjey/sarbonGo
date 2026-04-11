@@ -12,7 +12,9 @@ func EnsureTripAgreedPriceColumns(ctx context.Context, pg *pgxpool.Pool) error {
 	_, err := pg.Exec(ctx, `
 ALTER TABLE trips
   ADD COLUMN IF NOT EXISTS agreed_price NUMERIC(18, 2) NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS agreed_currency VARCHAR(3) NOT NULL DEFAULT 'UZS';
+  ADD COLUMN IF NOT EXISTS agreed_currency VARCHAR(3) NOT NULL DEFAULT 'UZS',
+  ADD COLUMN IF NOT EXISTS rating_from_driver NUMERIC(3, 1) NULL,
+  ADD COLUMN IF NOT EXISTS rating_from_dispatcher NUMERIC(3, 1) NULL;
 `)
 	if err != nil {
 		return err

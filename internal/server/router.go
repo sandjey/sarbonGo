@@ -42,6 +42,7 @@ import (
 	"sarbonNew/internal/tripnotif"
 	"sarbonNew/internal/triprating"
 	"sarbonNew/internal/trips"
+	"sarbonNew/internal/userstream"
 )
 
 func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Handler {
@@ -155,7 +156,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispProfileH := handlers.NewDispatcherProfileHandler(logger, dispatchersRepo, displayNameChecker, dispPhoneActions, tgClient, cfg.OTPTTL, cfg.OTPLength)
 	adminAuthH := handlers.NewAdminAuthHandler(logger, adminsRepo, jwtm, refreshStore)
 	adminCompaniesH := handlers.NewAdminCompaniesHandler(logger, companiesRepo, appusersRepo, cfg)
-	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, driversRepo, favRepo, jwtm, cfg)
+	userStreamHub := userstream.NewHub()
+	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, driversRepo, favRepo, jwtm, cfg, userStreamHub)
 	dispCargoExportH := handlers.NewDispatcherCargoExportHandler(logger, cargoRepo)
 	adminCargoModH := handlers.NewAdminCargoModerationHandler(logger, cargoRepo)
 	dispCompaniesH := handlers.NewDispatcherCompaniesHandler(logger, companiesRepo, dcrRepo, jwtm)
@@ -165,7 +167,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverDispCatalogH := handlers.NewDriverDispatchersCatalogHandler(logger, dispatchersRepo)
 	d2dInvRepo := drivertodispatcherinvitations.NewRepo(deps.PG)
 	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo)
-	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo, dispatchersRepo, tripNotifRepo, tripRatingRepo)
+	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo, dispatchersRepo, tripNotifRepo, tripRatingRepo, userStreamHub)
+	sseH := handlers.NewSSEStreamsHandler(userStreamHub)
 
 	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo, favRepo)
 
@@ -379,6 +382,13 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	driverAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDriver)
 
+	driverSSE := v1.Group("/driver")
+	driverSSE.Use(mw.RequireBaseHeaders(cfg))
+	driverSSE.Use(mw.RequireDriverWithQueryToken(jwtm, refreshStore))
+	driverSSE.Use(mw.UpdateDriverLastOnline(driversRepo))
+	driverSSE.GET("/sse/trip-notifications", sseH.DriverTripNotificationsSSE)
+	driverSSE.GET("/sse/trip-status", sseH.DriverTripStatusSSE)
+
 	// Dispatchers: только API диспетчера
 	dispAuthed := v1.Group("/dispatchers")
 	dispAuthed.Use(mw.RequireDispatcher(jwtm, refreshStore))
@@ -420,6 +430,12 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.GET("/trip-notifications", tripsH.ListTripNotificationsDispatcher)
 	dispAuthed.POST("/trip-notifications/read-all", tripsH.MarkAllTripNotificationsReadDispatcher)
 	dispAuthed.POST("/trip-notifications/:id/read", tripsH.MarkTripNotificationReadDispatcher)
+	dispSSE := v1.Group("/dispatchers")
+	dispSSE.Use(mw.RequireBaseHeaders(cfg))
+	dispSSE.Use(mw.RequireDispatcherWithQueryToken(jwtm, refreshStore))
+	dispSSE.Use(mw.UpdateDispatcherLastOnline(dispatchersRepo))
+	dispSSE.GET("/sse/trip-notifications", sseH.DispatcherTripNotificationsSSE)
+	dispSSE.GET("/sse/trip-status", sseH.DispatcherTripStatusSSE)
 	dispAuthed.POST("/drivers/:driverId/rating", tripsH.PostDispatcherRateDriver)
 	dispAuthed.GET("/offers/:id", cargoH.GetOfferDispatcher)
 	dispAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)

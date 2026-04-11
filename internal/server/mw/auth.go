@@ -1,6 +1,7 @@
 package mw
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,8 +15,8 @@ import (
 const CtxDriverID = "driver_id"
 const CtxDispatcherID = "dispatcher_id"
 const CtxDispatcherCompanyID = "dispatcher_company_id" // optional, set when JWT has company_id (after switch-company)
-const CtxUserID = "user_id"   // chat: any authenticated user UUID
-const CtxUserRole = "user_role" // chat: driver | dispatcher | admin
+const CtxUserID = "user_id"                            // chat: any authenticated user UUID
+const CtxUserRole = "user_role"                        // chat: driver | dispatcher | admin
 
 func RequireDriver(jwtm *security.JWTManager, refreshStore *store.RefreshStore) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -116,6 +117,66 @@ func RequireChatUser(jwtm *security.JWTManager, refreshStore *store.RefreshStore
 		}
 		c.Set(CtxUserID, id)
 		c.Set(CtxUserRole, role)
+		c.Next()
+	}
+}
+
+// RequireDriverWithQueryToken is like RequireDriver but also accepts JWT in query **token** (for browser EventSource / SSE, which cannot set custom headers).
+// Prefer **X-User-Token** when possible (e.g. native apps).
+func RequireDriverWithQueryToken(jwtm *security.JWTManager, refreshStore *store.RefreshStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := strings.TrimSpace(c.GetHeader(HeaderUserToken))
+		if raw == "" && c.Request.Method == http.MethodGet {
+			raw = strings.TrimSpace(c.Query("token"))
+		}
+		if raw == "" {
+			resp.ErrorLang(c, 401, "missing_user_token")
+			c.Abort()
+			return
+		}
+		id, role, _, sid, err := jwtm.ParseAccessWithSID(raw)
+		if err != nil || id == uuid.Nil || role != "driver" {
+			resp.ErrorLang(c, 401, "invalid_user_token")
+			c.Abort()
+			return
+		}
+		if sid != "" && refreshStore != nil && !refreshStore.SessionValid(c.Request.Context(), sid) {
+			resp.ErrorLang(c, 401, "invalid_user_token")
+			c.Abort()
+			return
+		}
+		c.Set(CtxDriverID, id)
+		c.Next()
+	}
+}
+
+// RequireDispatcherWithQueryToken is like RequireDispatcher but also accepts JWT in query **token** (for SSE).
+func RequireDispatcherWithQueryToken(jwtm *security.JWTManager, refreshStore *store.RefreshStore) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw := strings.TrimSpace(c.GetHeader(HeaderUserToken))
+		if raw == "" && c.Request.Method == http.MethodGet {
+			raw = strings.TrimSpace(c.Query("token"))
+		}
+		if raw == "" {
+			resp.ErrorLang(c, 401, "missing_user_token")
+			c.Abort()
+			return
+		}
+		id, role, companyID, sid, err := jwtm.ParseAccessWithSID(raw)
+		if err != nil || id == uuid.Nil || role != "dispatcher" {
+			resp.ErrorLang(c, 401, "invalid_user_token")
+			c.Abort()
+			return
+		}
+		if sid != "" && refreshStore != nil && !refreshStore.SessionValid(c.Request.Context(), sid) {
+			resp.ErrorLang(c, 401, "invalid_user_token")
+			c.Abort()
+			return
+		}
+		c.Set(CtxDispatcherID, id)
+		if companyID != uuid.Nil {
+			c.Set(CtxDispatcherCompanyID, companyID)
+		}
 		c.Next()
 	}
 }

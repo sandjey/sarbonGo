@@ -1053,11 +1053,18 @@ var apiMessages = map[string]map[string]string{
 		"zh": "无法加载报价列表",
 	},
 	"dispatcher_offer_already_exists": {
-		"en": "Offer for this cargo and driver was already sent",
-		"ru": "Оффер по этому грузу этому водителю уже отправлен",
-		"uz": "Bu yuk va haydovchi uchun taklif allaqachon yuborilgan",
-		"tr": "Bu yük ve sürücü için teklif zaten gönderildi",
-		"zh": "该货物给该司机的报价已发送",
+		"en": "A pending dispatcher offer for this cargo and driver already exists",
+		"ru": "Уже есть ожидающий оффер диспетчера по этому грузу для этого водителя",
+		"uz": "Bu yuk va haydovchi uchun kutilayotgan dispetcher taklifi allaqachon mavjud",
+		"tr": "Bu yük ve sürücü için bekleyen gönderici teklifi zaten var",
+		"zh": "该货物对该司机已有待处理的调度方报价",
+	},
+	"driver_offer_already_exists": {
+		"en": "You already have a pending or accepted offer for this cargo",
+		"ru": "У вас уже есть ожидающий или принятый оффер по этому грузу",
+		"uz": "Bu yuk bo'yicha sizda kutilayotgan yoki qabul qilingan taklif allaqachon bor",
+		"tr": "Bu yük için zaten bekleyen veya kabul edilmiş bir teklifiniz var",
+		"zh": "您对该货物已有待处理或已接受的报价",
 	},
 	"invalid_cargo_offer_bucket": {
 		"en": "Invalid bucket for cargo offers",

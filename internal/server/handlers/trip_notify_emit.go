@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -23,8 +24,26 @@ func (h *TripsHandler) notifInsert(ctx context.Context, tripID uuid.UUID, recipi
 	if h.notif == nil || recipientID == uuid.Nil {
 		return
 	}
-	if err := h.notif.Insert(ctx, tripID, recipientKind, recipientID, eventKind, fromSt, toSt); err != nil {
+	nid, err := h.notif.Insert(ctx, tripID, recipientKind, recipientID, eventKind, fromSt, toSt)
+	if err != nil {
 		h.logger.Warn("trip notification insert", zap.Error(err), zap.String("event", eventKind))
+		return
+	}
+	if h.stream != nil {
+		msg := map[string]any{
+			"kind":            "trip_notification",
+			"notification_id": nid.String(),
+			"trip_id":         tripID.String(),
+			"event_kind":      eventKind,
+			"created_at":      time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		if fromSt != nil {
+			msg["from_status"] = *fromSt
+		}
+		if toSt != nil {
+			msg["to_status"] = *toSt
+		}
+		h.stream.PublishNotification(recipientKind, recipientID, msg)
 	}
 }
 
@@ -62,6 +81,9 @@ func (h *TripsHandler) notifyTripTransition(ctx context.Context, before, after *
 			h.notifInsert(ctx, after.ID, tripnotif.RecipientDispatcher, *disp, tripnotif.EventCompletionPending, strPtr(before.Status), strPtr("COMPLETION_PENDING"))
 		}
 	}
+	if before.Status != after.Status || (!bPend && aPend) {
+		PublishTripStatusForCargoParticipants(h.stream, after, cg)
+	}
 }
 
 func (h *TripsHandler) notifyTripCancelled(ctx context.Context, t *trips.Trip) {
@@ -70,4 +92,9 @@ func (h *TripsHandler) notifyTripCancelled(ctx context.Context, t *trips.Trip) {
 	}
 	cg, _ := h.cargoRepo.GetByID(ctx, t.CargoID, false)
 	h.notifPair(ctx, t, cg, tripnotif.EventCancelled, strPtr(t.Status), strPtr(trips.StatusCancelled))
+	if h.stream != nil {
+		snap := *t
+		snap.Status = trips.StatusCancelled
+		PublishTripStatusForCargoParticipants(h.stream, &snap, cg)
+	}
 }

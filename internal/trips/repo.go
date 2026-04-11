@@ -85,7 +85,8 @@ func scanTrip(row pgx.Row) (*Trip, error) {
 	err := row.Scan(&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status,
 		&t.AgreedPrice, &t.AgreedCurrency,
 		&t.CreatedAt, &t.UpdatedAt,
-		&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt)
+		&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt,
+		&t.RatingFromDriver, &t.RatingFromDispatcher)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +94,8 @@ func scanTrip(row pgx.Row) (*Trip, error) {
 }
 
 const tripSelect = `SELECT id, cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency, created_at, updated_at,
-  pending_confirm_to, driver_confirmed_at, dispatcher_confirmed_at FROM trips `
+  pending_confirm_to, driver_confirmed_at, dispatcher_confirmed_at,
+  rating_from_driver, rating_from_dispatcher FROM trips `
 
 // GetByID returns trip by id.
 func (r *Repo) GetByID(ctx context.Context, id uuid.UUID) (*Trip, error) {
@@ -472,7 +474,8 @@ func (r *Repo) ListForCargoManager(
 	// Select the exact trip fields expected by scanTrip.
 	q := `SELECT
   t.id, t.cargo_id, t.offer_id, t.driver_id, t.status, t.agreed_price, t.agreed_currency, t.created_at, t.updated_at,
-  t.pending_confirm_to, t.driver_confirmed_at, t.dispatcher_confirmed_at
+  t.pending_confirm_to, t.driver_confirmed_at, t.dispatcher_confirmed_at,
+  t.rating_from_driver, t.rating_from_dispatcher
 FROM trips t
 INNER JOIN cargo c ON c.id = t.cargo_id
 WHERE ` + where + ` ORDER BY ` + orderBy + ` ` + dir + ` LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
@@ -497,7 +500,8 @@ func scanTripRows(rows pgx.Rows) ([]Trip, error) {
 		err := rows.Scan(&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status,
 			&t.AgreedPrice, &t.AgreedCurrency,
 			&t.CreatedAt, &t.UpdatedAt,
-			&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt)
+			&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt,
+			&t.RatingFromDriver, &t.RatingFromDispatcher)
 		if err != nil {
 			return nil, err
 		}

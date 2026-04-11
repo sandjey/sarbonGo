@@ -532,6 +532,8 @@ const swaggerHTML = `<!doctype html>
           'Drivers / Offers',
           'Drivers / Trips',
           'Notifications and ratings / Driver',
+          'SSE / Driver — Trip notifications',
+          'SSE / Driver — Trip status',
           'Cargo Manager',
           'Cargo Manager / Auth',
           'Cargo Manager / Registration',
@@ -541,6 +543,8 @@ const swaggerHTML = `<!doctype html>
           'Cargo Manager / Offers',
           'Cargo Manager / Trips',
           'Notifications and ratings / Cargo manager',
+          'SSE / Cargo manager — Trip notifications',
+          'SSE / Cargo manager — Trip status',
           'Cargo Manager / Cargo likes',
           'Cargo Manager / Driver likes',
           'Driver Manager',
@@ -589,6 +593,7 @@ const swaggerHTML = `<!doctype html>
           var tLower = t.toLowerCase();
           if (group === 'drivers') {
             if (t.startsWith('Notifications and ratings / Driver')) return true;
+            if (t.startsWith('SSE / Driver')) return true;
             if (!t.startsWith('Drivers /')) return false;
             return !DRIVERS_MOBILE_HIDDEN_TAGS.has(t);
           }
@@ -596,6 +601,7 @@ const swaggerHTML = `<!doctype html>
           if (group === 'admin') return t.startsWith('Admin /');
           if (group === 'cargo') {
             if (t.startsWith('Notifications and ratings / Cargo manager')) return true;
+            if (t.startsWith('SSE / Cargo manager')) return true;
             return t === 'Cargo Manager' || t.startsWith('Cargo Manager /');
           }
           if (group === 'chat') return t.startsWith('Chat') || t.startsWith('Calls');
