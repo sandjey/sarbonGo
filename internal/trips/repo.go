@@ -17,6 +17,10 @@ var ErrNotFound = errors.New("trip not found")
 var ErrInvalidTransition = errors.New("invalid status transition")
 var ErrForbiddenRole = errors.New("trip: not allowed for this role")
 var ErrAgreedPriceOutOfRange = errors.New("trip: agreed_price is out of NUMERIC(18,2) range")
+// ErrTripCompletionNeedsDriverFirst — диспетчер не может закрыть рейс, пока водитель не запросил завершение (DELIVERED → pending COMPLETED).
+var ErrTripCompletionNeedsDriverFirst = errors.New("trip completion: driver must confirm first")
+// ErrTripCompletionAlreadyPending — водитель уже отправил запрос на завершение, ждём cargo manager.
+var ErrTripCompletionAlreadyPending = errors.New("trip completion: already awaiting cargo manager")
 
 const maxAgreedPriceNumeric18_2 = 9999999999999999.99
 
@@ -183,7 +187,8 @@ func (r *Repo) AssignDriver(ctx context.Context, tripID, driverID uuid.UUID) err
 	return nil
 }
 
-// ConfirmTransitionTx advances trip one step (unilateral: driver or dispatcher may call).
+// ConfirmTransitionTx advances trip one step. IN_PROGRESS→IN_TRANSIT→DELIVERED: driver or driver manager (dispatcher with DRIVER_MANAGER); cargo manager (CARGO_MANAGER) is restricted to closing only — see HTTP handler.
+// DELIVERED→COMPLETED: driver first sets pending (same row, status stays DELIVERED); cargo manager then confirms COMPLETED.
 func (r *Repo) ConfirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.UUID, driverID uuid.UUID, asDispatcher bool) (*Trip, error) {
 	return r.confirmTransitionTx(ctx, tx, tripID, driverID, asDispatcher)
 }
@@ -226,7 +231,44 @@ func (r *Repo) confirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.U
 		return nil, ErrInvalidTransition
 	}
 
-	_, err = tx.Exec(ctx, `
+	// Bilateral completion: DELIVERED → COMPLETED requires driver request, then cargo manager confirms.
+	if t.Status == StatusDelivered && next == StatusCompleted {
+		pendingCompletion := t.PendingConfirmTo != nil && strings.EqualFold(strings.TrimSpace(*t.PendingConfirmTo), StatusCompleted)
+		if !asDispatcher {
+			if pendingCompletion && t.DriverConfirmedAt != nil {
+				return nil, ErrTripCompletionAlreadyPending
+			}
+			_, err = tx.Exec(ctx, `
+				UPDATE trips SET
+				  pending_confirm_to = $2,
+				  driver_confirmed_at = now(),
+				  dispatcher_confirmed_at = NULL,
+				  updated_at = now()
+				WHERE id = $1 AND status = $3`,
+				tripID, StatusCompleted, StatusDelivered)
+			if err != nil {
+				return nil, err
+			}
+			return r.GetByIDTx(ctx, tx, tripID)
+		}
+		// dispatcher
+		if !pendingCompletion || t.DriverConfirmedAt == nil {
+			return nil, ErrTripCompletionNeedsDriverFirst
+		}
+	}
+
+	if next == StatusCompleted {
+		_, err = tx.Exec(ctx, `
+		UPDATE trips SET
+		  status = $2,
+		  pending_confirm_to = NULL,
+		  driver_confirmed_at = NULL,
+		  dispatcher_confirmed_at = now(),
+		  updated_at = now()
+		WHERE id = $1`,
+			tripID, next)
+	} else {
+		_, err = tx.Exec(ctx, `
 		UPDATE trips SET
 		  status = $2,
 		  pending_confirm_to = NULL,
@@ -234,7 +276,8 @@ func (r *Repo) confirmTransitionTx(ctx context.Context, tx pgx.Tx, tripID uuid.U
 		  dispatcher_confirmed_at = NULL,
 		  updated_at = now()
 		WHERE id = $1`,
-		tripID, next)
+			tripID, next)
+	}
 	if err != nil {
 		return nil, err
 	}

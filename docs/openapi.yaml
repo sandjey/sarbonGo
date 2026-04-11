@@ -115,9 +115,10 @@ tags:
       - **GET /v1/dispatchers/cargo/{id}/trips** — рейсы конкретного груза по `cargo_id` (только если груз ваш).
       - **GET /v1/dispatchers/trips/history** — лента событий (новые сверху): `trip_active`, `trip_completed`, `trip_cancelled`, `offer_accepted` (`has_open_trip`), `offer_rejected`.
       - **GET /v1/dispatchers/trips/{id}** — получить рейс по `trip_id` (только если груз ваш).
-      - **POST /v1/dispatchers/trips/{id}/confirm-transition** — следующий шаг статуса рейса.
+      - **POST /v1/dispatchers/trips/{id}/confirm-transition** — следующий шаг статуса рейса; **на `DELIVERED` после запроса водителя** — этим вызовом вы переводите рейс в `COMPLETED`.
       - **POST /v1/dispatchers/trips/{id}/cancel** — отменить рейс по `trip_id`.
-      - **GET /v1/dispatchers/trips/{id}/state** — состояние рейса (включая next_status).
+      - **GET /v1/dispatchers/trips/{id}/state** — состояние рейса (включая next_status и `completion_awaiting_dispatcher_confirm`).
+      - **Уведомления и оценки:** см. **Notifications and ratings / Cargo manager** (`trip-notifications`, `trips/{id}/rating`).
   - name: "Cargo Manager / Cargo likes"
     description: |
       **Избранные грузы (Cargo Manager).** Добавить/удалить/список по JWT диспетчера. Можно сохранить **любой** существующий груз (свой или чужой): `POST /v1/dispatchers/cargo-likes` + `cargo_id`, `DELETE /cargo-likes/{cargoId}`, `GET` + `limit`.
@@ -148,6 +149,22 @@ tags:
       - **POST /v1/driver/trips/{id}/confirm** — подтвердить шаг (следующий статус рейса).
       - **POST /v1/driver/trips/{id}/reject** — отказ от рейса на **любом** этапе до `COMPLETED`: рейс уходит в архив и удаляется из `trips` (как полный сброс слота).
       - **POST /v1/driver/trips/{id}/cancel** — только при **`IN_PROGRESS`** (до `IN_TRANSIT`): архив + удаление строки рейса; не используйте для этапов после выезда — там **`reject`**.
+      - **Завершение рейса:** на шаге `DELIVERED` водитель вызывает `POST .../confirm` — рейс **остаётся** `DELIVERED`, выставляется `completion_awaiting_dispatcher_confirm`; cargo manager затем подтверждает `COMPLETED` своим `confirm-transition`.
+      - **Уведомления и оценки:** см. тег **Notifications and ratings / Driver** — `GET /v1/driver/trip-notifications`, `POST /v1/driver/trips/{id}/rating`.
+  - name: Notifications and ratings / Driver
+    description: |
+      **Уведомления по рейсу и оценка cargo manager (водитель).**
+
+      **Уведомления:** при смене статуса рейса (`IN_TRANSIT`, `DELIVERED`, `COMPLETED`, отмена) и когда завершение ждёт cargo manager — в ленте `GET /v1/driver/trip-notifications` каждый элемент содержит `step`, `event_kind`, `messages` (тексты на **ru, uz, en, tr, zh**). Отметить прочитанным: `POST .../trip-notifications/{id}/read`, `POST .../trip-notifications/read-all`.
+
+      **Оценка:** после статуса рейса `COMPLETED` — `POST /v1/driver/trips/{trip_id}/rating` с телом `{"stars":1..10}` на **cargo manager** груза (`created_by_type=DISPATCHER`). Для грузов компании без фриланс-владельца оценка может быть недоступна (см. ошибку `trip_rating_cargo_manager_unknown`).
+  - name: Notifications and ratings / Cargo manager
+    description: |
+      **Уведомления по рейсу и оценка водителя (cargo manager / диспетчер).**
+
+      **Уведомления:** те же события, плюс отдельное уведомление `COMPLETION_PENDING_MANAGER`, когда водитель запросил закрытие рейса и ждёт вашего `POST /v1/dispatchers/trips/{id}/confirm-transition` с переводом в `COMPLETED`. Список: `GET /v1/dispatchers/trip-notifications`.
+
+      **Оценка:** после `COMPLETED` — `POST /v1/dispatchers/trips/{trip_id}/rating` с `{"stars":1..10}` на водителя рейса.
   - name: Drivers / Cargo view
     description: |
       Просмотр и поиск грузов для водителя:
@@ -991,9 +1008,22 @@ components:
         status: { type: string, enum: [IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED] }
         agreed_price: { type: number }
         agreed_currency: { type: string }
-        next_status: { type: string, nullable: true, description: "Следующий шаг после текущего статуса" }
+        next_status: { type: string, nullable: true, description: "Следующий шаг после текущего статуса (из DELIVERED обычно COMPLETED)" }
+        completion_awaiting_dispatcher_confirm:
+          type: boolean
+          description: |
+            `true`, если водитель запросил завершение рейса (статус остаётся `DELIVERED`), и **cargo manager** должен вызвать `POST /v1/dispatchers/trips/{id}/confirm-transition`, чтобы перевести рейс в `COMPLETED`.
+        pending_confirm_to: { type: string, nullable: true, description: "При ожидании завершения — обычно `COMPLETED`" }
+        driver_confirmed_at: { type: string, format: date-time, nullable: true }
+        dispatcher_confirmed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    TripRatingRequest:
+      type: object
+      required: [stars]
+      properties:
+        stars: { type: integer, minimum: 1, maximum: 10, description: "Оценка по шкале 1–10" }
 
 paths:
   /health:
@@ -3722,11 +3752,9 @@ paths:
       tags: ["Cargo Manager / Trips"]
       summary: "Подтвердить следующий статус рейса (диспетчер)"
       description: |
-        Двустороннее подтверждение: диспетчер и водитель должны вызвать этот эндпоинт и парный вызов водителя для одного и того же перехода (next_status).
-        **en:** Bilateral confirmation with the driver for the next trip status.
-        **uz:** Keyingi reys holatini haydovchi bilan ikkala tomondan tasdiqlash.
-        **tr:** Bir sonraki sefer durumu için sürücü ile karşılıklı onay.
-        **zh:** 与司机双方确认下一行程状态。
+        **Роль `CARGO_MANAGER`:** через этот метод может только **закрыть** рейс — поставить `COMPLETED`, и только когда рейс в `DELIVERED` и водитель уже запросил завершение (`POST /v1/driver/trips/{id}/confirm`). Промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) для cargo manager **запрещены** (ответ `403`, ключ `trip_cargo_manager_completed_only`); их подтверждает водитель или диспетчер с ролью `DRIVER_MANAGER`.
+        **Роль `DRIVER_MANAGER` (и прочие диспетчеры без роли cargo manager):** промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) — как раньше, совместно с водителем.
+        **Закрытие (`COMPLETED`):** с `DELIVERED` никто не может перейти в `COMPLETED`, пока водитель не запросил завершение. Если водитель ещё не запросил — `400` `trip_completion_needs_driver_first`.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -3735,7 +3763,8 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: data — поля рейса после шага (см. GET /api/trips/:id) }
-        "403": { description: not your cargo }
+        "400": { description: "invalid_status_transition | trip_completion_needs_driver_first | trip_completion_already_pending" }
+        "403": { description: "not your cargo | trip_cargo_manager_completed_only (CARGO_MANAGER cannot confirm non-COMPLETED steps)" }
         "404": { description: trip not found }
 
   /v1/dispatchers/trips/{id}/cancel:
@@ -3780,6 +3809,66 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: OK }
+        "403": { description: not your cargo }
+        "404": { description: trip not found }
+
+  /v1/dispatchers/trip-notifications:
+    get:
+      tags: ["Notifications and ratings / Cargo manager"]
+      summary: "Список уведомлений по рейсам (cargo manager)"
+      description: |
+        Аналогично водителю; дополнительно приходит `COMPLETION_PENDING_MANAGER`, когда водитель запросил завершение и ждёт вашего `POST .../confirm-transition` для `COMPLETED`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: unread_only
+          in: query
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.items[], data.unread_count" }
+
+  /v1/dispatchers/trip-notifications/read-all:
+    post:
+      tags: ["Notifications and ratings / Cargo manager"]
+      summary: "Отметить все уведомления прочитанными (cargo manager)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200": { description: "data.updated" }
+
+  /v1/dispatchers/trip-notifications/{id}/read:
+    post:
+      tags: ["Notifications and ratings / Cargo manager"]
+      summary: "Отметить уведомление прочитанным (cargo manager)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: ok }
+        "404": { description: trip_notification_not_found }
+
+  /v1/dispatchers/trips/{id}/rating:
+    post:
+      tags: ["Notifications and ratings / Cargo manager"]
+      summary: "Оценить водителя по завершённому рейсу (1–10)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TripRatingRequest" }
+      responses:
+        "200": { description: ok }
+        "400": { description: trip_rating_not_completed | trip_rating_invalid_stars }
         "403": { description: not your cargo }
         "404": { description: trip not found }
 
@@ -4937,8 +5026,9 @@ paths:
       tags: ["Drivers / Trips"]
       summary: "Подтвердить шаг рейса (водитель)"
       description: |
-        Переводит рейс на следующий операционный статус: `IN_PROGRESS` → `IN_TRANSIT` → `DELIVERED` → `COMPLETED` (один вызов — один шаг).
-        Диспетчер для того же груза может вызывать POST /v1/dispatchers/trips/:id/confirm-transition (см. спецификацию Cargo Manager / Trips).
+        Переводит рейс на следующий операционный статус: `IN_PROGRESS` → `IN_TRANSIT` → `DELIVERED` (один вызов — один шаг).
+        **Завершение:** с `DELIVERED` первый вызов **не** ставит `COMPLETED`: фиксируется запрос водителя, в ответе `completion_awaiting_dispatcher_confirm: true`, статус остаётся `DELIVERED`. Закрывает рейс **cargo manager** через `POST /v1/dispatchers/trips/{id}/confirm-transition`.
+        Диспетчер может вызывать тот же переход для промежуточных шагов (см. Cargo Manager / Trips).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4947,7 +5037,7 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: поля рейса после перехода }
-        "400": { description: invalid_status_transition }
+        "400": { description: "invalid_status_transition | trip_completion_already_pending" }
         "403": { description: trip not assigned to you }
         "404": { description: trip not found }
 
@@ -4988,6 +5078,72 @@ paths:
       responses:
         "200": { description: "data.status=cancelled, data.trip_id, data.cargo_id, data.offer_id" }
         "400": { description: "trip already completed | trip_cancel_only_in_progress (не IN_PROGRESS)" }
+        "403": { description: trip not assigned to you }
+        "404": { description: trip not found }
+
+  /v1/driver/trip-notifications:
+    get:
+      tags: ["Notifications and ratings / Driver"]
+      summary: "Список уведомлений по рейсам (водитель)"
+      description: |
+        Лента уведомлений для текущего водителя: смена статуса рейса, отмена, ожидание cargo manager при завершении.
+        Каждый элемент: `id`, `trip_id`, `event_kind`, `step`, `from_status`, `to_status`, `messages` (объект с ключами `en`,`ru`,`uz`,`tr`,`zh`), `read`, `read_at`, `created_at`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: unread_only
+          in: query
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.items[], data.unread_count" }
+        "401": { description: unauthorized }
+
+  /v1/driver/trip-notifications/read-all:
+    post:
+      tags: ["Notifications and ratings / Driver"]
+      summary: "Отметить все уведомления прочитанными (водитель)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200": { description: "data.updated — число обновлённых строк" }
+
+  /v1/driver/trip-notifications/{id}/read:
+    post:
+      tags: ["Notifications and ratings / Driver"]
+      summary: "Отметить уведомление прочитанным (водитель)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: UUID записи уведомления (не trip_id)
+      responses:
+        "200": { description: ok }
+        "404": { description: trip_notification_not_found }
+
+  /v1/driver/trips/{id}/rating:
+    post:
+      tags: ["Notifications and ratings / Driver"]
+      summary: "Оценить cargo manager по завершённому рейсу (1–10)"
+      description: |
+        Доступно только если рейс в статусе `COMPLETED` и груз создан диспетчером (`created_by_type=DISPATCHER`), чтобы определить получателя оценки.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: trip_id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TripRatingRequest" }
+      responses:
+        "200": { description: ok }
+        "400": { description: "trip_rating_not_completed | trip_rating_invalid_stars | trip_rating_cargo_manager_unknown" }
         "403": { description: trip not assigned to you }
         "404": { description: trip not found }
 

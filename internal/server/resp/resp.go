@@ -6,6 +6,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// MsgAllLangs returns localized strings for apiMessages[key] in all five API languages (en, ru, uz, tr, zh).
+func MsgAllLangs(key string) map[string]string {
+	langs := []string{"en", "ru", "uz", "tr", "zh"}
+	out := make(map[string]string, len(langs))
+	for _, l := range langs {
+		out[l] = Msg(key, l)
+	}
+	return out
+}
+
 // Envelope is the unified response structure for ALL API endpoints.
 type Envelope struct {
 	Status      string `json:"status"`      // success | error

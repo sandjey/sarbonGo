@@ -1,6 +1,7 @@
 package trips
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,8 +26,16 @@ type Trip struct {
 	AgreedCurrency string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	// Legacy bilateral fields (optional; unused in new unilateral flow).
+	// PendingConfirmTo + DriverConfirmedAt: при DELIVERED означают «водитель запросил COMPLETED, ждём cargo manager».
 	PendingConfirmTo      *string
 	DriverConfirmedAt     *time.Time
 	DispatcherConfirmedAt *time.Time
+}
+
+// CompletionPending returns true if the trip is DELIVERED and the driver has requested completion but the cargo manager has not confirmed yet.
+func CompletionPending(t *Trip) bool {
+	if t == nil || t.Status != StatusDelivered || t.PendingConfirmTo == nil || t.DriverConfirmedAt == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(*t.PendingConfirmTo), StatusCompleted)
 }

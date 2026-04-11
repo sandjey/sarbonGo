@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"sort"
 	"strconv"
@@ -12,21 +13,27 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/cargo"
+	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
+	"sarbonNew/internal/tripnotif"
+	"sarbonNew/internal/triprating"
 	"sarbonNew/internal/trips"
 )
 
 type TripsHandler struct {
-	logger    *zap.Logger
-	repo      *trips.Repo
-	cargoRepo *cargo.Repo
-	drivers *drivers.Repo
+	logger      *zap.Logger
+	repo        *trips.Repo
+	cargoRepo   *cargo.Repo
+	drivers     *drivers.Repo
+	dispatchers *dispatchers.Repo
+	notif       *tripnotif.Repo
+	rating      *triprating.Repo
 }
 
-func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo) *TripsHandler {
-	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo, drivers: driversRepo}
+func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo, dispatchersRepo *dispatchers.Repo, notif *tripnotif.Repo, rating *triprating.Repo) *TripsHandler {
+	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo, drivers: driversRepo, dispatchers: dispatchersRepo, notif: notif, rating: rating}
 }
 
 func dispatcherOwnsCargo(c *cargo.Cargo, dispatcherID uuid.UUID, companyID *uuid.UUID) bool {
@@ -504,9 +511,18 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
+	tBefore, err := h.repo.GetByID(ctx, tripID)
+	if err != nil || tBefore == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
+		return
+	}
 	var driverID uuid.UUID
 	if !asDispatcher {
 		driverID = c.MustGet(mw.CtxDriverID).(uuid.UUID)
+		if tBefore.DriverID == nil || *tBefore.DriverID != driverID {
+			resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
+			return
+		}
 	}
 	if asDispatcher {
 		dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
@@ -516,15 +532,31 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 				companyID = &u
 			}
 		}
-		t0, err := h.repo.GetByID(ctx, tripID)
-		if err != nil || t0 == nil {
-			resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
-			return
-		}
-		cargoObj, _ := h.cargoRepo.GetByID(ctx, t0.CargoID, false)
+		cargoObj, _ := h.cargoRepo.GetByID(ctx, tBefore.CargoID, false)
 		if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
 			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 			return
+		}
+		// CARGO_MANAGER may only confirm closing the trip (COMPLETED), after the driver requested it — not IN_TRANSIT / DELIVERED steps.
+		if h.dispatchers != nil {
+			dRec, err := h.dispatchers.FindByID(ctx, dispID)
+			if err != nil {
+				if errors.Is(err, dispatchers.ErrNotFound) {
+					resp.ErrorLang(c, http.StatusForbidden, "forbidden")
+					return
+				}
+				h.logger.Error("dispatcher profile for trip confirm", zap.Error(err))
+				resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+				return
+			}
+			role := ""
+			if dRec != nil && dRec.ManagerRole != nil {
+				role = strings.TrimSpace(*dRec.ManagerRole)
+			}
+			if strings.EqualFold(role, dispatchers.ManagerRoleCargoManager) && !trips.CompletionPending(tBefore) {
+				resp.ErrorLang(c, http.StatusForbidden, "trip_cargo_manager_completed_only")
+				return
+			}
 		}
 	}
 
@@ -545,6 +577,10 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 			resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
 		case trips.ErrInvalidTransition:
 			resp.ErrorLang(c, http.StatusBadRequest, "invalid_status_transition")
+		case trips.ErrTripCompletionNeedsDriverFirst:
+			resp.ErrorLang(c, http.StatusBadRequest, "trip_completion_needs_driver_first")
+		case trips.ErrTripCompletionAlreadyPending:
+			resp.ErrorLang(c, http.StatusBadRequest, "trip_completion_already_pending")
 		default:
 			h.logger.Error("confirm transition", zap.Error(err))
 			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
@@ -574,6 +610,7 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
+	h.notifyTripTransition(ctx, tBefore, tr)
 	resp.OKLang(c, "ok", toTripResp(tr))
 }
 
@@ -676,6 +713,7 @@ func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool, driverRe
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
+	h.notifyTripCancelled(ctx, t)
 	resp.OKLang(c, "ok", gin.H{
 		"status":   "cancelled",
 		"trip_id":  tripID.String(),
@@ -788,6 +826,9 @@ func toTripResp(t *trips.Trip) gin.H {
 	}
 	if t.DispatcherConfirmedAt != nil {
 		res["dispatcher_confirmed_at"] = t.DispatcherConfirmedAt
+	}
+	if trips.CompletionPending(t) {
+		res["completion_awaiting_dispatcher_confirm"] = true
 	}
 	res["next_status"] = trips.NextStatus(t.Status)
 	return res

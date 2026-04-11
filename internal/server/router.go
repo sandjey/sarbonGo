@@ -39,6 +39,8 @@ import (
 	"sarbonNew/internal/server/swaggerui"
 	"sarbonNew/internal/store"
 	"sarbonNew/internal/telegram"
+	"sarbonNew/internal/tripnotif"
+	"sarbonNew/internal/triprating"
 	"sarbonNew/internal/trips"
 )
 
@@ -98,6 +100,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	appusersRepo := appusers.NewRepo(deps.PG)
 	cargoRepo := cargo.NewRepo(deps.PG)
 	tripsRepo := trips.NewRepo(deps.PG)
+	tripNotifRepo := tripnotif.NewRepo(deps.PG)
+	tripRatingRepo := triprating.NewRepo(deps.PG)
 	cargoDriversRepo := cargodrivers.NewRepo(deps.PG)
 	favRepo := favorites.NewRepo(deps.PG)
 	dcrRepo := dispatchercompanies.NewRepo(deps.PG)
@@ -161,7 +165,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverDispCatalogH := handlers.NewDriverDispatchersCatalogHandler(logger, dispatchersRepo)
 	d2dInvRepo := drivertodispatcherinvitations.NewRepo(deps.PG)
 	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo)
-	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo)
+	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo, dispatchersRepo, tripNotifRepo, tripRatingRepo)
 
 	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo, favRepo)
 
@@ -341,6 +345,10 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverAuthed.POST("/trips/:id/confirm", tripsH.DriverConfirm)
 	driverAuthed.POST("/trips/:id/reject", tripsH.DriverReject)
 	driverAuthed.POST("/trips/:id/cancel", tripsH.CancelTripDriver)
+	driverAuthed.GET("/trip-notifications", tripsH.ListTripNotificationsDriver)
+	driverAuthed.POST("/trip-notifications/read-all", tripsH.MarkAllTripNotificationsReadDriver)
+	driverAuthed.POST("/trip-notifications/:id/read", tripsH.MarkTripNotificationReadDriver)
+	driverAuthed.POST("/trips/:id/rating", tripsH.PostDriverTripRating)
 	driverAuthed.GET("/driver-invitations", driverInvH.ListInvitations)
 	driverAuthed.POST("/driver-invitations/accept", driverInvH.Accept)
 	driverAuthed.POST("/driver-invitations/decline", driverInvH.Decline)
@@ -409,6 +417,10 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.POST("/trips/:id/confirm-transition", tripsH.ConfirmTransitionDispatcher)
 	dispAuthed.POST("/trips/:id/cancel", tripsH.CancelTripDispatcher)
 	dispAuthed.GET("/trips/:id/state", tripsH.TripStateDispatcher)
+	dispAuthed.GET("/trip-notifications", tripsH.ListTripNotificationsDispatcher)
+	dispAuthed.POST("/trip-notifications/read-all", tripsH.MarkAllTripNotificationsReadDispatcher)
+	dispAuthed.POST("/trip-notifications/:id/read", tripsH.MarkTripNotificationReadDispatcher)
+	dispAuthed.POST("/trips/:id/rating", tripsH.PostDispatcherTripRating)
 	dispAuthed.GET("/offers/:id", cargoH.GetOfferDispatcher)
 	dispAuthed.POST("/offers/:id/accept", cargoH.AcceptOffer)
 	dispAuthed.POST("/offers/:id/reject", cargoH.RejectOfferDispatcher)
