@@ -11,9 +11,11 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/dispatchercompanies"
+	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/domain"
 	"sarbonNew/internal/driverinvitations"
 	"sarbonNew/internal/drivers"
+	"sarbonNew/internal/drivertodispatcherinvitations"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/userstream"
@@ -22,18 +24,20 @@ import (
 type DriverInvitationsHandler struct {
 	logger *zap.Logger
 	repo   *driverinvitations.Repo
+	d2d    *drivertodispatcherinvitations.Repo
 	dcr    *dispatchercompanies.Repo
 	drv    *drivers.Repo
+	disp   *dispatchers.Repo
 	stream *userstream.Hub
 }
 
-func NewDriverInvitationsHandler(logger *zap.Logger, repo *driverinvitations.Repo, dcr *dispatchercompanies.Repo, drv *drivers.Repo, stream *userstream.Hub) *DriverInvitationsHandler {
-	return &DriverInvitationsHandler{logger: logger, repo: repo, dcr: dcr, drv: drv, stream: stream}
+func NewDriverInvitationsHandler(logger *zap.Logger, repo *driverinvitations.Repo, d2d *drivertodispatcherinvitations.Repo, dcr *dispatchercompanies.Repo, drv *drivers.Repo, disp *dispatchers.Repo, stream *userstream.Hub) *DriverInvitationsHandler {
+	return &DriverInvitationsHandler{logger: logger, repo: repo, d2d: d2d, dcr: dcr, drv: drv, disp: disp, stream: stream}
 }
 
 // CreateDriverInvitationReq body for POST /v1/dispatchers/companies/:companyId/driver-invitations
 type CreateDriverInvitationReq struct {
-	Phone string `json:"phone" binding:"required"`
+	DriverID uuid.UUID `json:"driver_id" binding:"required"`
 }
 
 // CreateDriverInvitation creates invitation for driver by phone (dispatcher with company access).
@@ -54,21 +58,22 @@ func (h *DriverInvitationsHandler) Create(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
-	phone := strings.TrimSpace(req.Phone)
-	if phone == "" {
-		resp.ErrorLang(c, http.StatusBadRequest, "phone_required")
+	if req.DriverID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
 		return
 	}
-	drv, err := h.drv.FindByPhoneNormalized(c.Request.Context(), phone)
+	drv, err := h.drv.FindByID(c.Request.Context(), req.DriverID)
 	if err != nil {
 		h.logger.Error("driver invitation create check", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
 	}
-	if drv != nil {
-		phone = strings.TrimSpace(drv.Phone)
+	if drv == nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "driver_not_found")
+		return
 	}
-	if drv != nil && drv.CompanyID != nil && *drv.CompanyID == companyID.String() {
+	phone := strings.TrimSpace(drv.Phone)
+	if drv.CompanyID != nil && *drv.CompanyID == companyID.String() {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_in_company")
 		return
 	}
@@ -91,13 +96,12 @@ func (h *DriverInvitationsHandler) Create(c *gin.Context) {
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"token": token, "expires_in_hours": 168})
 }
 
-// CreateForFreelanceReq body for POST /v1/dispatchers/driver-invitations — phone или driver_id (найти водителя через GET .../drivers/find).
+// CreateForFreelanceReq body for POST /v1/dispatchers/driver-invitations — только driver_id.
 type CreateForFreelanceReq struct {
-	Phone    string     `json:"phone"`
-	DriverID *uuid.UUID `json:"driver_id"`
+	DriverID uuid.UUID `json:"driver_id" binding:"required"`
 }
 
-// CreateForFreelance creates driver invitation as freelance (no company). Можно передать phone или driver_id (после поиска через find).
+// CreateForFreelance creates driver invitation as freelance (no company) by driver_id.
 func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
 	var req CreateForFreelanceReq
@@ -105,31 +109,21 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
-	phone := strings.TrimSpace(req.Phone)
-	if req.DriverID != nil && *req.DriverID != uuid.Nil {
-		drv, err := h.drv.FindByID(c.Request.Context(), *req.DriverID)
-		if err != nil || drv == nil {
-			resp.ErrorLang(c, http.StatusBadRequest, "driver_not_found")
-			return
-		}
-		phone = strings.TrimSpace(drv.Phone)
-	}
-	if phone == "" {
-		resp.ErrorLang(c, http.StatusBadRequest, "phone_or_driver_id_required")
+	if req.DriverID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
 		return
 	}
-	drv, err := h.drv.FindByPhoneNormalized(c.Request.Context(), phone)
+	drv, err := h.drv.FindByID(c.Request.Context(), req.DriverID)
 	if err != nil {
 		h.logger.Error("driver invitation create freelance check", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
 	}
 	if drv == nil {
-		// Phone not found in drivers table.
 		resp.ErrorLang(c, http.StatusBadRequest, "driver_not_found")
 		return
 	}
-	phone = strings.TrimSpace(drv.Phone)
+	phone := strings.TrimSpace(drv.Phone)
 	if drv.FreelancerID != nil && *drv.FreelancerID == dispatcherID.String() {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_accepted_your_invitation")
 		return
@@ -226,6 +220,116 @@ func (h *DriverInvitationsHandler) ListSent(c *gin.Context) {
 		items = append(items, item)
 	}
 	resp.OKLang(c, "ok", gin.H{"items": items})
+}
+
+// ListConnectionOffers returns one list endpoint for connection offers with direction filter.
+// GET /v1/dispatchers/connection-offers?direction=incoming|outgoing|all
+func (h *DriverInvitationsHandler) ListConnectionOffers(c *gin.Context) {
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	direction := strings.ToLower(strings.TrimSpace(c.DefaultQuery("direction", "all")))
+	switch direction {
+	case "all", "incoming", "outgoing":
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	items := make([]gin.H, 0)
+
+	if direction == "all" || direction == "outgoing" {
+		list, err := h.repo.ListByInvitedBy(c.Request.Context(), dispatcherID)
+		if err != nil {
+			h.logger.Error("connection offers list outgoing", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_invitations")
+			return
+		}
+		for _, inv := range list {
+			item := gin.H{
+				"direction":       "outgoing",
+				"token":           inv.Token,
+				"phone":           inv.Phone,
+				"recipient_phone": inv.Phone,
+				"status":          driverinvitations.EffectiveStatus(inv),
+				"expires_at":      inv.ExpiresAt,
+				"created_at":      inv.CreatedAt,
+				"invited_by":      inv.InvitedBy.String(),
+			}
+			if inv.RespondedAt != nil {
+				item["responded_at"] = inv.RespondedAt
+			}
+			if inv.CompanyID != nil && *inv.CompanyID != uuid.Nil {
+				item["type"] = "company"
+				item["company_id"] = inv.CompanyID.String()
+			} else {
+				item["type"] = "freelance"
+				if inv.InvitedByDispatcherID != nil {
+					item["dispatcher_id"] = inv.InvitedByDispatcherID.String()
+				}
+			}
+			items = append(items, item)
+		}
+	}
+
+	if direction == "all" || direction == "incoming" {
+		if h.disp == nil || h.d2d == nil {
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+		if err != nil || disp == nil {
+			resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+			return
+		}
+		list, err := h.d2d.ListByDispatcherPhone(c.Request.Context(), disp.Phone)
+		if err != nil {
+			h.logger.Error("connection offers list incoming", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_invitations")
+			return
+		}
+		for _, inv := range list {
+			item := gin.H{
+				"direction":        "incoming",
+				"token":            inv.Token,
+				"driver_id":        inv.DriverID.String(),
+				"dispatcher_phone": inv.DispatcherPhone,
+				"from_driver_id":   inv.DriverID.String(),
+				"status":           drivertodispatcherinvitations.EffectiveStatus(inv),
+				"expires_at":       inv.ExpiresAt,
+				"created_at":       inv.CreatedAt,
+			}
+			if inv.RespondedAt != nil {
+				item["responded_at"] = inv.RespondedAt
+			}
+			drv, _ := h.drv.FindByID(c.Request.Context(), inv.DriverID)
+			if drv != nil {
+				item["driver_name"] = drv.Name
+				item["driver_phone"] = drv.Phone
+			}
+			items = append(items, item)
+		}
+	}
+
+	resp.OKLang(c, "ok", gin.H{"direction": direction, "items": items})
+}
+
+// GetMyDriver returns one linked driver by ID for current dispatcher.
+// GET /v1/dispatchers/drivers/:driverId
+func (h *DriverInvitationsHandler) GetMyDriver(c *gin.Context) {
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	driverID, err := uuid.Parse(c.Param("driverId"))
+	if err != nil || driverID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
+		return
+	}
+	drv, err := h.drv.FindByID(c.Request.Context(), driverID)
+	if err != nil || drv == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
+		return
+	}
+	if drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String() {
+		resp.ErrorLang(c, http.StatusForbidden, "driver_not_linked")
+		return
+	}
+	resp.OKLang(c, "ok", gin.H{"driver": drv})
 }
 
 // UnlinkDriver removes driver from dispatcher's list (sets driver.freelancer_id = NULL). Водитель должен быть принят по приглашению (freelancer_id = я).

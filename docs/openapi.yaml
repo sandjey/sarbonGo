@@ -145,8 +145,12 @@ tags:
     description: "Избранные водители Driver Manager: add/list/delete через /v1/dispatchers/driver-likes."
   - name: "Driver Manager / Notifications"
     description: "SSE-уведомления Driver Manager о смене данных водителя (когда меняет водитель или диспетчер)."
-  - name: "Driver Manager / Invitations"
-    description: "Приглашения водитель↔диспетчер: пригласить водителя, история приглашений, приглашения от водителей, принятие/отказ."
+  - name: "Driver Manager / Connection offer"
+    description: |
+      Connection offer (связь водитель ↔ driver manager, не cargo offer):
+      - отправить offer водителю;
+      - принять/отклонить входящий offer от водителя;
+      - смотреть outgoing/incoming списки offers.
   - name: "Driver Manager / Drivers catalog"
     description: "Каталог/поиск водителей (по телефону, фильтры, гео) для дальнейших приглашений."
   - name: "Driver Manager / My drivers"
@@ -3482,18 +3486,20 @@ paths:
 
   /v1/dispatchers/driver-invitations:
     get:
-      tags: ["Driver Manager / Invitations"]
-      summary: "Список отправленных приглашений (диспетчер)"
+      deprecated: true
+      tags: ["Driver Manager / Connection offer"]
+      summary: "Список outgoing connection offers (deprecated)"
       description: |
-        **Диспетчер:** список приглашений, которые **я отправил** (по компании и фриланс), **включая историю**: принятые, отклонённые, отменённые, истёкшие (status=expired для ещё не обработанных после expires_at). В ответе data.items: token, phone, recipient_phone, type (company | freelance), company_id или dispatcher_id, invited_by (UUID диспетчера-отправителя), status (pending | accepted | declined | cancelled | expired), expires_at, created_at, responded_at (если есть). Отменить только pending: DELETE .../driver-invitations/:token.
+        Используйте `GET /v1/dispatchers/connection-offers?direction=outgoing`.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       responses:
         "200": { description: "data.items — массив приглашений (token, phone, type, status, invited_by, company_id/dispatcher_id, expires_at, created_at, responded_at)" }
     post:
-      tags: ["Driver Manager / Invitations"]
+      tags: ["Driver Manager / Connection offer"]
       summary: "Отправить приглашение водителю (фриланс — без компании)"
       description: |
-        **Фриланс-диспетчер:** пригласить водителя. Передайте **phone** (номер телефона) **или** **driver_id** (UUID водителя из поиска GET /v1/dispatchers/drivers/find). Достаточно одного из полей. В ответе — token; передать водителю (чат/ссылка). Водитель: GET /v1/driver/driver-invitations → список; POST /v1/driver/driver-invitations/accept (token) или POST .../decline (token). После принятия у водителя freelancer_id = текущий диспетчер. X-User-Token (dispatcher).
+        **Фриланс-диспетчер:** connection offer водителю только по **driver_id** (UUID водителя из поиска GET /v1/dispatchers/drivers/find).
+        Отправка по номеру телефона удалена.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
         required: true
@@ -3501,26 +3507,19 @@ paths:
           application/json:
             schema:
               type: object
+              required: [driver_id]
               properties:
-                phone: { type: string, example: "+998901234567", description: "Номер телефона водителя (если не указан driver_id)" }
                 driver_id: { type: string, format: uuid, description: "UUID водителя из поиска GET .../drivers/find (приглашение по id)" }
             example:
-              phone: "+998901234567"
-            examples:
-              by_phone:
-                summary: "По номеру телефона"
-                value: { phone: "+998901234567" }
-              by_driver_id:
-                summary: "По ID водителя (после поиска)"
-                value: { driver_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+              driver_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
       responses:
         "201": { description: "data.token, data.expires_in_hours" }
-        "400": { description: "Неверное тело; нет phone и driver_id; водитель не найден по номеру; driver_id не существует" }
+        "400": { description: "Неверное тело; driver_id не существует" }
         "409": { description: "Неистёкшее приглашение на этот номер уже отправлено (driver_invitation_already_pending)" }
 
   /v1/dispatchers/driver-invitations/{token}:
     delete:
-      tags: ["Driver Manager / Invitations"]
+      tags: ["Driver Manager / Connection offer"]
       summary: "Отменить приглашение (диспетчер)"
       description: |
         **Диспетчер:** отменить (отозвать) отправленное приглашение. Можно отменить только своё приглашение. token — из GET /v1/dispatchers/driver-invitations.
@@ -3534,6 +3533,26 @@ paths:
         "200": { description: "data.message = cancelled" }
         "403": { description: "not your invitation" }
         "404": { description: "invitation not found or expired" }
+
+  /v1/dispatchers/connection-offers:
+    get:
+      tags: ["Driver Manager / Connection offer"]
+      summary: "Список connection offers (incoming/outgoing)"
+      description: |
+        Единый список connection offers между driver manager и водителями.
+        Параметр `direction`:
+        - `outgoing` — offers, которые отправил диспетчер водителям;
+        - `incoming` — offers, которые пришли диспетчеру от водителей;
+        - `all` — оба направления (по умолчанию).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: direction
+          in: query
+          required: false
+          schema: { type: string, enum: [all, incoming, outgoing], default: all }
+      responses:
+        "200": { description: "data.direction, data.items[]" }
+        "400": { description: "invalid direction" }
 
   /v1/dispatchers/drivers/find:
     get:
@@ -3596,7 +3615,7 @@ paths:
       summary: "Общий список водителей (каталог, с фильтрами и пагинацией)"
       description: |
         **Фриланс-диспетчер:** общий каталог всех водителей в системе (не только тех, кто уже принял ваше приглашение). Можно использовать для подбора новых водителей по параметрам и затем:
-        - отправить приглашение: POST /v1/dispatchers/driver-invitations (body: phone или driver_id);
+        - отправить connection offer: POST /v1/dispatchers/driver-invitations (body: driver_id);
         - отправлять офферы/приглашения по грузам через API офферов.
 
         **Фильтры:** phone, name, work_status, truck_type (power_plate_type), driver_type, account_status, has_photo.
@@ -3661,6 +3680,23 @@ paths:
         "200": { description: "data.items — массив водителей со всеми данными, data.total/page/limit/total_pages/has_next — мета пагинации" }
 
   /v1/dispatchers/drivers/{driverId}:
+    get:
+      tags: ["Driver Manager / My drivers"]
+      summary: "Получить одного моего водителя по ID"
+      description: |
+        **Диспетчер:** вернуть полный профиль одного водителя по `driverId`.
+        Доступно только если водитель привязан к текущему диспетчеру (`freelancer_id = me`).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: driverId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.driver — объект водителя" }
+        "400": { description: invalid_driver_id }
+        "403": { description: driver_not_linked }
+        "404": { description: driver_not_found }
     patch:
       tags: ["Driver Manager / My drivers"]
       summary: "Изменить данные своего водителя (кроме имени и телефона)"
@@ -3783,9 +3819,9 @@ paths:
 
   /v1/dispatchers/companies/{companyId}/driver-invitations:
     post:
-      tags: ["Driver Manager / Invitations"]
-      summary: "Пригласить водителя в компанию (по телефону)"
-      description: "Тело: phone. В ответе — token. Водитель принимает через POST /v1/driver/driver-invitations/accept."
+      tags: ["Driver Manager / Connection offer"]
+      summary: "Отправить company connection offer водителю"
+      description: "Тело: driver_id. В ответе — token. Водитель принимает через POST /v1/driver/driver-invitations/accept."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: companyId
@@ -3799,10 +3835,10 @@ paths:
             schema:
               type: object
               properties:
-                phone: { type: string, example: "+998901234567" }
-              required: [phone]
+                driver_id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
+              required: [driver_id]
             example:
-              phone: "+998971234567"
+              driver_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
       responses:
         "201": { description: "data.token, data.expires_in_hours" }
         "403": { description: access denied }
@@ -5738,10 +5774,11 @@ paths:
 
   /v1/dispatchers/invitations-from-drivers:
     get:
-      tags: ["Driver Manager / Invitations"]
-      summary: "Приглашения от водителей (диспетчер)"
+      deprecated: true
+      tags: ["Driver Manager / Connection offer"]
+      summary: "Incoming connection offers от водителей (deprecated)"
       description: |
-        **Диспетчер:** список приглашений, которые **водители отправили мне** (на мой номер), **включая историю**. data.items: token, from_driver_id, driver_id, driver_name, driver_phone, dispatcher_phone, status, expires_at, created_at, responded_at. По активному pending — accept/decline.
+        Используйте `GET /v1/dispatchers/connection-offers?direction=incoming`.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       responses:
         "200":
@@ -5749,7 +5786,7 @@ paths:
         "401": { description: dispatcher not found }
   /v1/dispatchers/invitations-from-drivers/accept:
     post:
-      tags: ["Driver Manager / Invitations"]
+      tags: ["Driver Manager / Connection offer"]
       summary: "Принять приглашение от водителя (диспетчер)"
       description: |
         **Диспетчер:** принять приглашение от водителя. Тело: token. Приглашение должно быть на мой номер. После принятия у водителя устанавливается freelancer_id = я; водитель появится в GET /v1/dispatchers/drivers.
@@ -5769,7 +5806,7 @@ paths:
         "403": { description: invitation was sent to another phone }
   /v1/dispatchers/invitations-from-drivers/decline:
     post:
-      tags: ["Driver Manager / Invitations"]
+      tags: ["Driver Manager / Connection offer"]
       summary: "Отказать от приглашения водителя (диспетчер)"
       description: "Тело: token. Приглашение должно быть на мой номер. Статус declined; запись остаётся в истории."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
