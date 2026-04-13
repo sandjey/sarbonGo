@@ -15,12 +15,14 @@ type Hub struct {
 	mu    sync.RWMutex
 	notif map[string][]chan []byte
 	trips map[string][]chan []byte
+	drv   map[string][]chan []byte
 }
 
 func NewHub() *Hub {
 	return &Hub{
 		notif: make(map[string][]chan []byte),
 		trips: make(map[string][]chan []byte),
+		drv:   make(map[string][]chan []byte),
 	}
 }
 
@@ -52,6 +54,19 @@ func (h *Hub) SubscribeTripStatus(recipientKind string, recipientID uuid.UUID) (
 	h.trips[k] = append(h.trips[k], c)
 	h.mu.Unlock()
 	return c, func() { h.remove(h.trips, k, c) }
+}
+
+// SubscribeDriverUpdates registers a subscriber for driver profile/vehicle update notifications.
+func (h *Hub) SubscribeDriverUpdates(recipientKind string, recipientID uuid.UUID) (ch <-chan []byte, unsubscribe func()) {
+	if h == nil || recipientID == uuid.Nil {
+		return nil, func() {}
+	}
+	c := make(chan []byte, subChanBuf)
+	k := subKey(recipientKind, recipientID)
+	h.mu.Lock()
+	h.drv[k] = append(h.drv[k], c)
+	h.mu.Unlock()
+	return c, func() { h.remove(h.drv, k, c) }
 }
 
 func (h *Hub) remove(m map[string][]chan []byte, k string, c chan []byte) {
@@ -91,6 +106,18 @@ func (h *Hub) PublishTripStatus(recipientKind string, recipientID uuid.UUID, v a
 		return
 	}
 	h.broadcast(h.trips, subKey(recipientKind, recipientID), b)
+}
+
+// PublishDriverUpdate sends one SSE payload to all driver-update stream subscribers for this recipient.
+func (h *Hub) PublishDriverUpdate(recipientKind string, recipientID uuid.UUID, v any) {
+	if h == nil || recipientID == uuid.Nil {
+		return
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	h.broadcast(h.drv, subKey(recipientKind, recipientID), b)
 }
 
 func (h *Hub) broadcast(m map[string][]chan []byte, k string, payload []byte) {

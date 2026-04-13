@@ -139,12 +139,12 @@ tags:
     description: "Регистрация диспетчера (registration/complete) для роли Driver Manager."
   - name: "Driver Manager / Profile"
     description: "Профиль диспетчера: просмотр, изменение, фото, пароль, смена телефона."
-  - name: "Driver Manager / Favorites"
-    description: "Избранные водители и избранные грузы (для подбора под водителей)."
   - name: "Driver Manager / Cargo likes"
     description: "Избранные грузы Driver Manager: add/list/delete через /v1/dispatchers/cargo-likes."
   - name: "Driver Manager / Driver likes"
     description: "Избранные водители Driver Manager: add/list/delete через /v1/dispatchers/driver-likes."
+  - name: "Driver Manager / Notifications"
+    description: "SSE-уведомления Driver Manager о смене данных водителя (когда меняет водитель или диспетчер)."
   - name: "Driver Manager / Invitations"
     description: "Приглашения водитель↔диспетчер: пригласить водителя, история приглашений, приглашения от водителей, принятие/отказ."
   - name: "Driver Manager / Drivers catalog"
@@ -548,6 +548,9 @@ components:
           enum: ["pending", "approved"]
           description: "pending — KYC не полный или не все scan_status=true; approved — полный KYC (is_full)."
           example: "pending"
+        has_trips:
+          type: boolean
+          description: "true если у водителя есть активный рейс (статус trip не COMPLETED/CANCELLED), иначе false."
         has_photo: { type: boolean, description: "true если загружено фото в БД (получить через GET /v1/driver/profile/photo). Фото необязательно при регистрации; можно добавить/обновить/удалить когда угодно." }
       required: [id, phone, created_at, updated_at]
     Dispatcher:
@@ -3658,6 +3661,53 @@ paths:
         "200": { description: "data.items — массив водителей со всеми данными, data.total/page/limit/total_pages/has_next — мета пагинации" }
 
   /v1/dispatchers/drivers/{driverId}:
+    patch:
+      tags: ["Driver Manager / My drivers"]
+      summary: "Изменить данные своего водителя (кроме имени и телефона)"
+      description: |
+        **Диспетчер (cargo/driver manager):** может менять данные привязанного водителя (`freelancer_id = текущий диспетчер`).
+        Ограничение: поля `name` и `phone` не редактируются этим методом.
+        Поддерживает обновление профиля + тягача + прицепа одним PATCH.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: driverId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                work_status: { type: string, example: "available" }
+                driver_passport_series: { type: string }
+                driver_passport_number: { type: string }
+                driver_pinfl: { type: string }
+                driver_scan_status: { type: boolean }
+                driver_type: { type: string, example: "freelancer" }
+                account_status: { type: string, example: "active" }
+                driver_owner: { type: boolean }
+                kyc_status: { type: string, example: "pending" }
+                registration_step: { type: string }
+                registration_status: { type: string, example: "BASIC" }
+                power_plate_type: { type: string, example: "TRACTOR" }
+                power_plate_number: { type: string }
+                power_tech_series: { type: string }
+                power_tech_number: { type: string }
+                power_owner_name: { type: string }
+                power_scan_status: { type: boolean }
+                trailer_plate_type: { type: string, example: "REEFER" }
+                trailer_plate_number: { type: string }
+                trailer_tech_series: { type: string }
+                trailer_tech_number: { type: string }
+                trailer_owner_name: { type: string }
+                trailer_scan_status: { type: boolean }
+      responses:
+        "200": { description: "data.event = updated, data.driver — обновлённый объект водителя" }
+        "400": { description: "invalid payload / validation errors" }
+        "403": { description: "driver_must_accept_invitation" }
+        "404": { description: "driver_not_found" }
     delete:
       tags: ["Driver Manager / My drivers"]
       summary: "Удалить водителя из списка (отвязать)"
@@ -4005,6 +4055,28 @@ paths:
       responses:
         "200":
           description: "text/event-stream; `data:` — #/components/schemas/SSETripStatusEvent"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
+
+  /v1/dispatchers/sse/driver-updates:
+    get:
+      tags: ["Driver Manager / Notifications"]
+      summary: "SSE поток изменений данных моих водителей"
+      description: |
+        Возвращает `text/event-stream` с событиями `kind=driver_update` для текущего диспетчера,
+        когда водитель меняет свой профиль/тягач/прицеп или когда диспетчер меняет данные водителя.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          description: JWT access token (для браузерного EventSource, если нельзя передать X-User-Token заголовком)
+          schema: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream; `data:` содержит driver_update payload"
           content:
             text/event-stream:
               schema: { type: string }
@@ -4581,7 +4653,7 @@ paths:
   /v1/dispatchers/favorite-drivers:
     get:
       deprecated: true
-      tags: ["Driver Manager / Favorites"]
+      tags: ["Driver Manager / Driver likes"]
       summary: "Избранные водители (deprecated — используйте GET /v1/dispatchers/driver-likes)"
       description: |
         Список водителей, добавленных текущим фриланс-диспетчером в избранное.
@@ -4640,7 +4712,7 @@ paths:
                 zh: { summary: "中文", value: { status: "error", code: 500, description: "获取收藏失败", data: null } }
     post:
       deprecated: true
-      tags: ["Driver Manager / Favorites"]
+      tags: ["Driver Manager / Driver likes"]
       summary: "Добавить водителя в избранное (deprecated — используйте POST /v1/dispatchers/driver-likes)"
       description: |
         Добавляет `driver_id` в избранное текущего фриланс-диспетчера.
@@ -4688,7 +4760,7 @@ paths:
   /v1/dispatchers/favorite-drivers/{driverId}:
     delete:
       deprecated: true
-      tags: ["Driver Manager / Favorites"]
+      tags: ["Driver Manager / Driver likes"]
       summary: "Удалить водителя из избранного (deprecated — используйте DELETE /v1/dispatchers/driver-likes/{driverId})"
       description: |
         Удаляет `driverId` из избранного текущего фриланс-диспетчера.

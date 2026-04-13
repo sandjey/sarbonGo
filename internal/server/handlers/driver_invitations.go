@@ -11,10 +11,12 @@ import (
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/dispatchercompanies"
+	"sarbonNew/internal/domain"
 	"sarbonNew/internal/driverinvitations"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
+	"sarbonNew/internal/userstream"
 )
 
 type DriverInvitationsHandler struct {
@@ -22,10 +24,11 @@ type DriverInvitationsHandler struct {
 	repo   *driverinvitations.Repo
 	dcr    *dispatchercompanies.Repo
 	drv    *drivers.Repo
+	stream *userstream.Hub
 }
 
-func NewDriverInvitationsHandler(logger *zap.Logger, repo *driverinvitations.Repo, dcr *dispatchercompanies.Repo, drv *drivers.Repo) *DriverInvitationsHandler {
-	return &DriverInvitationsHandler{logger: logger, repo: repo, dcr: dcr, drv: drv}
+func NewDriverInvitationsHandler(logger *zap.Logger, repo *driverinvitations.Repo, dcr *dispatchercompanies.Repo, drv *drivers.Repo, stream *userstream.Hub) *DriverInvitationsHandler {
+	return &DriverInvitationsHandler{logger: logger, repo: repo, dcr: dcr, drv: drv, stream: stream}
 }
 
 // CreateDriverInvitationReq body for POST /v1/dispatchers/companies/:companyId/driver-invitations
@@ -320,6 +323,9 @@ func (h *DriverInvitationsHandler) SetDriverPower(c *gin.Context) {
 		return
 	}
 	updated, _ := h.drv.FindByID(c.Request.Context(), driverID)
+	publishDriverUpdateToManager(h.stream, h.logger, updated, "dispatcher", dispatcherID.String(), "dispatcher.driver.power.put", []string{
+		"power_plate_type", "power_plate_number", "power_tech_series", "power_tech_number", "power_owner_name", "power_scan_status",
+	})
 	resp.OKLang(c, "updated", gin.H{"event": "updated", "driver": updated})
 }
 
@@ -403,6 +409,235 @@ func (h *DriverInvitationsHandler) SetDriverTrailer(c *gin.Context) {
 		return
 	}
 	updated, _ := h.drv.FindByID(c.Request.Context(), driverID)
+	publishDriverUpdateToManager(h.stream, h.logger, updated, "dispatcher", dispatcherID.String(), "dispatcher.driver.trailer.put", []string{
+		"trailer_plate_type", "trailer_plate_number", "trailer_tech_series", "trailer_tech_number", "trailer_owner_name", "trailer_scan_status",
+	})
+	resp.OKLang(c, "updated", gin.H{"event": "updated", "driver": updated})
+}
+
+type PatchMyDriverReq struct {
+	WorkStatus           *string `json:"work_status,omitempty"`
+	DriverPassportSeries *string `json:"driver_passport_series,omitempty"`
+	DriverPassportNumber *string `json:"driver_passport_number,omitempty"`
+	DriverPINFL          *string `json:"driver_pinfl,omitempty"`
+	DriverScanStatus     *bool   `json:"driver_scan_status,omitempty"`
+	DriverType           *string `json:"driver_type,omitempty"`         // company|freelancer|driver
+	AccountStatus        *string `json:"account_status,omitempty"`      // active|... (project-defined)
+	DriverOwner          *bool   `json:"driver_owner,omitempty"`
+	KYCStatus            *string `json:"kyc_status,omitempty"`          // pending|approved|...
+	RegistrationStep     *string `json:"registration_step,omitempty"`   // optional
+	RegistrationStatus   *string `json:"registration_status,omitempty"` // START|BASIC|FULL
+
+	PowerPlateType   *string `json:"power_plate_type,omitempty"`
+	PowerPlateNumber *string `json:"power_plate_number,omitempty"`
+	PowerTechSeries  *string `json:"power_tech_series,omitempty"`
+	PowerTechNumber  *string `json:"power_tech_number,omitempty"`
+	PowerOwnerName   *string `json:"power_owner_name,omitempty"`
+	PowerScanStatus  *bool   `json:"power_scan_status,omitempty"`
+
+	TrailerPlateType   *string `json:"trailer_plate_type,omitempty"`
+	TrailerPlateNumber *string `json:"trailer_plate_number,omitempty"`
+	TrailerTechSeries  *string `json:"trailer_tech_series,omitempty"`
+	TrailerTechNumber  *string `json:"trailer_tech_number,omitempty"`
+	TrailerOwnerName   *string `json:"trailer_owner_name,omitempty"`
+	TrailerScanStatus  *bool   `json:"trailer_scan_status,omitempty"`
+}
+
+// PatchMyDriver allows dispatcher to update linked driver fields (except driver name/phone).
+// PATCH /v1/dispatchers/drivers/:driverId
+func (h *DriverInvitationsHandler) PatchMyDriver(c *gin.Context) {
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	driverID, err := uuid.Parse(c.Param("driverId"))
+	if err != nil || driverID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
+		return
+	}
+	drv, err := h.drv.FindByID(c.Request.Context(), driverID)
+	if err != nil || drv == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
+		return
+	}
+	if drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String() {
+		resp.ErrorLang(c, http.StatusForbidden, "driver_must_accept_invitation")
+		return
+	}
+
+	var req PatchMyDriverReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	trimPtr := func(p **string) {
+		if p == nil || *p == nil {
+			return
+		}
+		v := strings.TrimSpace(**p)
+		if v == "" {
+			*p = nil
+			return
+		}
+		*p = &v
+	}
+	trimPtr(&req.WorkStatus)
+	trimPtr(&req.DriverPassportSeries)
+	trimPtr(&req.DriverPassportNumber)
+	trimPtr(&req.DriverPINFL)
+	trimPtr(&req.DriverType)
+	trimPtr(&req.AccountStatus)
+	trimPtr(&req.KYCStatus)
+	trimPtr(&req.RegistrationStep)
+	trimPtr(&req.RegistrationStatus)
+	trimPtr(&req.PowerPlateType)
+	trimPtr(&req.PowerPlateNumber)
+	trimPtr(&req.PowerTechSeries)
+	trimPtr(&req.PowerTechNumber)
+	trimPtr(&req.PowerOwnerName)
+	trimPtr(&req.TrailerPlateType)
+	trimPtr(&req.TrailerPlateNumber)
+	trimPtr(&req.TrailerTechSeries)
+	trimPtr(&req.TrailerTechNumber)
+	trimPtr(&req.TrailerOwnerName)
+
+	if req.WorkStatus != nil {
+		v := strings.ToLower(*req.WorkStatus)
+		switch v {
+		case "available", "loaded", "busy":
+			req.WorkStatus = &v
+		default:
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_work_status")
+			return
+		}
+	}
+	if req.DriverPassportSeries != nil {
+		if errKey := validatePassportSeries(*req.DriverPassportSeries); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
+	if req.DriverPassportNumber != nil {
+		if errKey := validatePassportNumber(*req.DriverPassportNumber); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
+	if req.DriverPINFL != nil {
+		if errKey := validatePINFL(*req.DriverPINFL); errKey != "" {
+			resp.ErrorLang(c, http.StatusBadRequest, errKey)
+			return
+		}
+	}
+	if req.DriverType != nil {
+		v := strings.ToLower(*req.DriverType)
+		switch domain.DriverType(v) {
+		case domain.DriverTypeCompany, domain.DriverTypeFreelancer, domain.DriverTypeDriver:
+			req.DriverType = &v
+		default:
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_type")
+			return
+		}
+	}
+	if req.PowerPlateType != nil {
+		v := strings.ToUpper(*req.PowerPlateType)
+		if v != "TRUCK" && v != "TRACTOR" {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_power_plate_type")
+			return
+		}
+		req.PowerPlateType = &v
+	}
+	if req.TrailerPlateType != nil {
+		v := strings.ToUpper(*req.TrailerPlateType)
+		power := ""
+		if req.PowerPlateType != nil {
+			power = *req.PowerPlateType
+		} else if drv.PowerPlateType != nil {
+			power = *drv.PowerPlateType
+		}
+		if power != "" {
+			if errKey := validatePowerTrailerTypes(power, v); errKey != "" {
+				resp.ErrorLang(c, http.StatusBadRequest, errKey)
+				return
+			}
+		}
+		req.TrailerPlateType = &v
+	}
+	if req.RegistrationStatus != nil {
+		v := strings.ToUpper(*req.RegistrationStatus)
+		req.RegistrationStatus = &v
+	}
+
+	if err := h.drv.UpdateDriverByDispatcher(c.Request.Context(), driverID, drivers.UpdateDriverByDispatcher{
+		WorkStatus:           req.WorkStatus,
+		DriverPassportSeries: req.DriverPassportSeries,
+		DriverPassportNumber: req.DriverPassportNumber,
+		DriverPINFL:          req.DriverPINFL,
+		DriverScanStatus:     req.DriverScanStatus,
+		DriverType:           req.DriverType,
+		AccountStatus:        req.AccountStatus,
+		DriverOwner:          req.DriverOwner,
+		KYCStatus:            req.KYCStatus,
+		RegistrationStep:     req.RegistrationStep,
+		RegistrationStatus:   req.RegistrationStatus,
+	}); err != nil {
+		h.logger.Error("dispatcher patch my driver", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if err := h.drv.UpdatePowerProfile(c.Request.Context(), driverID, drivers.UpdatePowerProfile{
+		PowerPlateType:   req.PowerPlateType,
+		PowerPlateNumber: req.PowerPlateNumber,
+		PowerTechSeries:  req.PowerTechSeries,
+		PowerTechNumber:  req.PowerTechNumber,
+		PowerOwnerName:   req.PowerOwnerName,
+		PowerScanStatus:  req.PowerScanStatus,
+	}); err != nil {
+		h.logger.Error("dispatcher patch my driver power", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_update_power")
+		return
+	}
+	if err := h.drv.UpdateTrailerProfile(c.Request.Context(), driverID, drivers.UpdateTrailerProfile{
+		TrailerPlateType:   req.TrailerPlateType,
+		TrailerPlateNumber: req.TrailerPlateNumber,
+		TrailerTechSeries:  req.TrailerTechSeries,
+		TrailerTechNumber:  req.TrailerTechNumber,
+		TrailerOwnerName:   req.TrailerOwnerName,
+		TrailerScanStatus:  req.TrailerScanStatus,
+	}); err != nil {
+		h.logger.Error("dispatcher patch my driver trailer", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_update_trailer")
+		return
+	}
+
+	updated, _ := h.drv.FindByID(c.Request.Context(), driverID)
+	changed := make([]string, 0, 24)
+	addChanged := func(name string, set bool) {
+		if set {
+			changed = append(changed, name)
+		}
+	}
+	addChanged("work_status", req.WorkStatus != nil)
+	addChanged("driver_passport_series", req.DriverPassportSeries != nil)
+	addChanged("driver_passport_number", req.DriverPassportNumber != nil)
+	addChanged("driver_pinfl", req.DriverPINFL != nil)
+	addChanged("driver_scan_status", req.DriverScanStatus != nil)
+	addChanged("driver_type", req.DriverType != nil)
+	addChanged("account_status", req.AccountStatus != nil)
+	addChanged("driver_owner", req.DriverOwner != nil)
+	addChanged("kyc_status", req.KYCStatus != nil)
+	addChanged("registration_step", req.RegistrationStep != nil)
+	addChanged("registration_status", req.RegistrationStatus != nil)
+	addChanged("power_plate_type", req.PowerPlateType != nil)
+	addChanged("power_plate_number", req.PowerPlateNumber != nil)
+	addChanged("power_tech_series", req.PowerTechSeries != nil)
+	addChanged("power_tech_number", req.PowerTechNumber != nil)
+	addChanged("power_owner_name", req.PowerOwnerName != nil)
+	addChanged("power_scan_status", req.PowerScanStatus != nil)
+	addChanged("trailer_plate_type", req.TrailerPlateType != nil)
+	addChanged("trailer_plate_number", req.TrailerPlateNumber != nil)
+	addChanged("trailer_tech_series", req.TrailerTechSeries != nil)
+	addChanged("trailer_tech_number", req.TrailerTechNumber != nil)
+	addChanged("trailer_owner_name", req.TrailerOwnerName != nil)
+	addChanged("trailer_scan_status", req.TrailerScanStatus != nil)
+	publishDriverUpdateToManager(h.stream, h.logger, updated, "dispatcher", dispatcherID.String(), "dispatcher.driver.patch", changed)
 	resp.OKLang(c, "updated", gin.H{"event": "updated", "driver": updated})
 }
 

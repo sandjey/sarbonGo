@@ -32,6 +32,13 @@ const driverSelectCols = `
   p.power_plate_type, p.power_plate_number, p.power_tech_series, p.power_tech_number, p.power_owner_name, p.power_scan_status,
   t.trailer_plate_type, t.trailer_plate_number, t.trailer_tech_series, t.trailer_tech_number, t.trailer_owner_name, t.trailer_scan_status,
   d.driver_owner, d.kyc_status,
+  EXISTS (
+    SELECT 1
+    FROM trips tr
+    WHERE tr.driver_id = d.id
+      AND tr.status NOT IN ('COMPLETED', 'CANCELLED')
+    LIMIT 1
+  ) AS has_trips,
   (d.photo_data IS NOT NULL) AS has_photo`
 
 const driverJoinTables = `
@@ -92,6 +99,7 @@ func scanDriver(row pgx.Row) (*Driver, error) {
 		&d.PowerPlateType, &d.PowerPlateNumber, &d.PowerTechSeries, &d.PowerTechNumber, &d.PowerOwnerName, &d.PowerScanStatus,
 		&d.TrailerPlateType, &d.TrailerPlateNumber, &d.TrailerTechSeries, &d.TrailerTechNumber, &d.TrailerOwnerName, &d.TrailerScanStatus,
 		&d.DriverOwner, &d.KYCStatus,
+		&d.HasTrips,
 		&d.HasPhoto,
 	)
 	if err != nil {
@@ -147,6 +155,54 @@ SET name = COALESCE($2, name),
     last_online_at = now()
 WHERE id = $1`
 	_, err := r.pg.Exec(ctx, q, id, u.Name, u.WorkStatus, u.DriverPassportSeries, u.DriverPassportNumber, u.DriverPINFL)
+	return err
+}
+
+// UpdateDriverByDispatcher updates driver fields editable by dispatcher (excluding name/phone).
+type UpdateDriverByDispatcher struct {
+	WorkStatus           *string
+	DriverPassportSeries *string
+	DriverPassportNumber *string
+	DriverPINFL          *string
+	DriverScanStatus     *bool
+	DriverType           *string
+	AccountStatus        *string
+	DriverOwner          *bool
+	KYCStatus            *string
+	RegistrationStep     *string
+	RegistrationStatus   *string
+}
+
+func (r *Repo) UpdateDriverByDispatcher(ctx context.Context, id uuid.UUID, u UpdateDriverByDispatcher) error {
+	const q = `
+UPDATE drivers
+SET work_status = COALESCE($2, work_status),
+    driver_passport_series = COALESCE($3, driver_passport_series),
+    driver_passport_number = COALESCE($4, driver_passport_number),
+    driver_pinfl = COALESCE($5, driver_pinfl),
+    driver_scan_status = COALESCE($6, driver_scan_status),
+    driver_type = COALESCE($7, driver_type),
+    account_status = COALESCE($8, account_status),
+    driver_owner = COALESCE($9, driver_owner),
+    kyc_status = COALESCE($10, kyc_status),
+    registration_step = COALESCE($11, registration_step),
+    registration_status = COALESCE($12, registration_status),
+    updated_at = now(),
+    last_online_at = now()
+WHERE id = $1`
+	_, err := r.pg.Exec(ctx, q, id,
+		u.WorkStatus,
+		u.DriverPassportSeries,
+		u.DriverPassportNumber,
+		u.DriverPINFL,
+		u.DriverScanStatus,
+		u.DriverType,
+		u.AccountStatus,
+		u.DriverOwner,
+		u.KYCStatus,
+		u.RegistrationStep,
+		u.RegistrationStatus,
+	)
 	return err
 }
 

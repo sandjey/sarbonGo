@@ -550,11 +550,11 @@ const swaggerHTML = `<!doctype html>
           'Driver Manager / Auth',
           'Driver Manager / Registration',
           'Driver Manager / Profile',
-          'Driver Manager / Favorites',
           'Driver Manager / Cargo likes',
           'Driver Manager / Driver likes',
           'Driver Manager / Drivers catalog',
           'Driver Manager / My drivers',
+          'Driver Manager / Notifications',
           'Admin / Auth',
           'Admin / Companies',
           'Company / Dispatcher (приглашённый)',
@@ -605,11 +605,11 @@ const swaggerHTML = `<!doctype html>
               'Driver Manager / Auth',
               'Driver Manager / Registration',
               'Driver Manager / Profile',
-              'Driver Manager / Favorites',
               'Driver Manager / Cargo likes',
               'Driver Manager / Driver likes',
               'Driver Manager / Drivers catalog',
               'Driver Manager / My drivers',
+              'Driver Manager / Notifications',
             ]);
             return allowedDispatcherTags.has(t);
           }

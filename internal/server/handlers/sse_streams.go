@@ -114,3 +114,11 @@ func (h *SSEStreamsHandler) DispatcherTripStatusSSE(c *gin.Context) {
 		return h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
 	})
 }
+
+// DispatcherDriverUpdatesSSE GET /v1/dispatchers/sse/driver-updates
+func (h *SSEStreamsHandler) DispatcherDriverUpdatesSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
+	})
+}

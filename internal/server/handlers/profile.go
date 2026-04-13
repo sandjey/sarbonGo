@@ -17,6 +17,7 @@ import (
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/store"
 	"sarbonNew/internal/telegram"
+	"sarbonNew/internal/userstream"
 	"sarbonNew/internal/util"
 )
 
@@ -31,10 +32,11 @@ type ProfileHandler struct {
 	tg          *telegram.GatewayClient
 	otpTTL      time.Duration
 	otpLen      int
+	stream      *userstream.Hub
 }
 
-func NewProfileHandler(logger *zap.Logger, driversRepo *drivers.Repo, displayName *displaynames.Checker, phoneChange *store.PhoneChangeStore, tg *telegram.GatewayClient, otpTTL time.Duration, otpLen int) *ProfileHandler {
-	return &ProfileHandler{logger: logger, drivers: driversRepo, displayName: displayName, phoneChange: phoneChange, tg: tg, otpTTL: otpTTL, otpLen: otpLen}
+func NewProfileHandler(logger *zap.Logger, driversRepo *drivers.Repo, displayName *displaynames.Checker, phoneChange *store.PhoneChangeStore, tg *telegram.GatewayClient, otpTTL time.Duration, otpLen int, stream *userstream.Hub) *ProfileHandler {
+	return &ProfileHandler{logger: logger, drivers: driversRepo, displayName: displayName, phoneChange: phoneChange, tg: tg, otpTTL: otpTTL, otpLen: otpLen, stream: stream}
 }
 
 // GET /v1/driver/profile
@@ -67,6 +69,7 @@ func groupedDriverProfile(d *drivers.Driver) gin.H {
 			"account_status":         d.AccountStatus,
 			"kyc_status":             d.KYCStatus,
 			"driver_owner":           d.DriverOwner,
+			"has_trips":             d.HasTrips,
 			"freelancer_id":          d.FreelancerID,
 			"company_id":             d.CompanyID,
 			"driver_passport_series": d.DriverPassportSeries,
@@ -185,6 +188,23 @@ func (h *ProfileHandler) PatchDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	changed := make([]string, 0, 5)
+	if req.Name != nil {
+		changed = append(changed, "name")
+	}
+	if req.WorkStatus != nil {
+		changed = append(changed, "work_status")
+	}
+	if req.DriverPassportSeries != nil {
+		changed = append(changed, "driver_passport_series")
+	}
+	if req.DriverPassportNumber != nil {
+		changed = append(changed, "driver_passport_number")
+	}
+	if req.DriverPINFL != nil {
+		changed = append(changed, "driver_pinfl")
+	}
+	publishDriverUpdateToManager(h.stream, h.logger, d, "driver", driverID.String(), "driver.profile.patch", changed)
 	resp.OKLang(c, "updated", gin.H{"event": "updated", "driver": d})
 }
 
@@ -353,6 +373,9 @@ func (h *ProfileHandler) PatchPower(c *gin.Context) {
 		return
 	}
 	d, _ := h.drivers.FindByID(c.Request.Context(), driverID)
+	publishDriverUpdateToManager(h.stream, h.logger, d, "driver", driverID.String(), "driver.profile.power.patch", []string{
+		"power_plate_number", "power_tech_series", "power_tech_number", "power_owner_name", "power_scan_status",
+	})
 	resp.OKLang(c, "updated", gin.H{"event": "updated", "driver": d})
 }
 
@@ -401,6 +424,9 @@ func (h *ProfileHandler) PatchTrailer(c *gin.Context) {
 		return
 	}
 	d, _ := h.drivers.FindByID(c.Request.Context(), driverID)
+	publishDriverUpdateToManager(h.stream, h.logger, d, "driver", driverID.String(), "driver.profile.trailer.patch", []string{
+		"trailer_plate_number", "trailer_tech_series", "trailer_tech_number", "trailer_owner_name", "trailer_scan_status",
+	})
 	resp.OKLang(c, "updated", gin.H{"event": "updated", "driver": d})
 }
 
