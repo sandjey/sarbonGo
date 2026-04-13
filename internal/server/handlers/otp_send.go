@@ -26,8 +26,8 @@ func SendOTP(ctx context.Context, tg *telegram.GatewayClient, phone string, ttlS
 		if !util.IsNumeric(u) || len(u) != otpLen {
 			return "", "", errors.New("invalid UNIVERSAL_OTP_CODE: must be numeric and match OTP_LENGTH")
 		}
-		// Universal OTP mode: bypass external gateway and use fixed code for all flows/roles.
-		return u, "universal-otp", nil
+		// Universal OTP remains valid at verification stage (store/isUniversalOTP),
+		// but we still send a real one-time code via gateway for realistic delivery.
 	}
 
 	code, err = util.GenerateNumericOTP(otpLen)

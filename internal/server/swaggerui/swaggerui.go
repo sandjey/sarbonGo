@@ -547,11 +547,14 @@ const swaggerHTML = `<!doctype html>
           'SSE / Cargo manager — Trip status',
           'Cargo Manager / Cargo likes',
           'Cargo Manager / Driver likes',
-          'Driver Manager',
-          'Driver Manager / Invitations',
-          'Driver Manager / My drivers',
-          'Driver Manager / Drivers catalog',
+          'Driver Manager / Auth',
+          'Driver Manager / Registration',
+          'Driver Manager / Profile',
           'Driver Manager / Favorites',
+          'Driver Manager / Cargo likes',
+          'Driver Manager / Driver likes',
+          'Driver Manager / Drivers catalog',
+          'Driver Manager / My drivers',
           'Admin / Auth',
           'Admin / Companies',
           'Company / Dispatcher (приглашённый)',
@@ -597,7 +600,19 @@ const swaggerHTML = `<!doctype html>
             if (!t.startsWith('Drivers /')) return false;
             return !DRIVERS_MOBILE_HIDDEN_TAGS.has(t);
           }
-          if (group === 'dispatchers') return t === 'Driver Manager' || t.startsWith('Driver Manager /');
+          if (group === 'dispatchers') {
+            const allowedDispatcherTags = new Set([
+              'Driver Manager / Auth',
+              'Driver Manager / Registration',
+              'Driver Manager / Profile',
+              'Driver Manager / Favorites',
+              'Driver Manager / Cargo likes',
+              'Driver Manager / Driver likes',
+              'Driver Manager / Drivers catalog',
+              'Driver Manager / My drivers',
+            ]);
+            return allowedDispatcherTags.has(t);
+          }
           if (group === 'admin') return t.startsWith('Admin /');
           if (group === 'cargo') {
             if (t.startsWith('Notifications and ratings / Cargo manager')) return true;

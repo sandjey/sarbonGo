@@ -125,17 +125,41 @@ tags:
   - name: "Cargo Manager / Driver likes"
     description: |
       **Избранные водители (Cargo Manager).** `POST` с `driver_id`, `DELETE /:driverId`, `GET` с `limit`. Предпочтительные пути: `/v1/dispatchers/driver-likes` (алиас: `/favorite-drivers`).
+  - name: "Cargo Manager / Likes"
+    description: |
+      Общая группировка избранного для Cargo Manager:
+      - грузы (`/v1/dispatchers/cargo-likes`)
+      - водители (`/v1/dispatchers/driver-likes`)
   - name: "Driver Manager"
     description: |
-      Роль Driver Manager: добавление/ведение водителей, поиск грузов для своих водителей, приглашения и рекомендации.
-  - name: "Driver Manager / Invitations"
-    description: "Приглашения водитель↔диспетчер: пригласить водителя, история приглашений, приглашения от водителей, принятие/отказ."
-  - name: "Driver Manager / My drivers"
-    description: "Мои водители: список, отвязка, управление данными транспорта (тягач/прицеп) для привязанных водителей."
-  - name: "Driver Manager / Drivers catalog"
-    description: "Каталог/поиск водителей (по телефону, фильтры, гео) для дальнейших приглашений."
+      Роль Driver Manager: добавление/ведение водителей, приглашения, офферы и сопровождение рейсов вместе с водителем.
+  - name: "Driver Manager / Auth"
+    description: "Авторизация диспетчера (OTP/password/refresh/logout) для роли Driver Manager."
+  - name: "Driver Manager / Registration"
+    description: "Регистрация диспетчера (registration/complete) для роли Driver Manager."
+  - name: "Driver Manager / Profile"
+    description: "Профиль диспетчера: просмотр, изменение, фото, пароль, смена телефона."
   - name: "Driver Manager / Favorites"
     description: "Избранные водители и избранные грузы (для подбора под водителей)."
+  - name: "Driver Manager / Cargo likes"
+    description: "Избранные грузы Driver Manager: add/list/delete через /v1/dispatchers/cargo-likes."
+  - name: "Driver Manager / Driver likes"
+    description: "Избранные водители Driver Manager: add/list/delete через /v1/dispatchers/driver-likes."
+  - name: "Driver Manager / Invitations"
+    description: "Приглашения водитель↔диспетчер: пригласить водителя, история приглашений, приглашения от водителей, принятие/отказ."
+  - name: "Driver Manager / Drivers catalog"
+    description: "Каталог/поиск водителей (по телефону, фильтры, гео) для дальнейших приглашений."
+  - name: "Driver Manager / My drivers"
+    description: "Мои водители: список, отвязка, управление данными транспорта (тягач/прицеп) для привязанных водителей."
+  - name: "Driver Manager / Offers"
+    description: |
+      Офферы Driver Manager.
+      - `/v1/dispatchers/offers/all` — единый список по `direction=all|incoming|outgoing` + `status` + `counterparty_id`.
+      - `/v1/dispatchers/offers/{id}/accept|reject` — принять/отклонить оффер.
+      В ответе списка есть `counts.incoming/outgoing`.
+  - name: "Driver Manager / Trips"
+    description: |
+      Рейсы Driver Manager по своим грузам и в выбранной компании (после switch-company), включая `confirm-transition`.
   - name: "Company / Dispatcher (приглашённый)"
     description: |
       **Диспетчер компании — только через приглашение.** GET /v1/dispatchers/companies (мои компании), POST /v1/dispatchers/auth/switch-company. Приглашение: POST /v1/dispatchers/companies/:companyId/invitations, accept, decline.
@@ -1490,7 +1514,7 @@ paths:
           description: "Переход недопустим (например delivered → searching)"
   /api/cargo/{id}/offers:
     get:
-      tags: ["Cargo Manager / Offers"]
+      tags: ["Cargo Manager / Offers", "Driver Manager / Offers"]
       summary: "7. Список офферов по грузу"
       description: |
         **Кто вызывает:** Диспетчер, компания, админ (перед принятием оффера). Водитель может смотреть свои офферы через список грузов или отдельный экран.
@@ -1573,7 +1597,7 @@ paths:
         "400":
           description: invalid_payload_detail / invalid_id
     post:
-      tags: ["Cargo Manager / Offers"]
+      tags: ["Cargo Manager / Offers", "Driver Manager / Offers"]
       summary: "8. Создать оффер (водитель или диспетчер)"
       description: |
         **Назначение:** Предложить **цену** по грузу (переговоры). В теле: carrier_id (водитель-исполнитель), price, currency, comment.
@@ -2770,7 +2794,7 @@ paths:
 
   /v1/dispatchers/auth/refresh:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: "Обновить JWT токены (диспетчер)"
       description: |
         **Кто вызывает:** Диспетчер при истёкшем/скоро истекающем access_token.
@@ -2884,7 +2908,7 @@ paths:
 
   /v1/dispatchers/auth/phone:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: "Шаг 1. Отправить OTP на телефон"
       description: |
         **Поток:** Ввод телефона в формате +998XXXXXXXXX → запрос отправляет OTP через Telegram Gateway. Код приходит в Telegram/смс. Используется и для входа (существующий диспетчер), и для регистрации (новый номер). Ответ: status=otp_sent, ttl_seconds.
@@ -2916,7 +2940,7 @@ paths:
 
   /v1/dispatchers/auth/otp/verify:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: "Шаг 2. Подтвердить OTP"
       description: |
         **Поток:** Передаёте phone и otp (код из шага 1). Если диспетчер уже зарегистрирован → в ответе status=login и tokens (access_token, refresh_token) — вход выполнен. Если телефон новый → status=register и session_id — переходите к регистрации (POST /v1/dispatchers/registration/complete), JWT пока не выдаётся.
@@ -2954,7 +2978,7 @@ paths:
 
   /v1/dispatchers/auth/login/password:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: "Вход по паролю (без OTP)"
       description: |
         **Поток:** Для уже зарегистрированного диспетчера. Передаёте phone и password → в ответе tokens. Дальше все запросы к профилю и т.д. с заголовком X-User-Token = access_token.
@@ -2986,7 +3010,7 @@ paths:
 
   /v1/dispatchers/auth/reset-password/request:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: Запросить OTP для сброса пароля
       requestBody:
         required: true
@@ -3016,7 +3040,7 @@ paths:
 
   /v1/dispatchers/auth/reset-password/confirm:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: Подтвердить сброс пароля (session_id + otp + new_password)
       requestBody:
         required: true
@@ -3047,7 +3071,7 @@ paths:
 
   /v1/dispatchers/auth/logout:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: "Выход (отзыв сессии)"
       description: |
         **Кто вызывает:** Freelance-диспетчер (клиент после входа по OTP или по паролю).
@@ -3075,7 +3099,7 @@ paths:
 
   /v1/dispatchers/registration/complete:
     post:
-      tags: ["Cargo Manager / Registration", "Driver Manager"]
+      tags: ["Cargo Manager / Registration", "Driver Manager / Registration"]
       summary: "Шаг 3. Завершить регистрацию (имя, пароль, паспорт)"
       description: |
         **Поток:** Вызывается после otp/verify, когда получен status=register и session_id. В теле передаёте session_id (обязательно), name, **role** (при **новой** регистрации обязательно: CARGO_MANAGER или DRIVER_MANAGER — только заглавные буквы; если телефон уже зарегистрирован, возвращается status=login и role в теле не проверяется), password, passport_series, passport_number, pinfl. Создаётся запись в freelance_dispatchers, в ответе — tokens и объект dispatcher (в т.ч. поле role). После этого диспетчер может входить по phone+password или по OTP. Фото загружается отдельно через POST /v1/dispatchers/profile/photo.
@@ -3129,7 +3153,7 @@ paths:
 
   /v1/dispatchers/profile:
     get:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: "Получить профиль диспетчера"
       description: |
         **Поток:** Запрос с заголовком X-User-Token (JWT access_token). В ответе data.dispatcher — объект диспетчера (id, name, phone, **role**, паспорт, pinfl, work_status, rating и т.д.).
@@ -3142,7 +3166,7 @@ paths:
               schema: { $ref: "#/components/schemas/Envelope" }
         "401": { description: Не авторизован }
     patch:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: Редактировать профиль диспетчера
       description: |
         Частичное обновление. Поле **name** — схема DisplayName (латиница и `_`, 2–64; уникально среди водителей и диспетчеров).
@@ -3178,7 +3202,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
     delete:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: Удалить профиль диспетчера (архивация)
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       responses:
@@ -3192,7 +3216,7 @@ paths:
 
   /v1/dispatchers/profile/photo:
     post:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: "Загрузить фото диспетчера"
       description: |
         **Формат:** multipart/form-data, поле **photo** — файл изображения (image/jpeg или image/png). Макс. размер 10 MB.
@@ -3235,7 +3259,7 @@ paths:
         "400": { description: "Нет файла, неверный тип или размер" }
         "401": { description: Не авторизован }
     get:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: "Получить фото диспетчера"
       description: |
         Возвращает загруженное фото (бинарные данные) с заголовком Content-Type (image/jpeg или image/png).
@@ -3250,7 +3274,7 @@ paths:
         "401": { description: Не авторизован }
         "404": { description: Фото не найдено }
     delete:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: "Удалить фото диспетчера"
       description: |
         Удаляет загруженное фото диспетчера из БД. После удаления has_photo = false.
@@ -3284,7 +3308,7 @@ paths:
 
   /v1/dispatchers/profile/password:
     put:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: Сменить пароль (текущий + новый)
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
@@ -3310,7 +3334,7 @@ paths:
 
   /v1/dispatchers/profile/phone-change/request:
     post:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: Смена телефона — запрос OTP
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
@@ -3339,7 +3363,7 @@ paths:
 
   /v1/dispatchers/profile/phone-change/verify:
     post:
-      tags: ["Cargo Manager / Profile", "Driver Manager"]
+      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
       summary: Смена телефона — подтверждение OTP
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       requestBody:
@@ -3376,7 +3400,7 @@ paths:
 
   /v1/dispatchers/auth/switch-company:
     post:
-      tags: ["Cargo Manager / Auth", "Driver Manager"]
+      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
       summary: "Переключить контекст на компанию"
       description: "Тело: company_id (UUID). В ответе — access_token, refresh_token, expires_in, expires_at (Unix), refresh_expires_in, refresh_expires_at (Unix)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -3736,8 +3760,8 @@ paths:
 
   /v1/dispatchers/trips:
     get:
-      tags: ["Cargo Manager / Trips"]
-      summary: "Список рейсов (cargo manager)"
+      tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
+      summary: "Список рейсов (диспетчер)"
       description: |
         Возвращает рейсы по грузам, к которым у диспетчера есть доступ:
         - грузы созданные этим диспетчером (`created_by_type=DISPATCHER`), или
@@ -3786,8 +3810,8 @@ paths:
 
   /v1/dispatchers/cargo/{id}/trips:
     get:
-      tags: ["Cargo Manager / Trips"]
-      summary: "Рейсы по cargo_id (cargo manager)"
+      tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
+      summary: "Рейсы по cargo_id (диспетчер)"
       description: "Возвращает все рейсы указанного груза. Доступно только владельцу груза (диспетчер/компания после switch-company)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -3803,8 +3827,8 @@ paths:
 
   /v1/dispatchers/trips/{id}:
     get:
-      tags: ["Cargo Manager / Trips"]
-      summary: "Получить рейс по trip_id (cargo manager)"
+      tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
+      summary: "Получить рейс по trip_id (диспетчер)"
       description: "Возвращает рейс по `trip_id`. Доступно только если груз рейса принадлежит диспетчеру/компании (см. GET /v1/dispatchers/trips)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -3820,8 +3844,8 @@ paths:
 
   /v1/dispatchers/trips/history:
     get:
-      tags: ["Cargo Manager / Trips"]
-      summary: "История trips/offers (cargo manager)"
+      tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
+      summary: "История trips/offers (диспетчер)"
       description: |
         Лента для cargo manager; `items` по `event_at` (новые первые).
         Типы: `trip_active`, `trip_completed`, `trip_cancelled`, `offer_accepted` (+ `has_open_trip`), `offer_rejected`.
@@ -3838,7 +3862,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/confirm-transition:
     post:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Подтвердить следующий статус рейса (диспетчер)"
       description: |
         **Роль `CARGO_MANAGER`:** через этот метод может только **закрыть** рейс — поставить `COMPLETED`, и только когда рейс в `DELIVERED` и водитель уже запросил завершение (`POST /v1/driver/trips/{id}/confirm`). Промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) для cargo manager **запрещены** (ответ `403`, ключ `trip_cargo_manager_completed_only`); их подтверждает водитель или диспетчер с ролью `DRIVER_MANAGER`.
@@ -3858,7 +3882,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/cancel:
     post:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Отменить рейс (диспетчер)"
       description: |
         Отмена без второй стороны: рейс архивируется и удаляется из trips; груз остаётся для новой попытки; оффер возвращается в PENDING.
@@ -3882,7 +3906,7 @@ paths:
 
   /v1/dispatchers/trips/{id}/state:
     get:
-      tags: ["Cargo Manager / Trips"]
+      tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Состояние рейса и подтверждений (диспетчер)"
       description: |
         Рейс, next_status, pending_confirm_to, метки подтверждений, при наличии — **rating_from_driver** / **rating_from_dispatcher** (кто уже оценил по рейсу), кратко cargo (id, status).
@@ -4013,7 +4037,7 @@ paths:
 
   /v1/dispatchers/offers/{id}/accept:
     post:
-      tags: ["Cargo Manager / Offers"]
+      tags: ["Cargo Manager / Offers", "Driver Manager / Offers"]
       summary: "Принять оффер водителя (его цену)"
       description: |
         Для офферов с **proposed_by=DRIVER**. Подтверждаете предложенную водителем цену; создаётся рейс с договорной ценой на рейсе; **payments** груза не меняются. Эквивалентно `POST /api/offers/{id}/accept` с JWT диспетчера-владельца груза (фриланс-автор груза **или** компания через switch-company).
@@ -4037,8 +4061,8 @@ paths:
 
   /v1/dispatchers/offers/{id}:
     get:
-      tags: ["Cargo Manager / Offers"]
-      summary: "Получить один оффер (cargo manager) + полный cargo"
+      tags: ["Cargo Manager / Offers", "Driver Manager / Offers"]
+      summary: "Получить один оффер (диспетчер) + полный cargo"
       description: |
         Возвращает один оффер по `offer_id` из path (`{id}`) и **полный связанный cargo** (как карточка груза: route_points, payment и пр.).
         Доступно только владельцу груза: диспетчер-создатель груза или диспетчер выбранной компании после switch-company.
@@ -4056,7 +4080,7 @@ paths:
 
   /v1/dispatchers/offers/{id}/reject:
     post:
-      tags: ["Cargo Manager / Offers"]
+      tags: ["Cargo Manager / Offers", "Driver Manager / Offers"]
       summary: "Отклонить оффер водителя или отозвать своё приглашение (диспетчер)"
       description: |
         Для **своего груза** (создатель-диспетчер или компания после switch-company), оффер **PENDING**:
@@ -4087,8 +4111,8 @@ paths:
 
   /v1/dispatchers/offers/all:
     get:
-      tags: ["Cargo Manager / Offers"]
-      summary: "Все офферы Cargo Manager (исходящие и входящие)"
+      tags: ["Cargo Manager / Offers", "Driver Manager / Offers"]
+      summary: "Все офферы диспетчера (исходящие и входящие)"
       description: |
         Единый список офферов для Cargo Manager с переключением направления:
         - `direction=all` (по умолчанию) — оба направления в одном списке
@@ -4694,7 +4718,7 @@ paths:
 
   /v1/dispatchers/cargo-likes:
     get:
-      tags: ["Cargo Manager / Cargo likes"]
+      tags: ["Cargo Manager / Likes", "Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
       summary: "Список избранных грузов (Cargo likes)"
       description: |
         Список грузов в избранном у текущего Cargo Manager (JWT `freelance_dispatchers`).
@@ -4735,7 +4759,7 @@ paths:
         "500":
           description: failed_to_list_favorites
     post:
-      tags: ["Cargo Manager / Cargo likes"]
+      tags: ["Cargo Manager / Likes", "Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
       summary: "Добавить груз в избранное (Cargo likes)"
       description: |
         Тело: `cargo_id` — любой существующий груз. Повторное добавление → 200 `favorite_already_exists`.
@@ -4763,7 +4787,7 @@ paths:
 
   /v1/dispatchers/cargo-likes/{cargoId}:
     delete:
-      tags: ["Cargo Manager / Cargo likes"]
+      tags: ["Cargo Manager / Likes", "Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
       summary: "Убрать груз из избранного (Cargo likes)"
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -4781,7 +4805,7 @@ paths:
 
   /v1/dispatchers/driver-likes:
     get:
-      tags: ["Cargo Manager / Driver likes"]
+      tags: ["Cargo Manager / Likes", "Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
       summary: "Список избранных водителей (Driver likes)"
       description: |
         Список водителей в избранном у текущего Cargo Manager. Те же данные, что у устаревшего `GET /v1/dispatchers/favorite-drivers`.
@@ -4822,7 +4846,7 @@ paths:
         "500":
           description: failed_to_list_favorites
     post:
-      tags: ["Cargo Manager / Driver likes"]
+      tags: ["Cargo Manager / Likes", "Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
       summary: "Добавить водителя в избранное (Driver likes)"
       description: "Тело: `driver_id`. Повтор → 200 `favorite_already_exists`."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -4849,7 +4873,7 @@ paths:
 
   /v1/dispatchers/driver-likes/{driverId}:
     delete:
-      tags: ["Cargo Manager / Driver likes"]
+      tags: ["Cargo Manager / Likes", "Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
       summary: "Убрать водителя из избранного (Driver likes)"
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
