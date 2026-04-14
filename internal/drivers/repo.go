@@ -296,19 +296,19 @@ LIMIT $2`
 
 // ListDriversFilter for GET /v1/dispatchers/drivers (freelance dispatcher's driver list with filters).
 type ListDriversFilter struct {
-	Phone      string // search by phone (partial match)
-	Name       string // search by name (partial match)
-	WorkStatus string // filter by work_status (e.g. available, busy)
-	TruckType  string // filter by power_plate_type (e.g. TENT, REFRIGERATOR)
-	DriverType string // driver_type (company|freelancer|driver)
+	Phone         string // search by phone (partial match)
+	Name          string // search by name (partial match)
+	WorkStatus    string // filter by work_status (e.g. available, busy)
+	TruckType     string // filter by power_plate_type (e.g. TENT, REFRIGERATOR)
+	DriverType    string // driver_type (company|freelancer|driver)
 	AccountStatus string // account_status (active|inactive|...)
-	HasPhoto   *bool
-	Latitude   *float64 // geo filter center latitude
-	Longitude  *float64 // geo filter center longitude
-	RadiusKM   *float64 // geo radius in kilometers
-	Page       int
-	Limit      int
-	Sort       string // "updated_at:desc" (default), "name:asc", "last_online_at:desc"
+	HasPhoto      *bool
+	Latitude      *float64 // geo filter center latitude
+	Longitude     *float64 // geo filter center longitude
+	RadiusKM      *float64 // geo radius in kilometers
+	Page          int
+	Limit         int
+	Sort          string // "updated_at:desc" (default), "name:asc", "last_online_at:desc"
 }
 
 // ListByFreelancerIDFilter returns drivers linked to this freelance dispatcher with optional filters and pagination.
@@ -702,6 +702,15 @@ WHERE id = $1`
 	return err
 }
 
+func (r *Repo) GetPushToken(ctx context.Context, id uuid.UUID) (string, error) {
+	const q = `SELECT COALESCE(push_token, '') FROM drivers WHERE id = $1`
+	var token string
+	if err := r.pg.QueryRow(ctx, q, id).Scan(&token); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
 func (r *Repo) UpdateTransportType(ctx context.Context, id uuid.UUID, driverType string, freelancerID *uuid.UUID, companyID *uuid.UUID, powerPlateType string, trailerPlateType string, nextStep string, nextStatus string) error {
 	_, err := r.pg.Exec(ctx, `
 UPDATE drivers
@@ -728,11 +737,11 @@ type KYCUpdate struct {
 	DriverPINFL          string
 	DriverScanStatus     *bool
 
-	PowerPlateNumber   string
-	PowerTechSeries    string
-	PowerTechNumber    string
-	PowerOwnerName     string
-	PowerScanStatus    *bool
+	PowerPlateNumber string
+	PowerTechSeries  string
+	PowerTechNumber  string
+	PowerOwnerName   string
+	PowerScanStatus  *bool
 
 	TrailerPlateNumber string
 	TrailerTechSeries  string
@@ -741,10 +750,10 @@ type KYCUpdate struct {
 	TrailerScanStatus  *bool
 
 	DriverOwner *bool
-	KYCStatus     string
+	KYCStatus   string
 
 	RegistrationStatus string
-	RegistrationStep  string // после KYC — "completed"
+	RegistrationStep   string // после KYC — "completed"
 }
 
 func (r *Repo) UpdateKYC(ctx context.Context, id uuid.UUID, u KYCUpdate) error {
@@ -841,4 +850,3 @@ func (r *Repo) DeletePhoto(ctx context.Context, id uuid.UUID) error {
 	_, err := r.pg.Exec(ctx, q, id)
 	return err
 }
-

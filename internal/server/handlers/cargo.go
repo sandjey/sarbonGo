@@ -29,6 +29,7 @@ import (
 	"sarbonNew/internal/security"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
+	"sarbonNew/internal/tripnotif"
 	"sarbonNew/internal/trips"
 	"sarbonNew/internal/userstream"
 )
@@ -1130,6 +1131,30 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
 		return
 	}
+	if h.stream != nil {
+		if proposedBy == cargo.OfferProposedByDispatcher {
+			h.stream.PublishNotification(tripnotif.RecipientDriver, req.CarrierID, gin.H{
+				"kind":       "cargo_offer",
+				"event":      "cargo_offer_created",
+				"direction":  "incoming",
+				"offer_id":   offerID.String(),
+				"cargo_id":   id.String(),
+				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+		} else {
+			if disp := tripNotifyDispatcherID(obj); disp != nil && *disp != uuid.Nil {
+				h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, gin.H{
+					"kind":       "cargo_offer",
+					"event":      "cargo_offer_created",
+					"direction":  "incoming",
+					"offer_id":   offerID.String(),
+					"cargo_id":   id.String(),
+					"driver_id":  req.CarrierID.String(),
+					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+			}
+		}
+	}
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"id": offerID.String()})
 }
 
@@ -1539,6 +1564,19 @@ func (h *CargoHandler) DriverCreateOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
 		return
 	}
+	if h.stream != nil {
+		if disp := tripNotifyDispatcherID(obj); disp != nil && *disp != uuid.Nil {
+			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, gin.H{
+				"kind":       "cargo_offer",
+				"event":      "cargo_offer_created",
+				"direction":  "incoming",
+				"offer_id":   offerID.String(),
+				"cargo_id":   id.String(),
+				"driver_id":  driverID.String(),
+				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+		}
+	}
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"id": offerID.String(), "proposed_by": cargo.OfferProposedByDriver})
 }
 
@@ -1929,8 +1967,40 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 				"agreed_price":    agreedPrice,
 				"agreed_currency": agreedCurrency,
 			})
+			if h.stream != nil {
+				recipientKind := tripnotif.RecipientDispatcher
+				recipientID := userID
+				if role == "dispatcher" {
+					recipientKind = tripnotif.RecipientDriver
+					recipientID = carrierID
+				}
+				h.stream.PublishNotification(recipientKind, recipientID, gin.H{
+					"kind":       "cargo_offer",
+					"event":      "cargo_offer_accepted",
+					"offer_id":   offerID.String(),
+					"cargo_id":   cargoID.String(),
+					"driver_id":  carrierID.String(),
+					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+			}
 			return
 		}
+	}
+	if h.stream != nil {
+		recipientKind := tripnotif.RecipientDispatcher
+		recipientID := userID
+		if role == "dispatcher" {
+			recipientKind = tripnotif.RecipientDriver
+			recipientID = carrierID
+		}
+		h.stream.PublishNotification(recipientKind, recipientID, gin.H{
+			"kind":       "cargo_offer",
+			"event":      "cargo_offer_accepted",
+			"offer_id":   offerID.String(),
+			"cargo_id":   cargoID.String(),
+			"driver_id":  carrierID.String(),
+			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+		})
 	}
 	resp.OKLang(c, "ok", gin.H{
 		"cargo_id":        cargoID.String(),
@@ -2025,6 +2095,15 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
 		return
 	}
+	if h.stream != nil {
+		h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, gin.H{
+			"kind":       "cargo_offer",
+			"event":      "cargo_offer_rejected",
+			"offer_id":   offerID.String(),
+			"cargo_id":   offer.CargoID.String(),
+			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}
 	resp.OKLang(c, "ok", gin.H{"status": "rejected"})
 }
 
@@ -2069,6 +2148,19 @@ func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 		}
 		resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
 		return
+	}
+	if h.stream != nil {
+		cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
+		if disp := tripNotifyDispatcherID(cargoObj); disp != nil && *disp != uuid.Nil {
+			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, gin.H{
+				"kind":       "cargo_offer",
+				"event":      "cargo_offer_rejected",
+				"offer_id":   offerID.String(),
+				"cargo_id":   offer.CargoID.String(),
+				"driver_id":  driverID.String(),
+				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+		}
 	}
 	resp.OKLang(c, "ok", gin.H{"status": "rejected"})
 }

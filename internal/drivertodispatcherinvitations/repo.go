@@ -49,6 +49,29 @@ func (r *Repo) Create(ctx context.Context, driverID uuid.UUID, dispatcherPhone s
 	return token, err
 }
 
+// HasPendingForDriverPhone returns true when this driver already has a pending non-expired invitation to the same dispatcher phone.
+func (r *Repo) HasPendingForDriverPhone(ctx context.Context, driverID uuid.UUID, dispatcherPhone string) (bool, error) {
+	norm := normalizePhone(dispatcherPhone)
+	if norm == "" {
+		return false, nil
+	}
+	var n int
+	err := r.pg.QueryRow(ctx,
+		`SELECT 1
+		 FROM driver_to_dispatcher_invitations
+		 WHERE driver_id = $1 AND status = $2 AND expires_at > now()
+		   AND replace(replace(replace(trim(dispatcher_phone), ' ', ''), '-', ''), '+', '') = $3
+		 LIMIT 1`,
+		driverID, StatusPending, norm).Scan(&n)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // Invitation is a driver_to_dispatcher_invitations row.
 type Invitation struct {
 	ID              uuid.UUID

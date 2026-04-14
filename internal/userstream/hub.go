@@ -12,10 +12,11 @@ const subChanBuf = 48
 // Hub delivers JSON payloads to SSE subscribers keyed by recipient_kind + recipient_id (UUID of driver or dispatcher app user).
 // One process only: for horizontal scaling add Redis Pub/Sub and bridge to this hub per instance.
 type Hub struct {
-	mu    sync.RWMutex
-	notif map[string][]chan []byte
-	trips map[string][]chan []byte
-	drv   map[string][]chan []byte
+	mu        sync.RWMutex
+	notif     map[string][]chan []byte
+	trips     map[string][]chan []byte
+	drv       map[string][]chan []byte
+	onPublish func(streamKind, recipientKind string, recipientID uuid.UUID, payload []byte)
 }
 
 func NewHub() *Hub {
@@ -94,6 +95,12 @@ func (h *Hub) PublishNotification(recipientKind string, recipientID uuid.UUID, v
 		return
 	}
 	h.broadcast(h.notif, subKey(recipientKind, recipientID), b)
+	h.mu.RLock()
+	cb := h.onPublish
+	h.mu.RUnlock()
+	if cb != nil {
+		cb("notifications", recipientKind, recipientID, b)
+	}
 }
 
 // PublishTripStatus sends one SSE payload to all trip-status subscribers for this recipient.
@@ -106,6 +113,12 @@ func (h *Hub) PublishTripStatus(recipientKind string, recipientID uuid.UUID, v a
 		return
 	}
 	h.broadcast(h.trips, subKey(recipientKind, recipientID), b)
+	h.mu.RLock()
+	cb := h.onPublish
+	h.mu.RUnlock()
+	if cb != nil {
+		cb("trip_status", recipientKind, recipientID, b)
+	}
 }
 
 // PublishDriverUpdate sends one SSE payload to all driver-update stream subscribers for this recipient.
@@ -118,6 +131,18 @@ func (h *Hub) PublishDriverUpdate(recipientKind string, recipientID uuid.UUID, v
 		return
 	}
 	h.broadcast(h.drv, subKey(recipientKind, recipientID), b)
+	h.mu.RLock()
+	cb := h.onPublish
+	h.mu.RUnlock()
+	if cb != nil {
+		cb("driver_updates", recipientKind, recipientID, b)
+	}
+}
+
+func (h *Hub) SetOnPublish(f func(streamKind, recipientKind string, recipientID uuid.UUID, payload []byte)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onPublish = f
 }
 
 func (h *Hub) broadcast(m map[string][]chan []byte, k string, payload []byte) {

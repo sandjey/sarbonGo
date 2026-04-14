@@ -30,8 +30,8 @@ type Config struct {
 	OTPSendLimitPerPhonePerHour int
 	OTPSendLimitPerIPPerHour    int
 	OTPSendWindow               time.Duration
-	OTPVerifyAttemptsPerPhone   int           // макс. попыток ввода OTP на один номер в окне (0 = только maxAttempts на один код)
-	OTPVerifyWindowSeconds     int           // окно в секундах для OTPVerifyAttemptsPerPhone
+	OTPVerifyAttemptsPerPhone   int // макс. попыток ввода OTP на один номер в окне (0 = только maxAttempts на один код)
+	OTPVerifyWindowSeconds      int // окно в секундах для OTPVerifyAttemptsPerPhone
 
 	TelegramGatewayBaseURL  string
 	TelegramGatewayToken    string
@@ -54,6 +54,11 @@ type Config struct {
 	CallsICEURLs        string        // comma-separated ICE URLs for clients
 	CallsICEUsername    string        // TURN username (static for now)
 	CallsICECredential  string        // TURN credential (static for now)
+
+	// Push notifications (Firebase FCM)
+	PushNotificationsEnabled bool
+	FirebaseProjectID        string
+	FirebaseCredentialsFile  string
 }
 
 func LoadFromEnv() (Config, error) {
@@ -111,6 +116,10 @@ func LoadFromEnv() (Config, error) {
 	cfg.CallsICEURLs = strings.TrimSpace(getEnv("CALLS_ICE_URLS", "stun:stun.l.google.com:19302"))
 	cfg.CallsICEUsername = strings.TrimSpace(os.Getenv("CALLS_TURN_USERNAME"))
 	cfg.CallsICECredential = strings.TrimSpace(os.Getenv("CALLS_TURN_CREDENTIAL"))
+
+	cfg.PushNotificationsEnabled = mustBool(getEnv("PUSH_NOTIFICATIONS_ENABLED", "false"))
+	cfg.FirebaseProjectID = strings.TrimSpace(os.Getenv("FIREBASE_PROJECT_ID"))
+	cfg.FirebaseCredentialsFile = strings.TrimSpace(os.Getenv("FIREBASE_CREDENTIALS_FILE"))
 
 	return cfg, nil
 }

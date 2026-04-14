@@ -32,6 +32,7 @@ import (
 	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/goadmin"
 	"sarbonNew/internal/infra"
+	"sarbonNew/internal/push"
 	"sarbonNew/internal/security"
 	"sarbonNew/internal/server/handlers"
 	"sarbonNew/internal/server/mw"
@@ -166,7 +167,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	driverInvH := handlers.NewDriverInvitationsHandler(logger, driverInvRepo, d2dInvRepo, dcrRepo, driversRepo, dispatchersRepo, userStreamHub)
 	driverDispH := handlers.NewDriverDispatchersHandler(logger, driversRepo, dispatchersRepo, dcrRepo)
 	driverDispCatalogH := handlers.NewDriverDispatchersCatalogHandler(logger, dispatchersRepo)
-	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo)
+	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo, userStreamHub)
 	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo, dispatchersRepo, tripNotifRepo, tripRatingRepo, userStreamHub)
 	sseH := handlers.NewSSEStreamsHandler(userStreamHub)
 
@@ -180,6 +181,18 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	chatPresence := chat.NewPresenceStore(deps.Redis)
 	chatHub := chat.NewHub(chatPresence, logger)
 	chatH := handlers.NewChatHandler(logger, chatRepo, chatPresence, chatHub, driversRepo, dispatchersRepo)
+	pushTokensH := handlers.NewPushTokensHandler(logger, driversRepo, dispatchersRepo)
+	pushSvc, err := push.New(context.Background(), cfg, logger, driversRepo, dispatchersRepo)
+	if err != nil {
+		logger.Error("push init failed", zap.Error(err))
+	} else if pushSvc != nil && pushSvc.Enabled() {
+		userStreamHub.SetOnPublish(func(streamKind, recipientKind string, recipientID uuid.UUID, payload []byte) {
+			pushSvc.SendByStreamRecipient(context.Background(), streamKind, recipientKind, recipientID, payload)
+		})
+		chatHub.SetOnSendToUser(func(userID uuid.UUID, payload []byte) {
+			pushSvc.SendByChatUser(context.Background(), userID, payload)
+		})
+	}
 
 	callsRepo := calls.NewRepo(deps.PG)
 	callsLimiter := calls.NewCreateLimiter(deps.Redis, cfg.CallsCreateLimit, cfg.CallsCreateWindow)
@@ -499,6 +512,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	chatGroup.DELETE("/messages/:id", chatH.DeleteMessage)
 	chatGroup.GET("/presence/:user_id", chatH.GetPresence)
 	chatGroup.GET("/files/:id", chatH.GetFile)
+	chatGroup.POST("/push-token", pushTokensH.Upsert)
+	chatGroup.DELETE("/push-token", pushTokensH.Delete)
 	chatGroup.GET("/ws", chatH.ServeWS)
 
 	// Calls (voice): state/session in REST; signaling via chat ws (webrtc.* / call.*).

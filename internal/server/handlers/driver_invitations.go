@@ -18,6 +18,7 @@ import (
 	"sarbonNew/internal/drivertodispatcherinvitations"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
+	"sarbonNew/internal/tripnotif"
 	"sarbonNew/internal/userstream"
 )
 
@@ -93,6 +94,17 @@ func (h *DriverInvitationsHandler) Create(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
 	}
+	if h.stream != nil {
+		h.stream.PublishNotification(tripnotif.RecipientDriver, req.DriverID, gin.H{
+			"kind":       "connection_offer",
+			"event":      "connection_offer_created",
+			"direction":  "incoming",
+			"type":       "company",
+			"token":      token,
+			"company_id": companyID.String(),
+			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"token": token, "expires_in_hours": 168})
 }
 
@@ -143,6 +155,17 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 		h.logger.Error("driver invitation create freelance", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
+	}
+	if h.stream != nil {
+		h.stream.PublishNotification(tripnotif.RecipientDriver, req.DriverID, gin.H{
+			"kind":          "connection_offer",
+			"event":         "connection_offer_created",
+			"direction":     "incoming",
+			"type":          "freelance",
+			"token":         token,
+			"dispatcher_id": dispatcherID.String(),
+			"created_at":    time.Now().UTC().Format(time.RFC3339Nano),
+		})
 	}
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"token": token, "expires_in_hours": 168})
 }
@@ -323,12 +346,17 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 		return
 	}
 	items := make([]gin.H, 0)
+	currentDriver, _ := h.drv.FindByID(c.Request.Context(), driverID)
 
 	if direction == "all" || direction == "incoming" {
-		drv, err := h.drv.FindByID(c.Request.Context(), driverID)
-		if err != nil || drv == nil {
-			resp.ErrorLang(c, http.StatusUnauthorized, "driver_not_found")
-			return
+		drv := currentDriver
+		if drv == nil {
+			var err error
+			drv, err = h.drv.FindByID(c.Request.Context(), driverID)
+			if err != nil || drv == nil {
+				resp.ErrorLang(c, http.StatusUnauthorized, "driver_not_found")
+				return
+			}
 		}
 		list, err := h.repo.ListByPhone(c.Request.Context(), drv.Phone)
 		if err != nil {
@@ -337,14 +365,21 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 			return
 		}
 		for _, inv := range list {
+			driverManagerID := inv.InvitedBy.String()
+			if inv.InvitedByDispatcherID != nil && *inv.InvitedByDispatcherID != uuid.Nil {
+				driverManagerID = inv.InvitedByDispatcherID.String()
+			}
 			item := gin.H{
-				"direction":  "incoming",
-				"token":      inv.Token,
-				"phone":      inv.Phone,
-				"status":     driverinvitations.EffectiveStatus(inv),
-				"expires_at": inv.ExpiresAt,
-				"created_at": inv.CreatedAt,
-				"invited_by": inv.InvitedBy.String(),
+				"direction":         "incoming",
+				"token":             inv.Token,
+				"driver_id":         driverID.String(),
+				"driver_phone":      drv.Phone,
+				"phone":             inv.Phone,
+				"status":            driverinvitations.EffectiveStatus(inv),
+				"expires_at":        inv.ExpiresAt,
+				"created_at":        inv.CreatedAt,
+				"invited_by":        inv.InvitedBy.String(),
+				"driver_manager_id": driverManagerID,
 			}
 			if inv.RespondedAt != nil {
 				item["responded_at"] = inv.RespondedAt
@@ -356,6 +391,14 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 				item["type"] = "freelance"
 				if inv.InvitedByDispatcherID != nil {
 					item["dispatcher_id"] = inv.InvitedByDispatcherID.String()
+				}
+			}
+			if disp, err := h.disp.FindByID(c.Request.Context(), inv.InvitedBy); err == nil && disp != nil {
+				item["driver_manager_name"] = disp.Name
+				item["driver_manager_phone"] = disp.Phone
+				item["driver_manager_has_photo"] = disp.HasPhoto
+				if disp.HasPhoto {
+					item["driver_manager_photo_url"] = "/v1/chat/users/" + disp.ID + "/photo"
 				}
 			}
 			items = append(items, item)
@@ -384,8 +427,20 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 				"expires_at":          inv.ExpiresAt,
 				"created_at":          inv.CreatedAt,
 			}
+			if currentDriver != nil {
+				item["driver_phone"] = currentDriver.Phone
+			}
 			if inv.RespondedAt != nil {
 				item["responded_at"] = inv.RespondedAt
+			}
+			if disp, err := h.disp.FindByPhone(c.Request.Context(), inv.DispatcherPhone); err == nil && disp != nil {
+				item["driver_manager_id"] = disp.ID
+				item["driver_manager_name"] = disp.Name
+				item["driver_manager_phone"] = disp.Phone
+				item["driver_manager_has_photo"] = disp.HasPhoto
+				if disp.HasPhoto {
+					item["driver_manager_photo_url"] = "/v1/chat/users/" + disp.ID + "/photo"
+				}
 			}
 			items = append(items, item)
 		}
@@ -866,6 +921,20 @@ func (h *DriverInvitationsHandler) CancelInvitation(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "invitation_not_found_or_expired")
 		return
 	}
+	if h.stream != nil {
+		drvList, _ := h.drv.SearchByPhone(c.Request.Context(), inv.Phone, 1)
+		if len(drvList) > 0 && drvList[0] != nil {
+			if driverUUID, err := uuid.Parse(drvList[0].ID); err == nil && driverUUID != uuid.Nil {
+				h.stream.PublishNotification(tripnotif.RecipientDriver, driverUUID, gin.H{
+					"kind":       "connection_offer",
+					"event":      "connection_offer_cancelled",
+					"direction":  "incoming",
+					"token":      token,
+					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+			}
+		}
+	}
 	resp.OKLang(c, "ok", nil)
 }
 
@@ -954,6 +1023,18 @@ func (h *DriverInvitationsHandler) Accept(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
 			return
 		}
+		if h.stream != nil {
+			h.stream.PublishNotification(tripnotif.RecipientDispatcher, inv.InvitedBy, gin.H{
+				"kind":       "connection_offer",
+				"event":      "connection_offer_accepted",
+				"direction":  "outgoing",
+				"type":       "company",
+				"token":      token,
+				"driver_id":  driverID.String(),
+				"company_id": inv.CompanyID.String(),
+				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+		}
 		resp.SuccessLang(c, http.StatusOK, "accepted", gin.H{"company_id": inv.CompanyID.String()})
 		return
 	}
@@ -968,6 +1049,18 @@ func (h *DriverInvitationsHandler) Accept(c *gin.Context) {
 			h.logger.Error("driver set freelancer", zap.Error(err))
 			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
 			return
+		}
+		if h.stream != nil {
+			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *inv.InvitedByDispatcherID, gin.H{
+				"kind":          "connection_offer",
+				"event":         "connection_offer_accepted",
+				"direction":     "outgoing",
+				"type":          "freelance",
+				"token":         token,
+				"driver_id":     driverID.String(),
+				"dispatcher_id": inv.InvitedByDispatcherID.String(),
+				"created_at":    time.Now().UTC().Format(time.RFC3339Nano),
+			})
 		}
 		resp.SuccessLang(c, http.StatusOK, "accepted", gin.H{"freelancer_id": inv.InvitedByDispatcherID.String()})
 		return
@@ -1012,6 +1105,20 @@ func (h *DriverInvitationsHandler) Decline(c *gin.Context) {
 	if !ok {
 		resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
 		return
+	}
+	if h.stream != nil {
+		target := inv.InvitedBy
+		if inv.InvitedByDispatcherID != nil && *inv.InvitedByDispatcherID != uuid.Nil {
+			target = *inv.InvitedByDispatcherID
+		}
+		h.stream.PublishNotification(tripnotif.RecipientDispatcher, target, gin.H{
+			"kind":       "connection_offer",
+			"event":      "connection_offer_declined",
+			"direction":  "outgoing",
+			"token":      token,
+			"driver_id":  driverID.String(),
+			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+		})
 	}
 	resp.OKLang(c, "declined", gin.H{"status": "declined"})
 }

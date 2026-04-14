@@ -5604,6 +5604,10 @@ paths:
         - `incoming` — приглашения, которые пришли водителю от диспетчеров;
         - `outgoing` — приглашения, которые водитель отправил диспетчерам;
         - `all` — оба направления (по умолчанию).
+        В элементах списка дополнительно возвращаются:
+        - `driver_id`, `driver_phone`
+        - `driver_manager_id`, `driver_manager_name`, `driver_manager_phone`
+        - `driver_manager_photo_url` (если есть фото)
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: direction
@@ -5632,7 +5636,7 @@ paths:
       responses:
         "201": { description: "data.token, data.expires_in_hours" }
         "400": { description: phone required, invalid payload }
-        "409": { description: already linked to this dispatcher }
+        "409": { description: driver_invitation_already_pending / already linked to this dispatcher }
 
   /v1/driver/connection-offers/accept:
     post:
@@ -5890,7 +5894,7 @@ paths:
       responses:
         "201": { description: "data.token, data.expires_in_hours" }
         "400": { description: phone required, invalid payload }
-        "409": { description: already linked to this dispatcher }
+        "409": { description: driver_invitation_already_pending / already linked to this dispatcher }
   /v1/driver/dispatcher-invitations/{token}:
     delete:
       tags: ["Legacy / Deprecated"]
@@ -6491,6 +6495,37 @@ paths:
           schema: { type: string }
       responses:
         "101": { description: Switching Protocols (WebSocket) }
+        "401": { description: unauthorized }
+
+  /v1/chat/push-token:
+    post:
+      tags: [Chat]
+      summary: "Сохранить push token для мобильного устройства"
+      description: |
+        Регистрирует/обновляет Firebase push token текущего пользователя (driver/dispatcher).
+        Используется мобильным приложением после логина и при refresh token устройства.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [push_token]
+              properties:
+                push_token: { type: string, example: "fcm_device_token_here" }
+      responses:
+        "200": { description: updated }
+        "400": { description: invalid payload }
+        "401": { description: unauthorized }
+    delete:
+      tags: [Chat]
+      summary: "Удалить push token текущего устройства"
+      description: |
+        Сбрасывает push token текущего пользователя (driver/dispatcher), например на logout.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200": { description: ok }
         "401": { description: unauthorized }
 
   /v1/calls:

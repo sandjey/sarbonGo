@@ -51,3 +51,6 @@ playground/package-lock.json
 .env
 api
 .aider*
+# Firebase / GCP service account secrets
+*firebase-adminsdk*.json
+*.service-account.json

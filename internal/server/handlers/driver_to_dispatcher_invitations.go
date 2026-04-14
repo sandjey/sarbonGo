@@ -14,6 +14,8 @@ import (
 	"sarbonNew/internal/drivertodispatcherinvitations"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
+	"sarbonNew/internal/tripnotif"
+	"sarbonNew/internal/userstream"
 )
 
 // DriverToDispatcherInvitationsHandler handles invitations FROM driver TO dispatcher (by phone). Driver sends, dispatcher accepts/declines.
@@ -22,11 +24,12 @@ type DriverToDispatcherInvitationsHandler struct {
 	repo   *drivertodispatcherinvitations.Repo
 	drv    *drivers.Repo
 	disp   *dispatchers.Repo
+	stream *userstream.Hub
 }
 
 // NewDriverToDispatcherInvitationsHandler creates the handler.
-func NewDriverToDispatcherInvitationsHandler(logger *zap.Logger, repo *drivertodispatcherinvitations.Repo, drv *drivers.Repo, disp *dispatchers.Repo) *DriverToDispatcherInvitationsHandler {
-	return &DriverToDispatcherInvitationsHandler{logger: logger, repo: repo, drv: drv, disp: disp}
+func NewDriverToDispatcherInvitationsHandler(logger *zap.Logger, repo *drivertodispatcherinvitations.Repo, drv *drivers.Repo, disp *dispatchers.Repo, stream *userstream.Hub) *DriverToDispatcherInvitationsHandler {
+	return &DriverToDispatcherInvitationsHandler{logger: logger, repo: repo, drv: drv, disp: disp, stream: stream}
 }
 
 // CreateDriverToDispatcherReq body for POST /v1/driver/dispatcher-invitations
@@ -47,6 +50,14 @@ func (h *DriverToDispatcherInvitationsHandler) CreateFromDriver(c *gin.Context) 
 		resp.ErrorLang(c, http.StatusBadRequest, "phone_required")
 		return
 	}
+	if dup, err := h.repo.HasPendingForDriverPhone(c.Request.Context(), driverID, phone); err != nil {
+		h.logger.Error("driver to dispatcher duplicate check", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
+		return
+	} else if dup {
+		resp.ErrorLang(c, http.StatusConflict, "driver_invitation_already_pending")
+		return
+	}
 	// Optional: check dispatcher exists by phone (so we don't invite non-existent)
 	disp, _ := h.disp.FindByPhone(c.Request.Context(), phone)
 	if disp == nil {
@@ -65,6 +76,18 @@ func (h *DriverToDispatcherInvitationsHandler) CreateFromDriver(c *gin.Context) 
 		h.logger.Error("driver to dispatcher invitation create", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
+	}
+	if h.stream != nil && disp != nil {
+		if dispID, err := uuid.Parse(disp.ID); err == nil && dispID != uuid.Nil {
+			h.stream.PublishNotification(tripnotif.RecipientDispatcher, dispID, gin.H{
+				"kind":       "connection_offer",
+				"event":      "connection_offer_created",
+				"direction":  "incoming",
+				"token":      token,
+				"driver_id":  driverID.String(),
+				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+			})
+		}
 	}
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"token": token, "expires_in_hours": 168})
 }
@@ -138,6 +161,20 @@ func (h *DriverToDispatcherInvitationsHandler) CancelByDriver(c *gin.Context) {
 	if !ok {
 		resp.ErrorLang(c, http.StatusNotFound, "invitation_not_found_or_expired")
 		return
+	}
+	if h.stream != nil {
+		if disp, _ := h.disp.FindByPhone(c.Request.Context(), inv.DispatcherPhone); disp != nil {
+			if dispID, err := uuid.Parse(disp.ID); err == nil && dispID != uuid.Nil {
+				h.stream.PublishNotification(tripnotif.RecipientDispatcher, dispID, gin.H{
+					"kind":       "connection_offer",
+					"event":      "connection_offer_cancelled",
+					"direction":  "incoming",
+					"token":      token,
+					"driver_id":  driverID.String(),
+					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+				})
+			}
+		}
 	}
 	resp.OKLang(c, "ok", nil)
 }
@@ -223,6 +260,16 @@ func (h *DriverToDispatcherInvitationsHandler) AcceptByDispatcher(c *gin.Context
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
 		return
 	}
+	if h.stream != nil {
+		h.stream.PublishNotification(tripnotif.RecipientDriver, inv.DriverID, gin.H{
+			"kind":          "connection_offer",
+			"event":         "connection_offer_accepted",
+			"direction":     "outgoing",
+			"token":         token,
+			"dispatcher_id": dispatcherID.String(),
+			"created_at":    time.Now().UTC().Format(time.RFC3339Nano),
+		})
+	}
 	resp.SuccessLang(c, http.StatusOK, "accepted", gin.H{"driver_id": inv.DriverID.String()})
 }
 
@@ -263,6 +310,16 @@ func (h *DriverToDispatcherInvitationsHandler) DeclineByDispatcher(c *gin.Contex
 	if !ok {
 		resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
 		return
+	}
+	if h.stream != nil {
+		h.stream.PublishNotification(tripnotif.RecipientDriver, inv.DriverID, gin.H{
+			"kind":          "connection_offer",
+			"event":         "connection_offer_declined",
+			"direction":     "outgoing",
+			"token":         token,
+			"dispatcher_id": dispatcherID.String(),
+			"created_at":    time.Now().UTC().Format(time.RFC3339Nano),
+		})
 	}
 	resp.OKLang(c, "declined", gin.H{"status": "declined"})
 }

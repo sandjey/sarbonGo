@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	ErrNotFound              = errors.New("dispatcher not found")
+	ErrNotFound               = errors.New("dispatcher not found")
 	ErrPhoneAlreadyRegistered = errors.New("phone already registered")
 )
 
@@ -29,16 +29,16 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 }
 
 type CatalogFilter struct {
-	Q          string  // name/phone search (ILIKE)
-	PhoneHint  string  // phone prefix hint (LIKE prefix%)
-	Status     *string // account_status
-	WorkStatus *string
-	HasPhoto   *bool
-	RatingMin  *float64
-	RatingMax  *float64
+	Q           string  // name/phone search (ILIKE)
+	PhoneHint   string  // phone prefix hint (LIKE prefix%)
+	Status      *string // account_status
+	WorkStatus  *string
+	HasPhoto    *bool
+	RatingMin   *float64
+	RatingMax   *float64
 	ManagerRole *string // CARGO_MANAGER | DRIVER_MANAGER — фильтр каталога
-	Limit      int
-	Offset     int
+	Limit       int
+	Offset      int
 }
 
 // ListCatalog returns all active (not deleted) freelance dispatchers with filters + pagination.
@@ -229,7 +229,7 @@ LIMIT 1`
 }
 
 // small helpers
-func itoa(n int) string { return strconv.Itoa(n) }
+func itoa(n int) string                 { return strconv.Itoa(n) }
 func sprintf(f string, a ...any) string { return fmt.Sprintf(f, a...) }
 
 func (r *Repo) FindByID(ctx context.Context, id uuid.UUID) (*Dispatcher, error) {
@@ -407,6 +407,21 @@ func (r *Repo) UpdateLastOnlineAt(ctx context.Context, id uuid.UUID, t time.Time
 	const q = `UPDATE freelance_dispatchers SET last_online_at = $2, updated_at = now() WHERE id = $1`
 	_, err := r.pg.Exec(ctx, q, id, t)
 	return err
+}
+
+func (r *Repo) UpdatePushToken(ctx context.Context, id uuid.UUID, pushToken string) error {
+	const q = `UPDATE freelance_dispatchers SET push_token = $2, updated_at = now() WHERE id = $1`
+	_, err := r.pg.Exec(ctx, q, id, pushToken)
+	return err
+}
+
+func (r *Repo) GetPushToken(ctx context.Context, id uuid.UUID) (string, error) {
+	const q = `SELECT COALESCE(push_token, '') FROM freelance_dispatchers WHERE id = $1 AND deleted_at IS NULL`
+	var token string
+	if err := r.pg.QueryRow(ctx, q, id).Scan(&token); err != nil {
+		return "", err
+	}
+	return token, nil
 }
 
 // UpdatePhoto сохраняет фото диспетчера в БД (бинарные данные + content-type).

@@ -111,13 +111,14 @@ type OnCallSignal func(fromUserID uuid.UUID, msgType string, data json.RawMessag
 
 // Hub holds all connected clients by user ID and broadcasts to conversations.
 type Hub struct {
-	mu       sync.RWMutex
-	clients  map[uuid.UUID][]*Client
-	presence *PresenceStore
-	onTyping OnTypingPeer
-	onCall   OnCallSignal
+	mu              sync.RWMutex
+	clients         map[uuid.UUID][]*Client
+	presence        *PresenceStore
+	onTyping        OnTypingPeer
+	onCall          OnCallSignal
 	onUserConnected func(userID uuid.UUID)
-	logger   *zap.Logger
+	onSendToUser    func(userID uuid.UUID, payload []byte)
+	logger          *zap.Logger
 }
 
 func NewHub(presence *PresenceStore, logger *zap.Logger) *Hub {
@@ -146,6 +147,12 @@ func (h *Hub) SetOnUserConnected(f func(userID uuid.UUID)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.onUserConnected = f
+}
+
+func (h *Hub) SetOnSendToUser(f func(userID uuid.UUID, payload []byte)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onSendToUser = f
 }
 
 func (h *Hub) Register(userID uuid.UUID, conn *websocket.Conn) *Client {
@@ -197,6 +204,7 @@ func (h *Hub) Unregister(c *Client) {
 func (h *Hub) SendToUser(userID uuid.UUID, payload []byte) {
 	h.mu.RLock()
 	list := h.clients[userID]
+	cb := h.onSendToUser
 	h.mu.RUnlock()
 	for _, c := range list {
 		select {
@@ -204,6 +212,9 @@ func (h *Hub) SendToUser(userID uuid.UUID, payload []byte) {
 		default:
 			// skip if buffer full
 		}
+	}
+	if cb != nil {
+		cb(userID, payload)
 	}
 }
 
