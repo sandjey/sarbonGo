@@ -311,6 +311,89 @@ func (h *DriverInvitationsHandler) ListConnectionOffers(c *gin.Context) {
 	resp.OKLang(c, "ok", gin.H{"direction": direction, "items": items})
 }
 
+// ListDriverConnectionOffers returns one list endpoint for driver's connection offers with direction filter.
+// GET /v1/driver/connection-offers?direction=incoming|outgoing|all
+func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	direction := strings.ToLower(strings.TrimSpace(c.DefaultQuery("direction", "all")))
+	switch direction {
+	case "all", "incoming", "outgoing":
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	items := make([]gin.H, 0)
+
+	if direction == "all" || direction == "incoming" {
+		drv, err := h.drv.FindByID(c.Request.Context(), driverID)
+		if err != nil || drv == nil {
+			resp.ErrorLang(c, http.StatusUnauthorized, "driver_not_found")
+			return
+		}
+		list, err := h.repo.ListByPhone(c.Request.Context(), drv.Phone)
+		if err != nil {
+			h.logger.Error("driver connection offers list incoming", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_invitations")
+			return
+		}
+		for _, inv := range list {
+			item := gin.H{
+				"direction":  "incoming",
+				"token":      inv.Token,
+				"phone":      inv.Phone,
+				"status":     driverinvitations.EffectiveStatus(inv),
+				"expires_at": inv.ExpiresAt,
+				"created_at": inv.CreatedAt,
+				"invited_by": inv.InvitedBy.String(),
+			}
+			if inv.RespondedAt != nil {
+				item["responded_at"] = inv.RespondedAt
+			}
+			if inv.CompanyID != nil && *inv.CompanyID != uuid.Nil {
+				item["type"] = "company"
+				item["company_id"] = inv.CompanyID.String()
+			} else {
+				item["type"] = "freelance"
+				if inv.InvitedByDispatcherID != nil {
+					item["dispatcher_id"] = inv.InvitedByDispatcherID.String()
+				}
+			}
+			items = append(items, item)
+		}
+	}
+
+	if direction == "all" || direction == "outgoing" {
+		if h.d2d == nil {
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		list, err := h.d2d.ListByDriverID(c.Request.Context(), driverID)
+		if err != nil {
+			h.logger.Error("driver connection offers list outgoing", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_invitations")
+			return
+		}
+		for _, inv := range list {
+			item := gin.H{
+				"direction":           "outgoing",
+				"token":               inv.Token,
+				"dispatcher_phone":    inv.DispatcherPhone,
+				"to_dispatcher_phone": inv.DispatcherPhone,
+				"driver_id":           inv.DriverID.String(),
+				"status":              drivertodispatcherinvitations.EffectiveStatus(inv),
+				"expires_at":          inv.ExpiresAt,
+				"created_at":          inv.CreatedAt,
+			}
+			if inv.RespondedAt != nil {
+				item["responded_at"] = inv.RespondedAt
+			}
+			items = append(items, item)
+		}
+	}
+
+	resp.OKLang(c, "ok", gin.H{"direction": direction, "items": items})
+}
+
 // GetMyDriver returns one linked driver by ID for current dispatcher.
 // GET /v1/dispatchers/drivers/:driverId
 func (h *DriverInvitationsHandler) GetMyDriver(c *gin.Context) {
@@ -525,8 +608,8 @@ type PatchMyDriverReq struct {
 	DriverPassportNumber *string `json:"driver_passport_number,omitempty"`
 	DriverPINFL          *string `json:"driver_pinfl,omitempty"`
 	DriverScanStatus     *bool   `json:"driver_scan_status,omitempty"`
-	DriverType           *string `json:"driver_type,omitempty"`         // company|freelancer|driver
-	AccountStatus        *string `json:"account_status,omitempty"`      // active|... (project-defined)
+	DriverType           *string `json:"driver_type,omitempty"`    // company|freelancer|driver
+	AccountStatus        *string `json:"account_status,omitempty"` // active|... (project-defined)
 	DriverOwner          *bool   `json:"driver_owner,omitempty"`
 	KYCStatus            *string `json:"kyc_status,omitempty"`          // pending|approved|...
 	RegistrationStep     *string `json:"registration_step,omitempty"`   // optional
@@ -753,6 +836,17 @@ func (h *DriverInvitationsHandler) CancelInvitation(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "token_required")
 		return
 	}
+	var req struct {
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
+		return
+	}
+	if len(strings.TrimSpace(req.Reason)) < 3 {
+		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_too_short")
+		return
+	}
 	inv, err := h.repo.GetPendingByToken(c.Request.Context(), token)
 	if err != nil || inv == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "invitation_not_found_or_expired")
@@ -762,7 +856,7 @@ func (h *DriverInvitationsHandler) CancelInvitation(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_invitation")
 		return
 	}
-	ok, err := h.repo.SetStatusIfPending(c.Request.Context(), token, driverinvitations.StatusCancelled)
+	ok, err := h.repo.DeletePendingByToken(c.Request.Context(), token)
 	if err != nil {
 		h.logger.Error("driver invitation cancel", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_cancel_invitation")
@@ -796,12 +890,12 @@ func (h *DriverInvitationsHandler) ListInvitations(c *gin.Context) {
 	for _, inv := range list {
 		st := driverinvitations.EffectiveStatus(inv)
 		item := gin.H{
-			"token":       inv.Token,
-			"phone":       inv.Phone,
-			"expires_at":  inv.ExpiresAt,
-			"created_at":  inv.CreatedAt,
-			"status":      st,
-			"invited_by":  inv.InvitedBy.String(),
+			"token":      inv.Token,
+			"phone":      inv.Phone,
+			"expires_at": inv.ExpiresAt,
+			"created_at": inv.CreatedAt,
+			"status":     st,
+			"invited_by": inv.InvitedBy.String(),
 		}
 		if inv.RespondedAt != nil {
 			item["responded_at"] = inv.RespondedAt
@@ -1003,19 +1097,19 @@ func (h *DriverInvitationsHandler) ListAllDriversForFreelance(c *gin.Context) {
 		}
 	}
 	f := drivers.ListDriversFilter{
-		Phone:      strings.TrimSpace(c.Query("phone")),
-		Name:       strings.TrimSpace(c.Query("name")),
-		WorkStatus: strings.TrimSpace(c.Query("work_status")),
-		TruckType:  strings.TrimSpace(c.Query("truck_type")),
-		DriverType: strings.TrimSpace(c.Query("driver_type")),
+		Phone:         strings.TrimSpace(c.Query("phone")),
+		Name:          strings.TrimSpace(c.Query("name")),
+		WorkStatus:    strings.TrimSpace(c.Query("work_status")),
+		TruckType:     strings.TrimSpace(c.Query("truck_type")),
+		DriverType:    strings.TrimSpace(c.Query("driver_type")),
 		AccountStatus: strings.TrimSpace(c.Query("account_status")),
-		HasPhoto:   hasPhoto,
-		Latitude:   latPtr,
-		Longitude:  lngPtr,
-		RadiusKM:   radiusPtr,
-		Page:       1,
-		Limit:      20,
-		Sort:       strings.TrimSpace(c.DefaultQuery("sort", "updated_at:desc")),
+		HasPhoto:      hasPhoto,
+		Latitude:      latPtr,
+		Longitude:     lngPtr,
+		RadiusKM:      radiusPtr,
+		Page:          1,
+		Limit:         20,
+		Sort:          strings.TrimSpace(c.DefaultQuery("sort", "updated_at:desc")),
 	}
 	if p := c.Query("page"); p != "" {
 		if n, err := strconv.Atoi(p); err == nil && n > 0 {
@@ -1041,11 +1135,11 @@ func (h *DriverInvitationsHandler) ListAllDriversForFreelance(c *gin.Context) {
 		totalPages = (total + f.Limit - 1) / f.Limit
 	}
 	resp.OKLang(c, "ok", gin.H{
-		"items":      list,
-		"total":      total,
-		"page":       f.Page,
-		"limit":      f.Limit,
+		"items":       list,
+		"total":       total,
+		"page":        f.Page,
+		"limit":       f.Limit,
 		"total_pages": totalPages,
-		"has_next":   f.Page < totalPages,
+		"has_next":    f.Page < totalPages,
 	})
 }

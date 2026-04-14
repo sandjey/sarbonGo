@@ -1211,6 +1211,7 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 			},
 			"offer": gin.H{
 				"id":               row.ID.String(),
+				"driver_id":        row.CarrierID.String(),
 				"proposed_by":      row.ProposedBy,
 				"price":            row.Price,
 				"invitation_price": row.Price,
@@ -1345,6 +1346,13 @@ func (h *CargoHandler) ListOffersForDriver(c *gin.Context) {
 				"source_role":      sourceRole,
 				"source_id":        sourceID,
 			},
+		}
+		if row.CargoCreatedByType != nil && strings.EqualFold(strings.TrimSpace(*row.CargoCreatedByType), "dispatcher") && row.CargoCreatedByID != nil {
+			itemOffer := item["offer"].(gin.H)
+			itemOffer["cargo_manager_id"] = row.CargoCreatedByID.String()
+		} else {
+			itemOffer := item["offer"].(gin.H)
+			itemOffer["cargo_manager_id"] = nil
 		}
 		if row.TripID != nil {
 			item["trip"] = gin.H{"id": row.TripID.String(), "status": row.TripStatus}

@@ -85,13 +85,13 @@ func (h *DriverToDispatcherInvitationsHandler) ListSentByDriver(c *gin.Context) 
 	for _, inv := range list {
 		st := drivertodispatcherinvitations.EffectiveStatus(inv)
 		item := gin.H{
-			"token":              inv.Token,
-			"dispatcher_phone":   inv.DispatcherPhone,
+			"token":               inv.Token,
+			"dispatcher_phone":    inv.DispatcherPhone,
 			"to_dispatcher_phone": inv.DispatcherPhone,
-			"driver_id":          inv.DriverID.String(),
-			"expires_at":         inv.ExpiresAt,
-			"created_at":         inv.CreatedAt,
-			"status":             st,
+			"driver_id":           inv.DriverID.String(),
+			"expires_at":          inv.ExpiresAt,
+			"created_at":          inv.CreatedAt,
+			"status":              st,
 		}
 		if inv.RespondedAt != nil {
 			item["responded_at"] = inv.RespondedAt
@@ -109,6 +109,17 @@ func (h *DriverToDispatcherInvitationsHandler) CancelByDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "token_required")
 		return
 	}
+	var req struct {
+		Reason string `json:"reason" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
+		return
+	}
+	if len(strings.TrimSpace(req.Reason)) < 3 {
+		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_too_short")
+		return
+	}
 	inv, err := h.repo.GetPendingByToken(c.Request.Context(), token)
 	if err != nil || inv == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "invitation_not_found_or_expired")
@@ -118,7 +129,7 @@ func (h *DriverToDispatcherInvitationsHandler) CancelByDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_invitation")
 		return
 	}
-	ok, err := h.repo.SetStatusIfPending(c.Request.Context(), token, drivertodispatcherinvitations.StatusCancelled)
+	ok, err := h.repo.DeletePendingByToken(c.Request.Context(), token)
 	if err != nil {
 		h.logger.Error("driver to dispatcher invitation cancel", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_cancel_invitation")
@@ -152,13 +163,13 @@ func (h *DriverToDispatcherInvitationsHandler) ListReceivedByDispatcher(c *gin.C
 	for _, inv := range list {
 		st := drivertodispatcherinvitations.EffectiveStatus(inv)
 		item := gin.H{
-			"token":              inv.Token,
-			"driver_id":          inv.DriverID.String(),
-			"dispatcher_phone":   inv.DispatcherPhone,
-			"from_driver_id":     inv.DriverID.String(),
-			"expires_at":         inv.ExpiresAt,
-			"created_at":         inv.CreatedAt,
-			"status":             st,
+			"token":            inv.Token,
+			"driver_id":        inv.DriverID.String(),
+			"dispatcher_phone": inv.DispatcherPhone,
+			"from_driver_id":   inv.DriverID.String(),
+			"expires_at":       inv.ExpiresAt,
+			"created_at":       inv.CreatedAt,
+			"status":           st,
 		}
 		if inv.RespondedAt != nil {
 			item["responded_at"] = inv.RespondedAt

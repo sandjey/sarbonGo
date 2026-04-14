@@ -103,6 +103,18 @@ func (r *Repo) SetStatusIfPending(ctx context.Context, token string, newStatus s
 	return tag.RowsAffected() > 0, nil
 }
 
+// DeletePendingByToken removes a pending non-expired invitation row.
+func (r *Repo) DeletePendingByToken(ctx context.Context, token string) (bool, error) {
+	tag, err := r.pg.Exec(ctx,
+		`DELETE FROM driver_to_dispatcher_invitations
+		 WHERE token = $1 AND status = $2 AND expires_at > now()`,
+		token, StatusPending)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // RevertToPending undoes an accepted mark if the follow-up driver update failed.
 func (r *Repo) RevertToPending(ctx context.Context, token string) error {
 	_, err := r.pg.Exec(ctx,
