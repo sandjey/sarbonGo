@@ -3492,67 +3492,6 @@ paths:
       responses:
         "200": { description: declined }
 
-  /v1/dispatchers/driver-invitations:
-    get:
-      deprecated: true
-      tags: ["Driver Manager / Connect offers"]
-      summary: "Список outgoing connection offers (deprecated)"
-      description: |
-        Используйте `GET /v1/dispatchers/connection-offers?direction=outgoing`.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200": { description: "data.items — массив приглашений (token, phone, type, status, invited_by, company_id/dispatcher_id, expires_at, created_at, responded_at)" }
-    post:
-      tags: ["Driver Manager / Connect offers"]
-      summary: "Отправить приглашение водителю (фриланс — без компании)"
-      description: |
-        **Фриланс-диспетчер:** connection offer водителю только по **driver_id** (UUID водителя из поиска GET /v1/dispatchers/drivers/find).
-        Отправка по номеру телефона удалена.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [driver_id]
-              properties:
-                driver_id: { type: string, format: uuid, description: "UUID водителя из поиска GET .../drivers/find (приглашение по id)" }
-            example:
-              driver_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-      responses:
-        "201": { description: "data.token, data.expires_in_hours" }
-        "400": { description: "Неверное тело; driver_id не существует" }
-        "409": { description: "Неистёкшее приглашение на этот номер уже отправлено (driver_invitation_already_pending)" }
-
-  /v1/dispatchers/driver-invitations/{token}:
-    delete:
-      tags: ["Driver Manager / Connect offers"]
-      summary: "Отменить приглашение (диспетчер)"
-      description: |
-        **Диспетчер:** отменить (отозвать) отправленное приглашение. Можно отменить только своё приглашение. token — из GET /v1/dispatchers/driver-invitations.
-        При отмене pending-запись удаляется из таблицы (не переводится в статус cancelled).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: token
-          in: path
-          required: true
-          schema: { type: string, example: "a1b2c3d4e5f6789012345678abcdef0123456789abcdef0123456789" }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                reason: { type: string, example: "driver does not respond" }
-              required: [reason]
-      responses:
-        "200": { description: "ok (invitation row deleted)" }
-        "400": { description: "rejection_reason_required / rejection_reason_too_short" }
-        "403": { description: "not your invitation" }
-        "404": { description: "invitation not found or expired" }
-
   /v1/dispatchers/connection-offers:
     get:
       tags: ["Driver Manager / Connect offers"]
@@ -3572,6 +3511,96 @@ paths:
       responses:
         "200": { description: "data.direction, data.items[]" }
         "400": { description: "invalid direction" }
+    post:
+      tags: ["Driver Manager / Connect offers"]
+      summary: "Отправить connection offer водителю"
+      description: |
+        **Диспетчер:** отправить connection offer водителю. Тело: `driver_id`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver_id: { type: string, format: uuid }
+              required: [driver_id]
+      responses:
+        "201": { description: "data.token, data.expires_in_hours, data.linked" }
+        "400": { description: invalid driver_id }
+        "403": { description: access denied }
+        "404": { description: driver not found }
+        "409": { description: "driver already linked or invitation pending (driver_invitation_already_pending)" }
+
+  /v1/dispatchers/connection-offers/{token}:
+    delete:
+      tags: ["Driver Manager / Connect offers"]
+      summary: "Отменить исходящий connection offer (диспетчер)"
+      description: |
+        Отмена требует обязательную причину, запись приглашения удаляется из таблицы.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string, example: "a1b2c3d4e5f6789012345678abcdef0123456789abcdef0123456789" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, example: "driver does not respond" }
+              required: [reason]
+      responses:
+        "200": { description: "ok (invitation row deleted)" }
+        "400": { description: "rejection_reason_required / rejection_reason_too_short" }
+        "403": { description: not your invitation }
+        "404": { description: invitation not found or expired }
+
+  /v1/dispatchers/connection-offers/accept:
+    post:
+      tags: ["Driver Manager / Connect offers"]
+      summary: "Принять incoming connection offer от водителя"
+      description: |
+        Тело: `token`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+              required: [token]
+      responses:
+        "200": { description: "data.driver_id" }
+        "400": { description: invitation not found or expired }
+        "403": { description: invitation was sent to another phone }
+
+  /v1/dispatchers/connection-offers/decline:
+    post:
+      tags: ["Driver Manager / Connect offers"]
+      summary: "Отклонить incoming connection offer от водителя"
+      description: |
+        Тело: `token`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+              required: [token]
+      responses:
+        "200": { description: data.status = declined }
+        "400": { description: invitation not found or expired }
+        "403": { description: invitation was sent to another phone }
 
   /v1/dispatchers/drivers/find:
     get:
@@ -3835,33 +3864,6 @@ paths:
         "200": { description: "data.event = updated, data.driver — полный объект водителя с прицепом" }
         "403": { description: "driver must have accepted your invitation" }
         "404": { description: "driver not found" }
-
-  /v1/dispatchers/companies/{companyId}/driver-invitations:
-    post:
-      tags: ["Driver Manager / Connect offers"]
-      summary: "Отправить company connection offer водителю"
-      description: "Тело: driver_id. В ответе — token. Водитель принимает через POST /v1/driver/driver-invitations/accept."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: companyId
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                driver_id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-              required: [driver_id]
-            example:
-              driver_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-      responses:
-        "201": { description: "data.token, data.expires_in_hours" }
-        "403": { description: access denied }
-        "409": { description: "Неистёкшее приглашение в эту компанию на этот номер уже есть (driver_invitation_already_pending)" }
 
   /v1/dispatchers/trips:
     get:
@@ -5711,6 +5713,82 @@ paths:
         "403": { description: not your invitation }
         "404": { description: invitation not found or expired }
 
+  /v1/driver/connection-offers/dispatchers:
+    get:
+      tags: ["Drivers / Connect offers"]
+      summary: "Каталог всех freelance driver managers (aliased)"
+      description: |
+        Алиас для `GET /v1/driver/dispatchers/catalog`.
+        Возвращает всех фриланс-диспетчеров с пагинацией и фильтрами.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, default: 0, minimum: 0 }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string }
+        - name: phone_hint
+          in: query
+          required: false
+          schema: { type: string }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: work_status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: has_photo
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: rating_min
+          in: query
+          required: false
+          schema: { type: number, format: float }
+        - name: rating_max
+          in: query
+          required: false
+          schema: { type: number, format: float }
+        - name: role
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/FreelanceDispatcherRole" }
+      responses:
+        "200": { description: "data.items + data.total + limit/offset" }
+        "400": { description: invalid payload }
+        "401": { description: unauthorized }
+
+  /v1/driver/connection-offers/dispatchers/hint:
+    get:
+      tags: ["Drivers / Connect offers"]
+      summary: "Hint search by driver manager phone (aliased)"
+      description: |
+        Алиас для `GET /v1/driver/dispatchers/hint`.
+        Быстрый поиск фриланс-диспетчеров по префиксу телефона.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: phone
+          in: query
+          required: true
+          schema: { type: string, example: "+99890" }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+      responses:
+        "200": { description: "data.items — array of dispatchers" }
+        "400": { description: phone required / invalid payload }
+        "401": { description: unauthorized }
+
   /v1/driver/dispatchers:
     get:
       tags: ["Legacy / Deprecated"]
@@ -5920,58 +5998,6 @@ paths:
         "400": { description: "rejection_reason_required / rejection_reason_too_short" }
         "403": { description: not your invitation }
         "404": { description: invitation not found or expired }
-
-  /v1/dispatchers/invitations-from-drivers:
-    get:
-      deprecated: true
-      tags: ["Driver Manager / Connect offers"]
-      summary: "Incoming connection offers от водителей (deprecated)"
-      description: |
-        Используйте `GET /v1/dispatchers/connection-offers?direction=incoming`.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200":
-          description: "data.items — приглашения от водителей (token, driver_id, status, driver_name, driver_phone, expires_at, responded_at)"
-        "401": { description: dispatcher not found }
-  /v1/dispatchers/invitations-from-drivers/accept:
-    post:
-      tags: ["Driver Manager / Connect offers"]
-      summary: "Принять приглашение от водителя (диспетчер)"
-      description: |
-        **Диспетчер:** принять приглашение от водителя. Тело: token. Приглашение должно быть на мой номер. После принятия у водителя устанавливается freelancer_id = я; водитель появится в GET /v1/dispatchers/drivers.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                token: { type: string }
-              required: [token]
-      responses:
-        "200": { description: "data.driver_id" }
-        "400": { description: invitation not found or expired }
-        "403": { description: invitation was sent to another phone }
-  /v1/dispatchers/invitations-from-drivers/decline:
-    post:
-      tags: ["Driver Manager / Connect offers"]
-      summary: "Отказать от приглашения водителя (диспетчер)"
-      description: "Тело: token. Приглашение должно быть на мой номер. Статус declined; запись остаётся в истории."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                token: { type: string }
-              required: [token]
-      responses:
-        "200": { description: data.status = declined }
-        "400": { description: invitation not found or expired }
-        "403": { description: invitation was sent to another phone }
 
   /v1/admin/auth/login/password:
     post:
