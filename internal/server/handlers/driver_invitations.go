@@ -116,6 +116,31 @@ type CreateForFreelanceReq struct {
 // CreateForFreelance creates driver invitation as freelance (no company) by driver_id.
 func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+	if err != nil || disp == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+		return
+	}
+	role := ""
+	if disp.ManagerRole != nil {
+		role = strings.TrimSpace(*disp.ManagerRole)
+	}
+	if role != dispatchers.ManagerRoleDriverManager {
+		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+		return
+	}
+
+	count, err := h.drv.GetDriverCount(c.Request.Context(), dispatcherID)
+	if err != nil {
+		h.logger.Error("get driver count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if count >= 10 {
+		resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
+		return
+	}
+
 	var req CreateForFreelanceReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
@@ -136,10 +161,13 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 		return
 	}
 	phone := strings.TrimSpace(drv.Phone)
-	if drv.FreelancerID != nil && *drv.FreelancerID == dispatcherID.String() {
+
+	isLinked, _ := h.drv.IsLinked(c.Request.Context(), req.DriverID, dispatcherID)
+	if isLinked {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_accepted_your_invitation")
 		return
 	}
+
 	dup, err := h.repo.HasPendingFreelanceInvitation(c.Request.Context(), dispatcherID, phone)
 	if err != nil {
 		h.logger.Error("driver invitation duplicate check freelance", zap.Error(err))
@@ -1039,17 +1067,48 @@ func (h *DriverInvitationsHandler) Accept(c *gin.Context) {
 		return
 	}
 	if inv.InvitedByDispatcherID != nil && *inv.InvitedByDispatcherID != uuid.Nil {
+		// Many-to-Many Connection Limit Check
+		dCount, err := h.drv.GetDriverCount(c.Request.Context(), *inv.InvitedByDispatcherID)
+		if err != nil {
+			h.logger.Error("get manager driver count", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		if dCount >= 10 {
+			resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
+			return
+		}
+
+		mCount, err := h.drv.GetManagerCount(c.Request.Context(), driverID)
+		if err != nil {
+			h.logger.Error("get driver manager count", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		if mCount >= 10 {
+			resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
+			return
+		}
+
 		ok, err := h.repo.SetStatusIfPending(c.Request.Context(), token, driverinvitations.StatusAccepted)
 		if err != nil || !ok {
 			resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
 			return
 		}
-		if err := h.drv.SetFreelancerID(c.Request.Context(), driverID, *inv.InvitedByDispatcherID); err != nil {
+
+		// Use the new many-to-many link
+		if err := h.drv.LinkManager(c.Request.Context(), driverID, *inv.InvitedByDispatcherID); err != nil {
 			_ = h.repo.RevertToPending(c.Request.Context(), token)
-			h.logger.Error("driver set freelancer", zap.Error(err))
+			h.logger.Error("driver link manager", zap.Error(err))
 			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
 			return
 		}
+
+		// Backward compatibility: set primary freelancer_id if not set
+		if drv.FreelancerID == nil || *drv.FreelancerID == "" {
+			_ = h.drv.SetFreelancerID(c.Request.Context(), driverID, *inv.InvitedByDispatcherID)
+		}
+
 		if h.stream != nil {
 			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *inv.InvitedByDispatcherID, gin.H{
 				"kind":          "connection_offer",

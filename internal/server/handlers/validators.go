@@ -65,6 +65,35 @@ func validatePassportNumber(s string) string {
 	return ""
 }
 
+func validatePlateNumber(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "plate_number_required"
+	}
+	if len(s) < 3 || len(s) > 20 {
+		return "invalid_plate_number"
+	}
+	return ""
+}
+
+func validateTechPassport(series, number string) string {
+	series = strings.TrimSpace(series)
+	number = strings.TrimSpace(number)
+	if series == "" {
+		return "tech_series_required"
+	}
+	if number == "" {
+		return "tech_number_required"
+	}
+	if len(series) < 2 || len(series) > 10 {
+		return "invalid_tech_series"
+	}
+	if len(number) < 5 || len(number) > 20 {
+		return "invalid_tech_number"
+	}
+	return ""
+}
+
 func validatePINFL(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {

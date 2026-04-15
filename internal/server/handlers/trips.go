@@ -539,7 +539,7 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 			return
 		}
-		// CARGO_MANAGER may only confirm closing the trip (COMPLETED), after the driver requested it — not IN_TRANSIT / DELIVERED steps.
+		// CARGO_MANAGER may only confirm closing the trip (COMPLETED), after the driver requested it.
 		if h.dispatchers != nil {
 			dRec, err := h.dispatchers.FindByID(ctx, dispID)
 			if err != nil {
@@ -548,7 +548,7 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 					return
 				}
 				h.logger.Error("dispatcher profile for trip confirm", zap.Error(err))
-				resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+				resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 				return
 			}
 			role := ""
@@ -565,10 +565,17 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 	tx, err := h.repo.BeginTx(ctx)
 	if err != nil {
 		h.logger.Error("trips begin tx", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	defer tx.Rollback(ctx)
+
+	// Ensure we lock the trip for update to avoid race conditions.
+	tForUpdate, err := h.repo.GetByIDForUpdateTx(ctx, tx, tripID)
+	if err != nil || tForUpdate == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
+		return
+	}
 
 	tr, err := h.repo.ConfirmTransitionTx(ctx, tx, tripID, driverID, asDispatcher)
 	if err != nil {
@@ -584,15 +591,15 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		case trips.ErrTripCompletionAlreadyPending:
 			resp.ErrorLang(c, http.StatusBadRequest, "trip_completion_already_pending")
 		default:
-			h.logger.Error("confirm transition", zap.Error(err))
+			h.logger.Error("confirm transition error", zap.Error(err))
 			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		}
 		return
 	}
 	if tr.Status == trips.StatusInTransit {
 		if err := h.cargoRepo.OnTripEnteredInTransitTx(ctx, tx, tr.CargoID); err != nil {
-			h.logger.Error("on trip in transit", zap.Error(err))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+			h.logger.Error("on trip in transit error", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 			return
 		}
 	}
@@ -602,14 +609,14 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 			return
 		}
 		if err := h.cargoRepo.ArchiveCompletedCargoTx(ctx, tx, tr.CargoID, tr.ID, *tr.DriverID); err != nil {
-			h.logger.Error("archive completed cargo", zap.Error(err))
+			h.logger.Error("archive completed cargo error", zap.Error(err))
 			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_complete_trip")
 			return
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		h.logger.Error("trips commit", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
+		h.logger.Error("trips commit error", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	h.notifyTripTransition(ctx, tBefore, tr)

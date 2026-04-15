@@ -24,6 +24,10 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
 
+func (r *Repo) BeginTx(ctx context.Context) (pgx.Tx, error) {
+	return r.pg.Begin(ctx)
+}
+
 // tripStatusConsumesVehiclesLeft is true when vehicles_left was already decremented (trip reached IN_TRANSIT or later in the new model).
 func tripStatusConsumesVehiclesLeft(status string) bool {
 	switch strings.ToUpper(strings.TrimSpace(status)) {
@@ -1007,6 +1011,132 @@ WHERE ` + where + ` ORDER BY o.created_at DESC`
 	return list, rows.Err()
 }
 
+// ListDriverManagerOffers lists offers for a driver manager:
+// 1. Offers proposed by this manager (proposed_by_id = managerID).
+// 2. Offers proposed to drivers linked to this manager (carrier_id in driver_manager_relations).
+func (r *Repo) ListDriverManagerOffers(ctx context.Context, managerID uuid.UUID, limit, offset int) ([]DriverCargoOffer, error) {
+	if limit < 1 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	rows, err := r.pg.Query(ctx, `
+SELECT
+  o.id, o.cargo_id, o.carrier_id,
+  o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER'), o.status,
+  COALESCE(o.rejection_reason, ''), o.created_at,
+  c.status, c.name, c.weight, c.volume, c.truck_type, c.vehicles_amount, COALESCE(c.vehicles_left, 0),
+  (
+    SELECT rp.city_code
+    FROM route_points rp
+    WHERE rp.cargo_id = c.id AND rp.is_main_load = true
+    ORDER BY rp.point_order
+    LIMIT 1
+  ) AS from_city_code,
+  (
+    SELECT rp.city_code
+    FROM route_points rp
+    WHERE rp.cargo_id = c.id AND rp.is_main_unload = true
+    ORDER BY rp.point_order
+    LIMIT 1
+  ) AS to_city_code,
+  p.total_amount, p.total_currency, c.created_by_type, c.created_by_id,
+  t.id, t.status
+FROM offers o
+INNER JOIN cargo c ON c.id = o.cargo_id AND c.deleted_at IS NULL
+LEFT JOIN payments p ON p.cargo_id = c.id
+LEFT JOIN trips t ON t.offer_id = o.id
+WHERE (o.proposed_by_id = $1)
+   OR (o.proposed_by = 'DISPATCHER' AND o.carrier_id IN (SELECT driver_id FROM driver_manager_relations WHERE manager_id = $1))
+ORDER BY o.created_at DESC
+LIMIT $2 OFFSET $3`, managerID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []DriverCargoOffer
+	for rows.Next() {
+		var row DriverCargoOffer
+		var rejReason string
+		var cargoName sql.NullString
+		var cargoFromCityCode sql.NullString
+		var cargoToCityCode sql.NullString
+		var cargoCurrentPrice sql.NullFloat64
+		var cargoCurrentCurrency sql.NullString
+		var cargoCreatedByType sql.NullString
+		var cargoCreatedByID *uuid.UUID
+		var tripID *uuid.UUID
+		var tripStatus sql.NullString
+		err := rows.Scan(
+			&row.ID, &row.CargoID, &row.CarrierID,
+			&row.Price, &row.Currency, &row.Comment, &row.ProposedBy, &row.Status,
+			&rejReason, &row.CreatedAt,
+			&row.CargoStatus, &cargoName, &row.CargoWeight, &row.CargoVolume, &row.CargoTruckType, &row.CargoVehiclesAmount, &row.CargoVehiclesLeft,
+			&cargoFromCityCode, &cargoToCityCode,
+			&cargoCurrentPrice, &cargoCurrentCurrency, &cargoCreatedByType, &cargoCreatedByID,
+			&tripID, &tripStatus)
+		if err != nil {
+			return nil, err
+		}
+		if rejReason != "" {
+			row.RejectionReason = &rejReason
+		}
+		if cargoName.Valid {
+			v := cargoName.String
+			row.CargoName = &v
+		}
+		if cargoFromCityCode.Valid {
+			v := cargoFromCityCode.String
+			row.CargoFromCityCode = &v
+		}
+		if cargoToCityCode.Valid {
+			v := cargoToCityCode.String
+			row.CargoToCityCode = &v
+		}
+		if cargoCurrentPrice.Valid {
+			v := cargoCurrentPrice.Float64
+			row.CargoCurrentPrice = &v
+		}
+		if cargoCurrentCurrency.Valid {
+			v := cargoCurrentCurrency.String
+			row.CargoCurrentCurrency = &v
+		}
+		if cargoCreatedByType.Valid {
+			v := cargoCreatedByType.String
+			row.CargoCreatedByType = &v
+		}
+		row.CargoCreatedByID = cargoCreatedByID
+		row.TripID = tripID
+		if tripStatus.Valid {
+			s := tripStatus.String
+			row.TripStatus = &s
+		} else {
+			row.TripStatus = nil
+		}
+		list = append(list, row)
+	}
+	return list, rows.Err()
+}
+
+// CountDriverManagerOffers counts offers for a driver manager.
+func (r *Repo) CountDriverManagerOffers(ctx context.Context, managerID uuid.UUID) (int, error) {
+	const q = `
+SELECT COUNT(*)
+FROM offers o
+INNER JOIN cargo c ON c.id = o.cargo_id AND c.deleted_at IS NULL
+WHERE (o.proposed_by_id = $1)
+   OR (o.proposed_by = 'DISPATCHER' AND o.carrier_id IN (SELECT driver_id FROM driver_manager_relations WHERE manager_id = $1))`
+	var count int
+	err := r.pg.QueryRow(ctx, q, managerID).Scan(&count)
+	return count, err
+}
+
 // CountDriverCargoOffersByBucket returns count of offers by driver (carrier_id) for selected bucket.
 // bucket: sent|accepted|completed|rejected.
 func (r *Repo) CountDriverCargoOffersByBucket(ctx context.Context, driverID uuid.UUID, bucket string) (int, error) {
@@ -1155,12 +1285,12 @@ func driverCargoOffersBucketWhere(bucket string) (string, error) {
 	}
 }
 
-// CreateOffer inserts an offer for a cargo. proposedBy: OfferProposedByDriver or OfferProposedByDispatcher.
-func (r *Repo) CreateOffer(ctx context.Context, cargoID, carrierID uuid.UUID, price float64, currency, comment, proposedBy string) (uuid.UUID, error) {
+// CreateOffer inserts an offer for a cargo. proposedBy: DRIVER | DISPATCHER | DRIVER_MANAGER.
+func (r *Repo) CreateOffer(ctx context.Context, cargoID, carrierID uuid.UUID, price float64, currency, comment, proposedBy string, proposedByID *uuid.UUID) (uuid.UUID, error) {
 	if math.IsNaN(price) || math.IsInf(price, 0) || math.Abs(price) > maxOfferPriceNumeric18_2 {
 		return uuid.Nil, ErrOfferPriceOutOfRange
 	}
-	if proposedBy != OfferProposedByDispatcher {
+	if proposedBy != OfferProposedByDispatcher && proposedBy != OfferProposedByDriverManager {
 		proposedBy = OfferProposedByDriver
 	}
 	var status CargoStatus
@@ -1187,11 +1317,26 @@ SELECT EXISTS(
   SELECT 1 FROM offers
   WHERE cargo_id = $1 AND carrier_id = $2
     AND COALESCE(proposed_by, 'DRIVER') = 'DRIVER'
-    AND status IN ('PENDING', 'ACCEPTED')
+    AND status IN ('PENDING', 'ACCEPTED', 'WAITING_DRIVER_CONFIRM')
 )`, cargoID, carrierID).Scan(&driverDup); err != nil {
 			return uuid.Nil, err
 		}
 		if driverDup {
+			return uuid.Nil, ErrDriverOfferAlreadyExists
+		}
+	}
+	if proposedBy == OfferProposedByDriverManager {
+		var managerDup bool
+		if err := r.pg.QueryRow(ctx, `
+SELECT EXISTS(
+  SELECT 1 FROM offers
+  WHERE cargo_id = $1 AND carrier_id = $2
+    AND proposed_by = 'DRIVER_MANAGER'
+    AND status IN ('PENDING', 'ACCEPTED', 'WAITING_DRIVER_CONFIRM')
+)`, cargoID, carrierID).Scan(&managerDup); err != nil {
+			return uuid.Nil, err
+		}
+		if managerDup {
 			return uuid.Nil, ErrDriverOfferAlreadyExists
 		}
 	}
@@ -1202,7 +1347,7 @@ SELECT EXISTS(
   SELECT 1
   FROM offers
   WHERE cargo_id = $1 AND carrier_id = $2 AND COALESCE(proposed_by, 'DRIVER') = 'DISPATCHER'
-    AND status = 'PENDING'
+    AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')
 )`, cargoID, carrierID).Scan(&alreadyExists); err != nil {
 			return uuid.Nil, err
 		}
@@ -1212,27 +1357,27 @@ SELECT EXISTS(
 	}
 	var id uuid.UUID
 	err := r.pg.QueryRow(ctx, `
-INSERT INTO offers (cargo_id, carrier_id, price, currency, comment, status, proposed_by, created_at)
-VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, now()) RETURNING id`,
-		cargoID, carrierID, price, currency, nullStr(comment), proposedBy).Scan(&id)
+INSERT INTO offers (cargo_id, carrier_id, price, currency, comment, status, proposed_by, proposed_by_id, created_at)
+VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, now()) RETURNING id`,
+		cargoID, carrierID, price, currency, nullStr(comment), proposedBy, proposedByID).Scan(&id)
 	return id, err
 }
 
 func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
-	proposedBy := ""
+	proposedByCond := ""
 	switch strings.ToLower(strings.TrimSpace(direction)) {
 	case "", "all", "both":
-		proposedBy = ""
+		proposedByCond = ""
 	case "outgoing", "from_me", "sent", "by":
-		proposedBy = "DISPATCHER"
+		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'"
 	case "incoming", "to_me", "received":
-		proposedBy = "DRIVER"
+		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') IN ('DRIVER', 'DRIVER_MANAGER')"
 	default:
 		return 0, errors.New("cargo: invalid offers direction")
 	}
 	where := "c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
-	if proposedBy != "" {
-		where += " AND COALESCE(o.proposed_by, 'DRIVER') = '" + proposedBy + "'"
+	if proposedByCond != "" {
+		where += " AND " + proposedByCond
 	}
 	args := []any{dispatcherID}
 	argN := 2
@@ -1260,20 +1405,20 @@ func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.U
 	if offset < 0 {
 		offset = 0
 	}
-	proposedBy := ""
+	proposedByCond := ""
 	switch strings.ToLower(strings.TrimSpace(direction)) {
 	case "", "all", "both":
-		proposedBy = ""
+		proposedByCond = ""
 	case "outgoing", "from_me", "sent", "by":
-		proposedBy = "DISPATCHER"
+		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'"
 	case "incoming", "to_me", "received":
-		proposedBy = "DRIVER"
+		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') IN ('DRIVER', 'DRIVER_MANAGER')"
 	default:
 		return nil, errors.New("cargo: invalid offers direction")
 	}
 	where := "c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
-	if proposedBy != "" {
-		where += " AND COALESCE(o.proposed_by, 'DRIVER') = '" + proposedBy + "'"
+	if proposedByCond != "" {
+		where += " AND " + proposedByCond
 	}
 	args := []any{dispatcherID}
 	argN := 2
@@ -1508,9 +1653,19 @@ func (r *Repo) AcceptOffer(ctx context.Context, offerID uuid.UUID) (cargoID, car
 	}
 	defer tx.Rollback(ctx)
 
+	cargoID, carrierID, err = r.AcceptOfferTx(ctx, tx, offerID)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+
+	return cargoID, carrierID, tx.Commit(ctx)
+}
+
+// AcceptOfferTx is the transactional core of AcceptOffer.
+func (r *Repo) AcceptOfferTx(ctx context.Context, tx pgx.Tx, offerID uuid.UUID) (cargoID, carrierID uuid.UUID, err error) {
 	err = tx.QueryRow(ctx, `
 SELECT cargo_id, carrier_id
-FROM offers WHERE id = $1 AND status = 'PENDING'`, offerID).Scan(&cargoID, &carrierID)
+FROM offers WHERE id = $1 AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')`, offerID).Scan(&cargoID, &carrierID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return uuid.Nil, uuid.Nil, ErrOfferNotFoundOrNotPending
@@ -1533,8 +1688,7 @@ FROM offers WHERE id = $1 AND status = 'PENDING'`, offerID).Scan(&cargoID, &carr
 	if !IsSearching(status) {
 		return uuid.Nil, uuid.Nil, ErrCargoNotSearching
 	}
-	// Slots = vehicles_amount: count ACCEPTED offers (not trips). Trips are created after this tx commits,
-	// so counting trips would allow too many accepts in flight; ACCEPTED offers reserve slots correctly.
+	// Slots = vehicles_amount: count ACCEPTED offers (not trips).
 	var acceptedCount int
 	err = tx.QueryRow(ctx,
 		`SELECT COUNT(*) FROM offers WHERE cargo_id = $1 AND status = 'ACCEPTED'`,
@@ -1558,11 +1712,19 @@ FROM offers WHERE id = $1 AND status = 'PENDING'`, offerID).Scan(&cargoID, &carr
 		return uuid.Nil, uuid.Nil, err
 	}
 
-	// Договорная цена хранится на trips (agreed_price) при создании рейса; payments по грузу не меняем.
+	return cargoID, carrierID, nil
+}
 
-	// vehicles_left is decremented when a trip enters LOADING (see OnTripEnteredLoadingTx), not on offer accept.
-	// Do NOT auto-reject other pending offers: cargo may require multiple vehicles.
-	return cargoID, carrierID, tx.Commit(ctx)
+// SetOfferStatusWaitingDriver sets offer status to WAITING_DRIVER_CONFIRM.
+func (r *Repo) SetOfferStatusWaitingDriver(ctx context.Context, offerID uuid.UUID) error {
+	res, err := r.pg.Exec(ctx, "UPDATE offers SET status = 'WAITING_DRIVER_CONFIRM' WHERE id = $1 AND status = 'PENDING'", offerID)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		return ErrOfferNotFoundOrNotPending
+	}
+	return nil
 }
 
 // RejectOffer sets offer status to rejected; reason is mandatory (trimmed non-empty).
@@ -1657,9 +1819,9 @@ func (r *Repo) GetOfferInvitationStats(ctx context.Context, cargoID uuid.UUID) (
 	var s OfferInvitationStats
 	err := r.pg.QueryRow(ctx, `
 SELECT
-  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DRIVER'),
+  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') IN ('DRIVER','DRIVER_MANAGER')),
   COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER'),
-  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DRIVER' AND status = 'PENDING'),
+  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') IN ('DRIVER','DRIVER_MANAGER') AND status = 'PENDING'),
   COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER' AND status = 'PENDING')
 FROM offers WHERE cargo_id = $1`, cargoID).Scan(
 		&s.IncomingTotal, &s.OutgoingTotal, &s.IncomingPending, &s.OutgoingPending)

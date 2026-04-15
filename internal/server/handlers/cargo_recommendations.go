@@ -211,7 +211,7 @@ func (h *CargoRecommendationsHandler) AcceptRecommendation(c *gin.Context) {
 		price = *pay.TotalAmount
 		currency = *pay.TotalCurrency
 	}
-	offerID, err := h.cargoRepo.CreateOffer(c.Request.Context(), cargoID, driverID, price, currency, "", cargo.OfferProposedByDriver)
+	offerID, err := h.cargoRepo.CreateOffer(c.Request.Context(), cargoID, driverID, price, currency, "", cargo.OfferProposedByDriver, &driverID)
 	if err != nil {
 		h.logger.Error("cargo recommend accept create offer", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")

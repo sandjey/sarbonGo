@@ -251,7 +251,7 @@ func (h *ProfileHandler) PhoneChangeRequest(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
-	newPhone, err := util.ValidateUzPhoneStrict(req.NewPhone)
+	newPhone, err := util.NormalizeE164StrictPlus(strings.TrimSpace(req.NewPhone))
 	if err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
@@ -296,6 +296,10 @@ func (h *ProfileHandler) PhoneChangeVerify(c *gin.Context) {
 	otp := strings.TrimSpace(req.OTP)
 	if otp == "" {
 		resp.ErrorLang(c, http.StatusBadRequest, "otp_required")
+		return
+	}
+	if len(otp) != h.otpLen || !util.IsNumeric(otp) {
+		resp.ErrorLang(c, http.StatusBadRequest, "otp_must_be_numeric")
 		return
 	}
 

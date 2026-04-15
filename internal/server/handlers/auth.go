@@ -66,14 +66,19 @@ func (h *AuthHandler) SendOTP(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
-	phone, err := util.NormalizeE164StrictPlus(req.Phone)
+	phone := strings.TrimSpace(req.Phone)
+	if phone == "" {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	normalizedPhone, err := util.NormalizeE164StrictPlus(phone)
 	if err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
 
 	ttlSec := int(h.otpTTL.Seconds())
-	code, requestID, err := SendOTP(c.Request.Context(), h.tg, phone, ttlSec, h.otpLen)
+	code, requestID, err := SendOTP(c.Request.Context(), h.tg, normalizedPhone, ttlSec, h.otpLen)
 	if err != nil {
 		if WriteOTPSendError(c, err, h.logger, "telegram sendVerificationMessage failed") {
 			return
@@ -84,7 +89,7 @@ func (h *AuthHandler) SendOTP(c *gin.Context) {
 
 	ctx := c.Request.Context()
 	ip := strings.TrimSpace(c.ClientIP())
-	if err := h.otp.SaveOTP(ctx, phone, code, requestID, ip); err != nil {
+	if err := h.otp.SaveOTP(ctx, normalizedPhone, code, requestID, ip); err != nil {
 		if errors.Is(err, store.ErrOTPCooldown) {
 			resp.ErrorLang(c, http.StatusTooManyRequests, "otp_cooldown")
 			return
@@ -112,18 +117,23 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
-	phone, err := util.NormalizeE164(req.Phone)
+	phone := strings.TrimSpace(req.Phone)
+	if phone == "" {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	normalizedPhone, err := util.NormalizeE164StrictPlus(phone)
 	if err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
 	otp := strings.TrimSpace(req.OTP)
-	if len(otp) < 4 || len(otp) > 8 || !util.IsNumeric(otp) {
+	if len(otp) != h.otpLen || !util.IsNumeric(otp) {
 		resp.ErrorLang(c, http.StatusBadRequest, "otp_must_be_numeric")
 		return
 	}
 
-	rec, err := h.otp.Verify(c.Request.Context(), phone, otp)
+	rec, err := h.otp.Verify(c.Request.Context(), normalizedPhone, otp)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrOTPExpired):
@@ -142,7 +152,7 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 	}
 	_ = rec // request_id can be used for optional Telegram checkVerificationStatus
 
-	d, err := h.drivers.FindByPhone(c.Request.Context(), phone)
+	d, err := h.drivers.FindByPhone(c.Request.Context(), normalizedPhone)
 	if err == nil {
 		driverUUID, _ := uuid.Parse(d.ID)
 		tokens, refreshClaims, err := h.jwtm.Issue("driver", driverUUID)
@@ -165,7 +175,7 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		return
 	}
 
-	sessionID, err := h.sessions.Create(c.Request.Context(), phone)
+	sessionID, err := h.sessions.Create(c.Request.Context(), normalizedPhone)
 	if err != nil {
 		h.logger.Error("create register session failed", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")

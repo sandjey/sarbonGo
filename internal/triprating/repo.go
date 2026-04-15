@@ -43,7 +43,7 @@ func (r *Repo) Upsert(ctx context.Context, tripID uuid.UUID, raterKind string, r
 	_, err := r.pg.Exec(ctx, `
 INSERT INTO trip_ratings (trip_id, rater_kind, rater_id, ratee_kind, ratee_id, stars, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, now(), now())
-ON CONFLICT (trip_id, rater_kind) DO UPDATE SET
+ON CONFLICT (trip_id, rater_kind, ratee_kind) DO UPDATE SET
   stars = EXCLUDED.stars,
   ratee_kind = EXCLUDED.ratee_kind,
   ratee_id = EXCLUDED.ratee_id,

@@ -90,6 +90,26 @@ func (h *KYCHandler) Submit(c *gin.Context) {
 		return
 	}
 
+	// Validate Power data
+	if errKey := validatePlateNumber(req.PowerData.PlateNumber); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	if errKey := validateTechPassport(req.PowerData.TechSeries, req.PowerData.TechNumber); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+
+	// Validate Trailer data
+	if errKey := validatePlateNumber(req.TrailerData.PlateNumber); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	if errKey := validateTechPassport(req.TrailerData.TechSeries, req.TrailerData.TechNumber); errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+
 	driverOK := req.DriverData.PassportSeries != "" && req.DriverData.PassportNumber != "" && req.DriverData.PINFL != "" &&
 		req.DriverData.ScanStatus != nil && *req.DriverData.ScanStatus
 

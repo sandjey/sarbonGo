@@ -220,6 +220,50 @@ func (r *Repo) SetFreelancerID(ctx context.Context, driverID, freelancerID uuid.
 	return err
 }
 
+// LinkManager adds a many-to-many relationship between a driver and a manager.
+func (r *Repo) LinkManager(ctx context.Context, driverID, managerID uuid.UUID) error {
+	const q = `
+INSERT INTO driver_manager_relations (driver_id, manager_id)
+VALUES ($1, $2)
+ON CONFLICT (driver_id, manager_id) DO NOTHING`
+	_, err := r.pg.Exec(ctx, q, driverID, managerID)
+	return err
+}
+
+// UnlinkManager removes a many-to-many relationship between a driver and a manager.
+func (r *Repo) UnlinkManager(ctx context.Context, driverID, managerID uuid.UUID) (bool, error) {
+	const q = `DELETE FROM driver_manager_relations WHERE driver_id = $1 AND manager_id = $2`
+	tag, err := r.pg.Exec(ctx, q, driverID, managerID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// GetManagerCount returns the number of managers linked to this driver.
+func (r *Repo) GetManagerCount(ctx context.Context, driverID uuid.UUID) (int, error) {
+	const q = `SELECT COUNT(*) FROM driver_manager_relations WHERE driver_id = $1`
+	var count int
+	err := r.pg.QueryRow(ctx, q, driverID).Scan(&count)
+	return count, err
+}
+
+// GetDriverCount returns the number of drivers linked to this manager.
+func (r *Repo) GetDriverCount(ctx context.Context, managerID uuid.UUID) (int, error) {
+	const q = `SELECT COUNT(*) FROM driver_manager_relations WHERE manager_id = $1`
+	var count int
+	err := r.pg.QueryRow(ctx, q, managerID).Scan(&count)
+	return count, err
+}
+
+// IsLinked checks if a driver and a manager are linked.
+func (r *Repo) IsLinked(ctx context.Context, driverID, managerID uuid.UUID) (bool, error) {
+	const q = `SELECT EXISTS(SELECT 1 FROM driver_manager_relations WHERE driver_id = $1 AND manager_id = $2)`
+	var exists bool
+	err := r.pg.QueryRow(ctx, q, driverID, managerID).Scan(&exists)
+	return exists, err
+}
+
 // UnlinkFromFreelancer removes driver from dispatcher (sets freelancer_id = NULL). Only if driver is currently linked to this freelancer.
 func (r *Repo) UnlinkFromFreelancer(ctx context.Context, driverID, freelancerID uuid.UUID) (bool, error) {
 	const q = `UPDATE drivers SET freelancer_id = NULL, updated_at = now() WHERE id = $1 AND freelancer_id = $2`

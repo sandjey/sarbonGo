@@ -348,9 +348,10 @@ END$$;
 	_, err = pg.Exec(ctx, `
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offers_proposed_by_check') THEN
-    ALTER TABLE offers ADD CONSTRAINT offers_proposed_by_check CHECK (proposed_by IN ('DRIVER', 'DISPATCHER'));
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'offers_proposed_by_check') THEN
+    ALTER TABLE offers DROP CONSTRAINT offers_proposed_by_check;
   END IF;
+  ALTER TABLE offers ADD CONSTRAINT offers_proposed_by_check CHECK (proposed_by IN ('DRIVER', 'DISPATCHER', 'DRIVER_MANAGER'));
 END$$;
 `)
 	if err != nil {

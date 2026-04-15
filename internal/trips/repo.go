@@ -80,6 +80,22 @@ func (r *Repo) Create(ctx context.Context, cargoID, offerID, driverID uuid.UUID,
 	return id, err
 }
 
+// CreateTx creates trip inside an existing transaction.
+func (r *Repo) CreateTx(ctx context.Context, tx pgx.Tx, cargoID, offerID, driverID uuid.UUID, agreedPrice float64, agreedCurrency string) (uuid.UUID, error) {
+	if math.IsNaN(agreedPrice) || math.IsInf(agreedPrice, 0) || math.Abs(agreedPrice) > maxAgreedPriceNumeric18_2 {
+		return uuid.Nil, ErrAgreedPriceOutOfRange
+	}
+	cur := strings.ToUpper(strings.TrimSpace(agreedCurrency))
+	if cur == "" {
+		cur = "UZS"
+	}
+	var id uuid.UUID
+	err := tx.QueryRow(ctx,
+		`INSERT INTO trips (cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+		cargoID, offerID, driverID, StatusInProgress, agreedPrice, cur).Scan(&id)
+	return id, err
+}
+
 func scanTrip(row pgx.Row) (*Trip, error) {
 	var t Trip
 	err := row.Scan(&t.ID, &t.CargoID, &t.OfferID, &t.DriverID, &t.Status,

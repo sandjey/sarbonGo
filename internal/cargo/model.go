@@ -162,8 +162,17 @@ type Payment struct {
 
 // ProposedBy — кто задал цену в оффере (кто должен принять другую сторону).
 const (
-	OfferProposedByDriver     = "DRIVER"     // водитель предложил цену → принимает диспетчер
-	OfferProposedByDispatcher = "DISPATCHER" // диспетчер предложил цену → принимает водитель
+	OfferProposedByDriver        = "DRIVER"         // водитель предложил цену → принимает диспетчер
+	OfferProposedByDispatcher    = "DISPATCHER"     // диспетчер предложил цену → принимает водитель
+	OfferProposedByDriverManager = "DRIVER_MANAGER"  // менеджер водителя предложил цену → принимает cargo manager
+)
+
+// Offer status values
+const (
+	OfferStatusPending             = "PENDING"
+	OfferStatusAccepted            = "ACCEPTED"
+	OfferStatusRejected            = "REJECTED"
+	OfferStatusWaitingDriverConfirm = "WAITING_DRIVER_CONFIRM"
 )
 
 // Offer model (table offers).
@@ -174,9 +183,10 @@ type Offer struct {
 	Price           float64
 	Currency        string
 	Comment         *string
-	ProposedBy      string  // DRIVER | DISPATCHER
-	Status          string  // PENDING, ACCEPTED, REJECTED
-	RejectionReason *string // optional, when dispatcher rejects
+	ProposedBy      string     // DRIVER | DISPATCHER | DRIVER_MANAGER
+	ProposedByID    *uuid.UUID // ID диспетчера, если предложил диспетчер (или менеджер водителя)
+	Status          string     // PENDING, ACCEPTED, REJECTED, WAITING_DRIVER_CONFIRM
+	RejectionReason *string
 	CreatedAt       time.Time
 }
 

@@ -510,6 +510,8 @@ const swaggerHTML = `<!doctype html>
           'Drivers / Driver invitations',
           'Drivers / My dispatchers',
           'Drivers / Invite dispatcher',
+          'Drivers / Offers',
+          'Drivers / Offer decision flow',
         ]);
         // Do not hide POST /v1/driver/dispatchers/.../rating (cargo manager rating) with a blanket dispatchers prefix.
         function hideDriverMobilePath(pathText) {
@@ -526,6 +528,7 @@ const swaggerHTML = `<!doctype html>
           'Drivers / Registration',
           'Drivers / KYC',
           'Drivers / Profile',
+          'Drivers / Offer minimal',
           'Drivers / Cargo view',
           'Drivers / Cargo likes',
           'Drivers / Dispatcher likes',
@@ -556,6 +559,9 @@ const swaggerHTML = `<!doctype html>
           'Driver Manager / Drivers catalog',
           'Driver Manager / My drivers',
           'Driver Manager / Notifications',
+          'Driver Manager / Offers',
+          'Driver Manager / Trips',
+          'Driver Manager / Completion & ratings flow',
           'Admin / Auth',
           'Admin / Companies',
           'Company / Dispatcher (приглашённый)',
@@ -612,6 +618,9 @@ const swaggerHTML = `<!doctype html>
               'Driver Manager / Drivers catalog',
               'Driver Manager / My drivers',
               'Driver Manager / Notifications',
+              'Driver Manager / Offers',
+              'Driver Manager / Trips',
+              'Driver Manager / Completion & ratings flow',
             ]);
             return allowedDispatcherTags.has(t);
           }

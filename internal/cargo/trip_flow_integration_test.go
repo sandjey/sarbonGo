@@ -147,15 +147,15 @@ func TestAcceptOffer_AcceptedSlotsLimit(t *testing.T) {
 	defer itestDeleteCargo(t, pool, cargoID)
 
 	d1, d2, d3 := itestInsertDriver(t, pool), itestInsertDriver(t, pool), itestInsertDriver(t, pool)
-	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "", OfferProposedByDriver)
+	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer1: %v", err)
 	}
-	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "", OfferProposedByDriver)
+	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer2: %v", err)
 	}
-	o3, err := repo.CreateOffer(ctx, cargoID, d3, 100, "USD", "", OfferProposedByDriver)
+	o3, err := repo.CreateOffer(ctx, cargoID, d3, 100, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer3: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestArchiveCompletedCargoTx_LastTripSetsCargoCompleted(t *testing.T) {
 	cargoID := itestCreateCargo(t, repo, 1)
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
-	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 100, "USD", "", OfferProposedByDriver)
+	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 100, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer: %v", err)
 	}
@@ -240,11 +240,11 @@ func TestArchiveCompletedCargoTx_MultiTripKeepsCargoSearching(t *testing.T) {
 	defer itestDeleteCargo(t, pool, cargoID)
 
 	d1, d2 := itestInsertDriver(t, pool), itestInsertDriver(t, pool)
-	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "", OfferProposedByDriver)
+	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer1: %v", err)
 	}
-	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "", OfferProposedByDriver)
+	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer2: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestOnTripCancelledTx_RestoresVehiclesLeftWhenInTransit(t *testing.T) {
 	cargoID := itestCreateCargo(t, repo, 5)
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
-	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "", OfferProposedByDriver)
+	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer: %v", err)
 	}
@@ -358,7 +358,7 @@ func TestOnTripCancelledTx_NoRestoreBeforeInTransit(t *testing.T) {
 	cargoID := itestCreateCargo(t, repo, 3)
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
-	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "", OfferProposedByDriver)
+	offerID, err := repo.CreateOffer(ctx, cargoID, driverID, 1, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer: %v", err)
 	}
@@ -398,18 +398,18 @@ func TestCreateOffer_DriverCannotDuplicatePendingOrRejectedAllowsRetry(t *testin
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
 
-	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDriver)
+	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer1: %v", err)
 	}
-	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDriver)
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDriver, nil)
 	if err != ErrDriverOfferAlreadyExists {
 		t.Fatalf("CreateOffer2 want ErrDriverOfferAlreadyExists, got %v", err)
 	}
 	if err := repo.RejectOffer(ctx, o1, "test"); err != nil {
 		t.Fatalf("RejectOffer: %v", err)
 	}
-	_, err = repo.CreateOffer(ctx, cargoID, driverID, 12, "USD", "", OfferProposedByDriver)
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 12, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer after reject: %v", err)
 	}
@@ -426,14 +426,14 @@ func TestCreateOffer_DriverBlockedWhenAccepted(t *testing.T) {
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
 
-	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDriver)
+	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDriver, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer: %v", err)
 	}
 	if _, _, err := repo.AcceptOffer(ctx, o1); err != nil {
 		t.Fatalf("AcceptOffer: %v", err)
 	}
-	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDriver)
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDriver, nil)
 	if err != ErrDriverOfferAlreadyExists {
 		t.Fatalf("second CreateOffer want ErrDriverOfferAlreadyExists, got %v", err)
 	}
@@ -450,18 +450,18 @@ func TestCreateOffer_DispatcherPendingUniqueRepeatAfterReject(t *testing.T) {
 	defer itestDeleteCargo(t, pool, cargoID)
 	driverID := itestInsertDriver(t, pool)
 
-	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDispatcher)
+	o1, err := repo.CreateOffer(ctx, cargoID, driverID, 10, "USD", "", OfferProposedByDispatcher, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer dispatcher1: %v", err)
 	}
-	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDispatcher)
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 11, "USD", "", OfferProposedByDispatcher, nil)
 	if err != ErrDispatcherOfferAlreadyExists {
 		t.Fatalf("CreateOffer dispatcher2 want ErrDispatcherOfferAlreadyExists, got %v", err)
 	}
 	if err := repo.RejectOffer(ctx, o1, "test"); err != nil {
 		t.Fatalf("RejectOffer: %v", err)
 	}
-	_, err = repo.CreateOffer(ctx, cargoID, driverID, 12, "USD", "", OfferProposedByDispatcher)
+	_, err = repo.CreateOffer(ctx, cargoID, driverID, 12, "USD", "", OfferProposedByDispatcher, nil)
 	if err != nil {
 		t.Fatalf("CreateOffer dispatcher after reject: %v", err)
 	}

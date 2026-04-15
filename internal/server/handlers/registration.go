@@ -47,6 +47,7 @@ type startReq struct {
 func (h *RegistrationHandler) Start(c *gin.Context) {
 	var req startReq
 	if err := c.ShouldBindJSON(&req); err != nil {
+		h.logger.Info("registration start: invalid payload", zap.Error(err))
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
@@ -59,8 +60,13 @@ func (h *RegistrationHandler) Start(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, errKey)
 		return
 	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
 
-	phone, err := h.sessions.Consume(c.Request.Context(), strings.TrimSpace(req.SessionID))
+	phone, err := h.sessions.Consume(c.Request.Context(), sessionID)
 	if err != nil {
 		if errors.Is(err, store.ErrSessionNotFound) {
 			resp.ErrorLang(c, http.StatusUnauthorized, "session_id_expired_or_invalid")
