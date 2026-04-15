@@ -257,6 +257,12 @@ tags:
       - `POST /v1/driver/connection-offers/accept` (принять входящее приглашение)
       - `POST /v1/driver/connection-offers/decline` (отклонить входящее приглашение)
       - `DELETE /v1/driver/connection-offers/{token}` (отменить своё исходящее приглашение)
+  - name: "Drivers / My driver managers"
+    description: |
+      API водителя для управления связями с driver manager:
+      - `GET /v1/driver/my-driver-managers` — список всех моих менеджеров (с кем есть активная связь).
+      - `GET /v1/driver/my-driver-managers/{dispatcherId}` — один менеджер по id (детальная карточка).
+      - `DELETE /v1/driver/my-driver-managers/{dispatcherId}` — удалить связь (отвязка от freelance manager).
   - name: "Legacy / Deprecated"
     description: "Устаревшие эндпоинты. Не используйте в новых интеграциях."
   - name: Admin / Auth
@@ -5826,6 +5832,53 @@ paths:
                               description: "Только для type=freelance"
                             company_role: { type: string, description: "Только для type=company (owner, dispatcher и т.д.)" }
         "401": { description: driver not found }
+
+  /v1/driver/my-driver-managers:
+    get:
+      tags: ["Drivers / My driver managers"]
+      summary: "Список моих driver managers"
+      description: |
+        Водитель получает всех связанных менеджеров:
+        - `type=freelance` — когда есть принятый connection offer;
+        - `type=company` — менеджеры компании, если водитель в компании.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200": { description: "data.items[]: id, name, phone, work_status, has_photo, type, role/company_role" }
+        "401": { description: driver not found }
+
+  /v1/driver/my-driver-managers/{dispatcherId}:
+    get:
+      tags: ["Drivers / My driver managers"]
+      summary: "Получить одного моего driver manager по ID"
+      description: |
+        Возвращает детальную карточку manager (все публичные поля), только если он связан с текущим водителем.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: dispatcherId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.item — объект manager" }
+        "400": { description: invalid dispatcher id }
+        "401": { description: driver not found }
+        "403": { description: dispatcher not linked to this driver }
+    delete:
+      tags: ["Drivers / My driver managers"]
+      summary: "Удалить manager из моих связей"
+      description: |
+        Отвязка от manager. Разрешено только для текущей freelance-связи (`driver.freelancer_id = dispatcherId`).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: dispatcherId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.status = unlinked" }
+        "400": { description: invalid dispatcher id }
+        "403": { description: dispatcher not linked to this driver }
+
   /v1/driver/dispatchers/{dispatcherId}:
     delete:
       tags: ["Legacy / Deprecated"]

@@ -78,6 +78,57 @@ func (h *DriverDispatchersHandler) ListMyDispatchers(c *gin.Context) {
 	resp.OKLang(c, "ok", gin.H{"items": items})
 }
 
+// GetMyDispatcher returns one linked dispatcher by ID with full public fields.
+// GET /v1/driver/my-driver-managers/:dispatcherId
+func (h *DriverDispatchersHandler) GetMyDispatcher(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	dispatcherID, err := uuid.Parse(c.Param("dispatcherId"))
+	if err != nil || dispatcherID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_dispatcher_id")
+		return
+	}
+	drv, err := h.drv.FindByID(c.Request.Context(), driverID)
+	if err != nil || drv == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "driver_not_found")
+		return
+	}
+	d, linkType, companyRole, ok, err := h.findLinkedDispatcher(c, drv, dispatcherID)
+	if err != nil {
+		h.logger.Error("get linked dispatcher", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_dispatchers")
+		return
+	}
+	if !ok || d == nil {
+		resp.ErrorLang(c, http.StatusForbidden, "dispatcher_not_linked_to_you")
+		return
+	}
+
+	out := gin.H{
+		"id":              d.ID,
+		"name":            d.Name,
+		"phone":           d.Phone,
+		"passport_series": d.PassportSeries,
+		"passport_number": d.PassportNumber,
+		"pinfl":           d.PINFL,
+		"cargo_id":        d.CargoID,
+		"driver_id":       d.DriverID,
+		"rating":          d.Rating,
+		"work_status":     d.WorkStatus,
+		"status":          d.Status,
+		"role":            d.ManagerRole,
+		"photo":           d.Photo,
+		"has_photo":       d.HasPhoto,
+		"created_at":      d.CreatedAt,
+		"updated_at":      d.UpdatedAt,
+		"last_online_at":  d.LastOnlineAt,
+		"type":            linkType,
+	}
+	if companyRole != nil {
+		out["company_role"] = *companyRole
+	}
+	resp.OKLang(c, "ok", gin.H{"item": out})
+}
+
 func dispatcherToItem(d *dispatchers.Dispatcher, linkType string, companyRole *string) gin.H {
 	item := gin.H{
 		"id":          d.ID,
@@ -116,4 +167,39 @@ func (h *DriverDispatchersHandler) UnlinkDispatcher(c *gin.Context) {
 		return
 	}
 	resp.OKLang(c, "ok", gin.H{"status": "unlinked"})
+}
+
+func (h *DriverDispatchersHandler) findLinkedDispatcher(c *gin.Context, drv *drivers.Driver, dispatcherID uuid.UUID) (*dispatchers.Dispatcher, string, *string, bool, error) {
+	if drv.FreelancerID != nil && *drv.FreelancerID != "" {
+		freelancerID, err := uuid.Parse(*drv.FreelancerID)
+		if err == nil && freelancerID == dispatcherID {
+			d, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+			if err == nil && d != nil {
+				return d, "freelance", nil, true, nil
+			}
+		}
+	}
+
+	if drv.CompanyID != nil && *drv.CompanyID != "" {
+		companyID, err := uuid.Parse(*drv.CompanyID)
+		if err != nil {
+			return nil, "", nil, false, nil
+		}
+		list, err := h.dcr.ListDispatchersByCompany(c.Request.Context(), companyID)
+		if err != nil {
+			return nil, "", nil, false, err
+		}
+		for _, row := range list {
+			if row.DispatcherID != dispatcherID {
+				continue
+			}
+			d, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+			if err != nil || d == nil {
+				return nil, "", nil, false, nil
+			}
+			role := row.Role
+			return d, "company", &role, true, nil
+		}
+	}
+	return nil, "", nil, false, nil
 }
