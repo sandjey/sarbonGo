@@ -18,5 +18,8 @@ ALTER TABLE offers ADD COLUMN IF NOT EXISTS proposed_by_id UUID;
 
 -- Переносим старые связи (один-к-одному) в новую таблицу
 INSERT INTO driver_manager_relations (driver_id, manager_id)
-SELECT id, freelancer_id FROM drivers WHERE freelancer_id IS NOT NULL
+SELECT d.id, d.freelancer_id
+FROM drivers d
+JOIN freelance_dispatchers fd ON fd.id = d.freelancer_id
+WHERE d.freelancer_id IS NOT NULL
 ON CONFLICT (driver_id, manager_id) DO NOTHING;
