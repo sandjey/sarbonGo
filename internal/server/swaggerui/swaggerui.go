@@ -562,7 +562,6 @@ const swaggerHTML = `<!doctype html>
           'Driver Manager / Drivers catalog',
           'Driver Manager / My drivers',
           'Driver Manager / Notifications',
-          'Unified notifications SSE',
           'Driver Manager / Offers',
           'Driver Manager / Trips',
           'Driver Manager / Completion & ratings flow',
@@ -622,7 +621,6 @@ const swaggerHTML = `<!doctype html>
               'Driver Manager / Drivers catalog',
               'Driver Manager / My drivers',
               'Driver Manager / Notifications',
-              'Unified notifications SSE',
               'Driver Manager / Offers',
               'Driver Manager / Trips',
               'Driver Manager / Completion & ratings flow',
@@ -633,7 +631,6 @@ const swaggerHTML = `<!doctype html>
           if (group === 'cargo') {
             if (t.startsWith('Notifications and ratings / Cargo manager')) return true;
             if (t.startsWith('SSE / Cargo manager')) return true;
-            if (t === 'Unified notifications SSE') return true;
             return t === 'Cargo Manager' || t.startsWith('Cargo Manager /');
           }
           if (group === 'chat') return t.startsWith('Chat') || t.startsWith('Calls');

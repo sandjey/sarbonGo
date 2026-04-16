@@ -51,6 +51,27 @@ func dispatcherOwnsCargo(c *cargo.Cargo, dispatcherID uuid.UUID, companyID *uuid
 	return false
 }
 
+func (h *TripsHandler) dispatcherCanAccessTrip(ctx *gin.Context, t *trips.Trip, cargoObj *cargo.Cargo, dispatcherID uuid.UUID, companyID *uuid.UUID) bool {
+	if dispatcherOwnsCargo(cargoObj, dispatcherID, companyID) {
+		return true
+	}
+	if h.cargoRepo == nil || t == nil {
+		return false
+	}
+	offer, err := h.cargoRepo.GetOfferByID(ctx.Request.Context(), t.OfferID)
+	if err != nil || offer == nil {
+		return false
+	}
+	pb := strings.ToUpper(strings.TrimSpace(offer.ProposedBy))
+	if pb == cargo.OfferProposedByDriverManager && offer.ProposedByID != nil && *offer.ProposedByID == dispatcherID {
+		return true
+	}
+	if offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID == dispatcherID {
+		return true
+	}
+	return false
+}
+
 // Get returns trip by id.
 func (h *TripsHandler) Get(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -213,7 +234,7 @@ func (h *TripsHandler) GetForCargoManager(c *gin.Context) {
 		return
 	}
 	cargoObj, _ := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false)
-	if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
+	if !h.dispatcherCanAccessTrip(c, t, cargoObj, dispID, companyID) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 		return
 	}
@@ -240,8 +261,24 @@ func (h *TripsHandler) ListByCargoForCargoManager(c *gin.Context) {
 		return
 	}
 	if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
-		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
-		return
+		allowed := false
+		offers, _ := h.cargoRepo.GetOffers(c.Request.Context(), cargoID)
+		for i := range offers {
+			o := offers[i]
+			if o.NegotiationDispatcherID != nil && *o.NegotiationDispatcherID == dispID {
+				allowed = true
+				break
+			}
+			if strings.EqualFold(strings.TrimSpace(o.ProposedBy), cargo.OfferProposedByDriverManager) &&
+				o.ProposedByID != nil && *o.ProposedByID == dispID {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
+			return
+		}
 	}
 	list, err := h.repo.ListByCargoID(c.Request.Context(), cargoID)
 	if err != nil {
@@ -535,7 +572,7 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 			}
 		}
 		cargoObj, _ := h.cargoRepo.GetByID(ctx, tBefore.CargoID, false)
-		if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
+		if !h.dispatcherCanAccessTrip(c, tBefore, cargoObj, dispID, companyID) {
 			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 			return
 		}
@@ -684,7 +721,7 @@ func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool, driverRe
 			}
 		}
 		cargoObj, _ := h.cargoRepo.GetByID(ctx, t.CargoID, false)
-		if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
+		if !h.dispatcherCanAccessTrip(c, t, cargoObj, dispID, companyID) {
 			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 			return
 		}
@@ -762,7 +799,7 @@ func (h *TripsHandler) runTripState(c *gin.Context, asDispatcher bool) {
 			}
 		}
 		cargoObj, _ := h.cargoRepo.GetByID(ctx, t.CargoID, false)
-		if !dispatcherOwnsCargo(cargoObj, dispID, companyID) {
+		if !h.dispatcherCanAccessTrip(c, t, cargoObj, dispID, companyID) {
 			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 			return
 		}

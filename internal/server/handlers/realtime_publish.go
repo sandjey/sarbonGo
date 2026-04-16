@@ -11,8 +11,8 @@ import (
 	"sarbonNew/internal/userstream"
 )
 
-// PublishTripStatusForCargoParticipants pushes the same trip snapshot to the driver on the trip and to the freelance dispatcher who owns the cargo (when applicable — same rule as trip notifications).
-func PublishTripStatusForCargoParticipants(hub *userstream.Hub, trip *trips.Trip, cg *cargo.Cargo) {
+// PublishTripStatusForCargoParticipants pushes the same trip snapshot to driver + CM + DM (if present in negotiation chain).
+func PublishTripStatusForCargoParticipants(hub *userstream.Hub, trip *trips.Trip, cg *cargo.Cargo, offer *cargo.Offer) {
 	if hub == nil || trip == nil {
 		return
 	}
@@ -22,6 +22,12 @@ func PublishTripStatusForCargoParticipants(hub *userstream.Hub, trip *trips.Trip
 	}
 	if disp := tripNotifyDispatcherID(cg); disp != nil && *disp != uuid.Nil {
 		hub.PublishTripStatus(tripnotif.RecipientDispatcher, *disp, payload)
+	}
+	if dm := offerDriverManagerDispatcherID(offer); dm != nil && *dm != uuid.Nil {
+		cm := tripNotifyDispatcherID(cg)
+		if cm == nil || *cm != *dm {
+			hub.PublishTripStatus(tripnotif.RecipientDispatcher, *dm, payload)
+		}
 	}
 }
 

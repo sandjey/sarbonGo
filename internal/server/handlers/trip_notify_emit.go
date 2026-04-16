@@ -58,10 +58,11 @@ func (h *TripsHandler) notifPair(ctx context.Context, trip *trips.Trip, cg *carg
 }
 
 func (h *TripsHandler) notifyTripTransition(ctx context.Context, before, after *trips.Trip) {
-	if h.notif == nil || before == nil || after == nil {
+	if before == nil || after == nil {
 		return
 	}
 	cg, _ := h.cargoRepo.GetByID(ctx, after.CargoID, false)
+	offer, _ := h.cargoRepo.GetOfferByID(ctx, after.OfferID)
 
 	if before.Status != after.Status {
 		switch after.Status {
@@ -82,19 +83,20 @@ func (h *TripsHandler) notifyTripTransition(ctx context.Context, before, after *
 		}
 	}
 	if before.Status != after.Status || (!bPend && aPend) {
-		PublishTripStatusForCargoParticipants(h.stream, after, cg)
+		PublishTripStatusForCargoParticipants(h.stream, after, cg, offer)
 	}
 }
 
 func (h *TripsHandler) notifyTripCancelled(ctx context.Context, t *trips.Trip) {
-	if h.notif == nil || t == nil {
+	if t == nil {
 		return
 	}
 	cg, _ := h.cargoRepo.GetByID(ctx, t.CargoID, false)
+	offer, _ := h.cargoRepo.GetOfferByID(ctx, t.OfferID)
 	h.notifPair(ctx, t, cg, tripnotif.EventCancelled, strPtr(t.Status), strPtr(trips.StatusCancelled))
 	if h.stream != nil {
 		snap := *t
 		snap.Status = trips.StatusCancelled
-		PublishTripStatusForCargoParticipants(h.stream, &snap, cg)
+		PublishTripStatusForCargoParticipants(h.stream, &snap, cg, offer)
 	}
 }

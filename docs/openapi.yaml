@@ -157,11 +157,6 @@ tags:
     description: "Избранные водители Driver Manager: add/list/delete через /v1/dispatchers/driver-likes."
   - name: "Driver Manager / Notifications"
     description: "SSE-уведомления Driver Manager о смене данных водителя (когда меняет водитель или диспетчер)."
-  - name: "Unified notifications SSE"
-    description: |
-      Единый SSE-поток диспетчера (подходит и для Cargo Manager, и для Driver Manager):
-      `GET /v1/dispatchers/sse/notifications`.
-      В одном канале приходят события офферов, статусов рейсов, trip-notifications и driver-updates.
   - name: "Driver Manager / Connect offers"
     description: |
       Connection offer (связь водитель ↔ driver manager, не cargo offer):
@@ -183,7 +178,13 @@ tags:
       - `GET /v1/dispatchers/offers/{id}` — детально по id.
   - name: "Driver Manager / Trips"
     description: |
-      Рейсы Driver Manager по своим грузам и в выбранной компании (после switch-company), включая `confirm-transition`.
+      Рейсы Driver Manager:
+      - по своим грузам и в выбранной компании (после switch-company),
+      - а также по рейсам, где вы участвуете в переговорной цепочке оффера
+        (`offers.proposed_by=DRIVER_MANAGER` с вашим `proposed_by_id`
+        или `offers.negotiation_dispatcher_id=вы`).
+      Основные API: `/v1/dispatchers/trips`, `/v1/dispatchers/trips/{id}`, `/v1/dispatchers/trips/{id}/state`,
+      `/v1/dispatchers/trips/{id}/confirm-transition`, `/v1/dispatchers/trips/{id}/cancel`, `/v1/dispatchers/cargo/{id}/trips`.
   - name: "Driver Manager / Completion & ratings flow"
     description: |
       Финальные шаги Driver Manager:
@@ -3952,7 +3953,8 @@ paths:
       description: |
         Возвращает рейсы по грузам, к которым у диспетчера есть доступ:
         - грузы созданные этим диспетчером (`created_by_type=DISPATCHER`), или
-        - грузы выбранной компании после `POST /v1/dispatchers/auth/switch-company` (`created_by_type=COMPANY` + `company_id` из JWT/контекста).
+        - грузы выбранной компании после `POST /v1/dispatchers/auth/switch-company` (`created_by_type=COMPANY` + `company_id` из JWT/контекста), или
+        - рейсы, где диспетчер участвует как Driver Manager в цепочке оффера (`offers.proposed_by=DRIVER_MANAGER` с вашим `proposed_by_id` или `offers.negotiation_dispatcher_id=вы`).
 
         Фильтры:
         - `cargo_id` (UUID) — рейсы только по одному грузу;
@@ -3999,7 +4001,7 @@ paths:
     get:
       tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Рейсы по cargo_id (диспетчер)"
-      description: "Возвращает все рейсы указанного груза. Доступно только владельцу груза (диспетчер/компания после switch-company)."
+      description: "Возвращает все рейсы указанного груза. Доступно владельцу груза (диспетчер/компания после switch-company) или Driver Manager, участвующему в офферах этого груза."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4016,7 +4018,7 @@ paths:
     get:
       tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Получить рейс по trip_id (диспетчер)"
-      description: "Возвращает рейс по `trip_id`. Доступно только если груз рейса принадлежит диспетчеру/компании (см. GET /v1/dispatchers/trips)."
+      description: "Возвращает рейс по `trip_id`. Доступно если рейс находится в вашем visible scope (владелец груза / выбранная компания / участие Driver Manager в цепочке оффера)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4052,6 +4054,7 @@ paths:
       tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Подтвердить следующий статус рейса (диспетчер)"
       description: |
+        Доступно в едином scope диспетчера: владелец груза, выбранная компания, либо Driver Manager из переговорной цепочки оффера.
         **Роль `CARGO_MANAGER`:** через этот метод может только **закрыть** рейс — поставить `COMPLETED`, и только когда рейс в `DELIVERED` и водитель уже запросил завершение (`POST /v1/driver/trips/{id}/confirm`). Промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) для cargo manager **запрещены** (ответ `403`, ключ `trip_cargo_manager_completed_only`); их подтверждает водитель или диспетчер с ролью `DRIVER_MANAGER`.
         **Роль `DRIVER_MANAGER` (и прочие диспетчеры без роли cargo manager):** промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) — как раньше, совместно с водителем.
         **Закрытие (`COMPLETED`):** с `DELIVERED` никто не может перейти в `COMPLETED`, пока водитель не запросил завершение. Если водитель ещё не запросил — `400` `trip_completion_needs_driver_first`.
@@ -4072,6 +4075,7 @@ paths:
       tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Отменить рейс (диспетчер)"
       description: |
+        Доступно в едином scope диспетчера: владелец груза, выбранная компания, либо Driver Manager из переговорной цепочки оффера.
         Отмена без второй стороны: рейс архивируется и удаляется из trips; груз остаётся для новой попытки; оффер возвращается в PENDING.
         Параметр пути **`id`** — UUID **рейса** (`trip_id`), не идентификатор оффера.
         **en:** Cancel trip; trip archived, cargo kept for retry.
@@ -4096,6 +4100,7 @@ paths:
       tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Состояние рейса и подтверждений (диспетчер)"
       description: |
+        Доступно в едином scope диспетчера: владелец груза, выбранная компания, либо Driver Manager из переговорной цепочки оффера.
         Рейс, next_status, pending_confirm_to, метки подтверждений, при наличии — **rating_from_driver** / **rating_from_dispatcher** (кто уже оценил по рейсу), кратко cargo (id, status).
         **en:** Trip state and bilateral confirmation progress.
         **uz:** Reys holati va tasdiqlar.
@@ -4154,7 +4159,7 @@ paths:
 
   /v1/dispatchers/sse/notifications:
     get:
-      tags: ["Unified notifications SSE", "SSE / Cargo manager — Trip notifications", "SSE / Cargo manager — Trip status", "Driver Manager / Notifications"]
+      tags: ["SSE / Cargo manager — Trip notifications", "SSE / Cargo manager — Trip status", "Driver Manager / Notifications"]
       summary: "Единый SSE поток уведомлений диспетчера (Cargo Manager + Driver Manager)"
       description: |
         Единый real-time канал (`text/event-stream`) для всех ключевых событий диспетчера.
@@ -4184,10 +4189,11 @@ paths:
 
   /v1/dispatchers/sse/trip-notifications:
     get:
-      tags: ["SSE / Cargo manager — Trip notifications"]
+      tags: ["SSE / Cargo manager — Trip notifications", "Driver Manager / Notifications"]
       summary: "SSE: поток новых уведомлений по рейсу (диспетчер)"
       description: |
         Аналог `GET /v1/dispatchers/trip-notifications`, но события приходят в реальном времени (`text/event-stream`).
+        Доступно для диспетчера в едином scope (Cargo Manager и Driver Manager).
 
         **JWT:** заголовок **X-User-Token** или query **`token`** для EventSource. Базовые заголовки обязательны.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -4207,10 +4213,11 @@ paths:
 
   /v1/dispatchers/sse/trip-status:
     get:
-      tags: ["SSE / Cargo manager — Trip status"]
+      tags: ["SSE / Cargo manager — Trip status", "Driver Manager / Notifications"]
       summary: "SSE: изменения статуса рейса (диспетчер)"
       description: |
-        Поток `trip_status` для грузов с фриланс-автором-вами (см. тег **SSE / Cargo manager — Trip status** в списке tags). Иначе события могут не приходить — как для строк в `trip_user_notifications`.
+        Поток `trip_status` для рейсов из видимого scope диспетчера:
+        владелец груза/компания, а также Driver Manager из negotiation цепочки оффера.
 
         **JWT:** как у `/v1/dispatchers/sse/trip-notifications`.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]

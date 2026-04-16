@@ -447,7 +447,9 @@ func (r *Repo) ListForCargoManager(
 	args := make([]any, 0, 8)
 	argN := 1
 
-	// Ownership scope: dispatcher cargo OR (if switched) company cargo.
+	// Visibility scope:
+	// - cargo owner dispatcher/company (Cargo Manager flow), OR
+	// - Driver Manager involved in negotiation for this trip's offer.
 	own := "(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $" + strconv.Itoa(argN) + ")"
 	args = append(args, dispatcherID)
 	argN++
@@ -458,6 +460,14 @@ func (r *Repo) ListForCargoManager(
 	} else {
 		own = "(" + own + ")"
 	}
+	own = "(" + own + " OR EXISTS (" +
+		"SELECT 1 FROM offers o " +
+		"WHERE o.id = t.offer_id AND (" +
+		"(UPPER(COALESCE(o.proposed_by,'')) = 'DRIVER_MANAGER' AND o.proposed_by_id = $" + strconv.Itoa(argN) + ") " +
+		"OR o.negotiation_dispatcher_id = $" + strconv.Itoa(argN) +
+		")))"
+	args = append(args, dispatcherID)
+	argN++
 	conds = append(conds, own)
 
 	if cargoID != nil && *cargoID != uuid.Nil {
