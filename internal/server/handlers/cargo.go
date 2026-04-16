@@ -1098,6 +1098,12 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 					if forceDriverManager {
 						isManager, _ := h.drivers.IsLinked(c.Request.Context(), req.CarrierID, userID)
 						if !isManager {
+							// Backward compatibility: old linkage model used drivers.freelancer_id without driver_manager_relations row.
+							if drv, _ := h.drivers.FindByID(c.Request.Context(), req.CarrierID); drv != nil && drv.FreelancerID != nil && strings.TrimSpace(*drv.FreelancerID) == userID.String() {
+								isManager = true
+							}
+						}
+						if !isManager {
 							resp.ErrorLang(c, http.StatusForbidden, "not_your_driver_or_cargo")
 							return
 						}
@@ -1118,6 +1124,11 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 					} else {
 						// Check if dispatcher is a MANAGER for this carrier (driver).
 						isManager, _ := h.drivers.IsLinked(c.Request.Context(), req.CarrierID, userID)
+						if !isManager {
+							if drv, _ := h.drivers.FindByID(c.Request.Context(), req.CarrierID); drv != nil && drv.FreelancerID != nil && strings.TrimSpace(*drv.FreelancerID) == userID.String() {
+								isManager = true
+							}
+						}
 						if !isManager {
 							resp.ErrorLang(c, http.StatusForbidden, "not_your_driver_or_cargo")
 							return
