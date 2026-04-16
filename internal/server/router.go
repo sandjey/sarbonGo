@@ -462,6 +462,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispSSE.Use(mw.RequireBaseHeaders(cfg))
 	dispSSE.Use(mw.RequireDispatcherWithQueryToken(jwtm, refreshStore))
 	dispSSE.Use(mw.UpdateDispatcherLastOnline(dispatchersRepo))
+	dispSSE.GET("/sse/notifications", sseH.DispatcherUnifiedNotificationsSSE)
 	dispSSE.GET("/sse/trip-notifications", sseH.DispatcherTripNotificationsSSE)
 	dispSSE.GET("/sse/trip-status", sseH.DispatcherTripStatusSSE)
 	dispSSE.GET("/sse/driver-updates", sseH.DispatcherDriverUpdatesSSE)

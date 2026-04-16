@@ -122,3 +122,47 @@ func (h *SSEStreamsHandler) DispatcherDriverUpdatesSSE(c *gin.Context) {
 		return h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
 	})
 }
+
+// DispatcherUnifiedNotificationsSSE GET /v1/dispatchers/sse/notifications
+// One stream for dispatchers (both Cargo Manager and Driver Manager):
+// merges notifications, trip status and driver updates.
+func (h *SSEStreamsHandler) DispatcherUnifiedNotificationsSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		notifCh, unNotif := h.hub.SubscribeNotifications(tripnotif.RecipientDispatcher, id)
+		tripCh, unTrip := h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
+		drvCh, unDrv := h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
+
+		out := make(chan []byte, 128)
+		done := make(chan struct{})
+
+		forward := func(src <-chan []byte) {
+			for {
+				select {
+				case <-done:
+					return
+				case msg, ok := <-src:
+					if !ok {
+						return
+					}
+					select {
+					case out <- msg:
+					default:
+						// slow consumer: drop event to avoid blocking producers
+					}
+				}
+			}
+		}
+
+		go forward(notifCh)
+		go forward(tripCh)
+		go forward(drvCh)
+
+		return out, func() {
+			close(done)
+			unNotif()
+			unTrip()
+			unDrv()
+		}
+	})
+}

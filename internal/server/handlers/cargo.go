@@ -1076,6 +1076,9 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 			}
 		}
 	}
+	fullPath := strings.ToLower(strings.TrimSpace(c.FullPath()))
+	forceDriverManager := strings.Contains(fullPath, "/offers/send-by-driver-manager")
+	forceCargoManager := strings.Contains(fullPath, "/offers/send-by-cargo-manager")
 	proposedBy := cargo.OfferProposedByDriver
 	if h.jwtm != nil {
 		raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken))
@@ -1088,6 +1091,23 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 						if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
 							dispCompanyID = &u
 						}
+					}
+					if forceDriverManager {
+						isManager, _ := h.drivers.IsLinked(c.Request.Context(), req.CarrierID, userID)
+						if !isManager {
+							resp.ErrorLang(c, http.StatusForbidden, "not_your_driver_or_cargo")
+							return
+						}
+						proposedBy = cargo.OfferProposedByDriverManager
+						break
+					}
+					if forceCargoManager {
+						if !dispatcherOwnsCargoForNegotiation(obj, userID, dispCompanyID) {
+							resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
+							return
+						}
+						proposedBy = cargo.OfferProposedByDispatcher
+						break
 					}
 					// If dispatcher owns cargo, it's a normal DISPATCHER offer (to driver).
 					if dispatcherOwnsCargoForNegotiation(obj, userID, dispCompanyID) {
@@ -2446,7 +2466,9 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 	}
 	ownsCargo := dispatcherOwnsCargoForNegotiation(cargoObj, dispatcherID, companyID)
 	isNegotiator := offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID == dispatcherID
-	canReject := ownsCargo || (offer.Status == cargo.OfferStatusWaitingDriverConfirm && isNegotiator)
+	isOfferAuthor := offer.ProposedByID != nil && *offer.ProposedByID == dispatcherID &&
+		(pb == cargo.OfferProposedByDispatcher || pb == cargo.OfferProposedByDriverManager)
+	canReject := ownsCargo || isOfferAuthor || (offer.Status == cargo.OfferStatusWaitingDriverConfirm && isNegotiator)
 	if !canReject {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 		return
@@ -2467,7 +2489,7 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 	cancelOwn := false
 	switch offer.Status {
 	case "PENDING":
-		if pb == cargo.OfferProposedByDispatcher && ownsCargo {
+		if isOfferAuthor {
 			cancelOwn = true
 		}
 	case cargo.OfferStatusWaitingDriverConfirm:

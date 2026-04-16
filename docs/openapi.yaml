@@ -157,6 +157,11 @@ tags:
     description: "Избранные водители Driver Manager: add/list/delete через /v1/dispatchers/driver-likes."
   - name: "Driver Manager / Notifications"
     description: "SSE-уведомления Driver Manager о смене данных водителя (когда меняет водитель или диспетчер)."
+  - name: "Unified notifications SSE"
+    description: |
+      Единый SSE-поток диспетчера (подходит и для Cargo Manager, и для Driver Manager):
+      `GET /v1/dispatchers/sse/notifications`.
+      В одном канале приходят события офферов, статусов рейсов, trip-notifications и driver-updates.
   - name: "Driver Manager / Connect offers"
     description: |
       Connection offer (связь водитель ↔ driver manager, не cargo offer):
@@ -4146,6 +4151,36 @@ paths:
       responses:
         "200": { description: ok }
         "404": { description: trip_notification_not_found }
+
+  /v1/dispatchers/sse/notifications:
+    get:
+      tags: ["Unified notifications SSE", "SSE / Cargo manager — Trip notifications", "SSE / Cargo manager — Trip status", "Driver Manager / Notifications"]
+      summary: "Единый SSE поток уведомлений диспетчера (Cargo Manager + Driver Manager)"
+      description: |
+        Единый real-time канал (`text/event-stream`) для всех ключевых событий диспетчера.
+        Подходит для обеих ролей: **Cargo Manager** и **Driver Manager**.
+
+        В одном потоке приходят payload разных типов:
+        - `kind=trip_notification` — события из trip notifications;
+        - `kind=trip_status` — изменения статусов рейса;
+        - `kind=cargo_offer` — создание/принятие/отклонение/отмена оффера;
+        - `kind=driver_update` — изменения данных привязанных водителей.
+
+        **JWT:** заголовок **X-User-Token** или query **`token`** для EventSource. Базовые заголовки обязательны.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+          description: JWT access при отсутствии X-User-Token.
+      responses:
+        "200":
+          description: "text/event-stream; `data:` содержит unified event payload"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
 
   /v1/dispatchers/sse/trip-notifications:
     get:
