@@ -52,12 +52,27 @@ ON CONFLICT (trip_id, rater_kind, ratee_kind) DO UPDATE SET
 	if err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(raterKind)) {
-	case "driver":
-		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_from_driver = $1, updated_at = now() WHERE id = $2`, stars, tripID)
-	case "dispatcher":
+
+	// Mirror to trips table for history/reporting
+	rk := strings.ToLower(strings.TrimSpace(raterKind))
+	ek := strings.ToLower(strings.TrimSpace(rateeKind))
+	starsInt := int(math.Round(stars)) // Extended ratings use INTEGER in trips table
+
+	switch {
+	case rk == "driver" && ek == "dispatcher":
+		// Check if it's DM or CM? Actually the business logic says Driver rates DM.
+		// For backward compatibility we keep rating_from_driver, but also set rating_driver_to_dm.
+		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_from_driver = $1, rating_driver_to_dm = $2, updated_at = now() WHERE id = $3`, stars, starsInt, tripID)
+	case rk == "driver_manager" && ek == "driver":
+		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_dm_to_driver = $1, updated_at = now() WHERE id = $2`, starsInt, tripID)
+	case rk == "driver_manager" && ek == "dispatcher":
+		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_dm_to_cm = $1, updated_at = now() WHERE id = $2`, starsInt, tripID)
+	case rk == "dispatcher" && ek == "driver_manager":
+		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_cm_to_dm = $1, updated_at = now() WHERE id = $2`, starsInt, tripID)
+	case rk == "dispatcher" && ek == "driver":
 		_, _ = r.pg.Exec(ctx, `UPDATE trips SET rating_from_dispatcher = $1, updated_at = now() WHERE id = $2`, stars, tripID)
 	}
+
 	return r.syncRateeProfileRating(ctx, rateeKind, rateeID)
 }
 

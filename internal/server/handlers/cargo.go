@@ -1240,11 +1240,22 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 	}
 	items := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
+		pb := strings.ToUpper(strings.TrimSpace(row.ProposedBy))
 		sourceRole := "CARGO_MANAGER"
 		sourceID := dispatcherID.String()
-		if direction == "incoming" || (direction == "all" && strings.EqualFold(strings.TrimSpace(row.ProposedBy), cargo.OfferProposedByDriver)) {
-			sourceRole = "DRIVER"
-			sourceID = row.CarrierID.String()
+		switch pb {
+		case cargo.OfferProposedByDriverManager:
+			sourceRole = "DRIVER_MANAGER"
+			if row.ProposedByID != nil && *row.ProposedByID != uuid.Nil {
+				sourceID = row.ProposedByID.String()
+			} else {
+				sourceID = dispatcherID.String()
+			}
+		case cargo.OfferProposedByDriver:
+			if direction == "incoming" || direction == "all" {
+				sourceRole = "DRIVER"
+				sourceID = row.CarrierID.String()
+			}
 		}
 		item := gin.H{
 			"cargo_id": row.CargoID.String(),
@@ -1470,7 +1481,7 @@ func (h *CargoHandler) GetOfferDispatcher(c *gin.Context) {
 		return
 	}
 	cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
-	if !dispatcherOwnsCargoForNegotiation(cargoObj, dispatcherID, companyID) {
+	if !dispatcherCanAccessOfferForNegotiation(cargoObj, offer, dispatcherID, companyID) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 		return
 	}
@@ -1492,20 +1503,27 @@ func (h *CargoHandler) respondSingleOfferWithCargo(c *gin.Context, offer *cargo.
 
 	cargoDetail := toCargoDetail(cargoObj, points, pay, nil)
 	h.applyIsLikedToCargoMap(c.Request.Context(), cargoDetail, offer.CargoID, cargoViewerFromGin(c))
+	offerOut := gin.H{
+		"id":               offer.ID.String(),
+		"cargo_id":         offer.CargoID.String(),
+		"carrier_id":       offer.CarrierID.String(),
+		"proposed_by":      pb,
+		"price":            offer.Price,
+		"invitation_price": offer.Price,
+		"currency":         offer.Currency,
+		"comment":          offer.Comment,
+		"status":           offer.Status,
+		"rejection_reason": offer.RejectionReason,
+		"created_at":       offer.CreatedAt,
+	}
+	if offer.ProposedByID != nil {
+		offerOut["proposed_by_id"] = offer.ProposedByID.String()
+	}
+	if offer.NegotiationDispatcherID != nil {
+		offerOut["negotiation_dispatcher_id"] = offer.NegotiationDispatcherID.String()
+	}
 	out := gin.H{
-		"offer": gin.H{
-			"id":               offer.ID.String(),
-			"cargo_id":         offer.CargoID.String(),
-			"carrier_id":       offer.CarrierID.String(),
-			"proposed_by":      pb,
-			"price":            offer.Price,
-			"invitation_price": offer.Price,
-			"currency":         offer.Currency,
-			"comment":          offer.Comment,
-			"status":           offer.Status,
-			"rejection_reason": offer.RejectionReason,
-			"created_at":       offer.CreatedAt,
-		},
+		"offer": offerOut,
 		"cargo": cargoDetail,
 	}
 	if h.tripsRepo != nil {
@@ -1797,7 +1815,7 @@ func (h *CargoHandler) ListDriverManagerOffers(c *gin.Context) {
 
 
 // ListMyCargoOffers lists driver offers (requests) grouped by bucket:
-// sent (PENDING), accepted (ACCEPTED, not completed), completed (ACCEPTED + cargo COMPLETED), rejected (REJECTED).
+// sent (PENDING), accepted (ACCEPTED, not completed), completed (ACCEPTED + cargo COMPLETED), rejected (REJECTED), canceled (CANCELED).
 // Endpoint: GET /v1/driver/cargo-offers?bucket=...
 func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
@@ -1807,7 +1825,7 @@ func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
 		bucket = "sent"
 	}
 	switch bucket {
-	case "sent", "accepted", "completed", "rejected":
+	case "sent", "accepted", "completed", "rejected", "canceled", "cancelled":
 	default:
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_cargo_offer_bucket")
 		return
@@ -1879,6 +1897,9 @@ func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
 		case "REJECTED":
 			state = "rejected"
 			step = "REJECTED"
+		case "CANCELED":
+			state = "canceled"
+			step = "CANCELED"
 		}
 		item := gin.H{
 			"cargo_id": row.CargoID.String(),
@@ -1899,6 +1920,7 @@ func (h *CargoHandler) ListMyCargoOffers(c *gin.Context) {
 			"offer": gin.H{
 				"id":               row.ID.String(),
 				"proposed_by":      row.ProposedBy,
+				"status":           row.Status,
 				"price":            row.Price,
 				"invitation_price": row.Price,
 				"currency":         row.Currency,
@@ -1966,7 +1988,7 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		proposedBy = cargo.OfferProposedByDriver
 	}
 	proposedBy = strings.ToUpper(strings.TrimSpace(proposedBy))
-	tripFlow := offerTripFlow(proposedBy)
+	tripFlow := offerTripFlowFromOffer(offer)
 	cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
 	if cargoObj == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
@@ -2006,7 +2028,12 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 
 		// SPECIAL CASE: Cargo manager accepts Driver Manager's offer.
 		// Move to WAITING_DRIVER_CONFIRM, don't create trip yet.
-		if err := h.repo.SetOfferStatusWaitingDriver(c.Request.Context(), offerID); err != nil {
+		negID := offer.ProposedByID
+		if negID == nil || *negID == uuid.Nil {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+		if err := h.repo.SetOfferStatusWaitingDriver(c.Request.Context(), offerID, negID); err != nil {
 			if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
 				resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
 				return
@@ -2017,13 +2044,15 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		}
 
 		if h.stream != nil {
-			h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, gin.H{
+			p := gin.H{
 				"kind":       "cargo_offer",
 				"event":      "cargo_offer_waiting_driver",
 				"offer_id":   offerID.String(),
 				"cargo_id":   offer.CargoID.String(),
 				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-			})
+			}
+			h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, p)
+			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *negID, p)
 		}
 		resp.OKLang(c, "waiting_driver_confirmation", gin.H{
 			"status":   "waiting_driver_confirm",
@@ -2049,7 +2078,7 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			}
 
 			// Manager accepts Cargo Manager's offer. Move to WAITING_DRIVER_CONFIRM.
-			if err := h.repo.SetOfferStatusWaitingDriver(c.Request.Context(), offerID); err != nil {
+			if err := h.repo.SetOfferStatusWaitingDriver(c.Request.Context(), offerID, &userID); err != nil {
 				if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
 					resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
 					return
@@ -2060,13 +2089,17 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			}
 
 			if h.stream != nil {
-				h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, gin.H{
+				p := gin.H{
 					"kind":       "cargo_offer",
 					"event":      "cargo_offer_waiting_driver",
 					"offer_id":   offerID.String(),
 					"cargo_id":   offer.CargoID.String(),
 					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-				})
+				}
+				h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, p)
+				if disp := tripNotifyDispatcherID(cargoObj); disp != nil {
+					h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, p)
+				}
 			}
 			resp.OKLang(c, "waiting_driver_confirmation", gin.H{
 				"status":   "waiting_driver_confirm",
@@ -2223,7 +2256,7 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
 		return
 	}
-	tripFlow := offerTripFlow(offer.ProposedBy)
+	tripFlow := offerTripFlowFromOffer(offer)
 
 	tx, err := h.repo.BeginTx(c.Request.Context())
 	if err != nil {
@@ -2262,17 +2295,23 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 				cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
 				PublishTripStatusForCargoParticipants(h.stream, tr, cg)
 			}
-			// Notify Cargo Manager
+			// Notify Cargo Manager and Driver Manager (same SSE channel for dispatchers)
 			if cargoObj, _ := h.repo.GetByID(c.Request.Context(), cargoID, false); cargoObj != nil {
+				acc := gin.H{
+					"kind":       "cargo_offer",
+					"event":      "cargo_offer_accepted",
+					"offer_id":   offerID.String(),
+					"cargo_id":   cargoID.String(),
+					"driver_id":  carrierID.String(),
+					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+				}
+				var cmID *uuid.UUID
 				if disp := tripNotifyDispatcherID(cargoObj); disp != nil {
-					h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, gin.H{
-						"kind":       "cargo_offer",
-						"event":      "cargo_offer_accepted",
-						"offer_id":   offerID.String(),
-						"cargo_id":   cargoID.String(),
-						"driver_id":  carrierID.String(),
-						"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-					})
+					cmID = disp
+					h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, acc)
+				}
+				if dm := offerDriverManagerDispatcherID(offer); dm != nil && (cmID == nil || *dm != *cmID) {
+					h.stream.PublishNotification(tripnotif.RecipientDispatcher, *dm, acc)
 				}
 			}
 		}
@@ -2289,11 +2328,57 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 	resp.OKLang(c, "ok", nil)
 }
 
-func offerTripFlow(proposedBy string) string {
-	if strings.EqualFold(strings.TrimSpace(proposedBy), cargo.OfferProposedByDriverManager) {
+func offerTripFlowFromOffer(o *cargo.Offer) string {
+	if o == nil {
+		return "direct"
+	}
+	if strings.EqualFold(strings.TrimSpace(o.ProposedBy), cargo.OfferProposedByDriverManager) {
+		return "via_driver_manager"
+	}
+	if o.NegotiationDispatcherID != nil && *o.NegotiationDispatcherID != uuid.Nil {
 		return "via_driver_manager"
 	}
 	return "direct"
+}
+
+// offerDriverManagerDispatcherID returns the driver-manager dispatcher involved in negotiation (WAITING_DRIVER_CONFIRM / ratings).
+func offerDriverManagerDispatcherID(o *cargo.Offer) *uuid.UUID {
+	if o == nil {
+		return nil
+	}
+	if o.NegotiationDispatcherID != nil && *o.NegotiationDispatcherID != uuid.Nil {
+		return o.NegotiationDispatcherID
+	}
+	if strings.EqualFold(strings.TrimSpace(o.ProposedBy), cargo.OfferProposedByDriverManager) && o.ProposedByID != nil && *o.ProposedByID != uuid.Nil {
+		return o.ProposedByID
+	}
+	return nil
+}
+
+func (h *CargoHandler) publishCargoOfferEndedNotifs(c *gin.Context, offer *cargo.Offer, cargoObj *cargo.Cargo, event string) {
+	if h.stream == nil || offer == nil {
+		return
+	}
+	if event == "" {
+		event = "cargo_offer_rejected"
+	}
+	payload := gin.H{
+		"kind":       "cargo_offer",
+		"event":      event,
+		"offer_id":   offer.ID.String(),
+		"cargo_id":   offer.CargoID.String(),
+		"driver_id":  offer.CarrierID.String(),
+		"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, payload)
+	if disp := tripNotifyDispatcherID(cargoObj); disp != nil && *disp != uuid.Nil {
+		h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, payload)
+	}
+	if dm := offerDriverManagerDispatcherID(offer); dm != nil {
+		if disp := tripNotifyDispatcherID(cargoObj); disp == nil || *dm != *disp {
+			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *dm, payload)
+		}
+	}
 }
 
 func isDBConflict(err error) bool {
@@ -2359,8 +2444,15 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 		return
 	}
-	if !dispatcherOwnsCargoForNegotiation(cargoObj, dispatcherID, companyID) {
+	ownsCargo := dispatcherOwnsCargoForNegotiation(cargoObj, dispatcherID, companyID)
+	isNegotiator := offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID == dispatcherID
+	canReject := ownsCargo || (offer.Status == cargo.OfferStatusWaitingDriverConfirm && isNegotiator)
+	if !canReject {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
+		return
+	}
+	if offer.Status != "PENDING" && offer.Status != cargo.OfferStatusWaitingDriverConfirm {
+		resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
 		return
 	}
 	var req RejectOfferReq
@@ -2372,24 +2464,38 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_too_short")
 		return
 	}
-	if err := h.repo.RejectOffer(c.Request.Context(), offerID, req.Reason); err != nil {
-		if errors.Is(err, cargo.ErrRejectionReasonRequired) {
+	cancelOwn := false
+	switch offer.Status {
+	case "PENDING":
+		if pb == cargo.OfferProposedByDispatcher && ownsCargo {
+			cancelOwn = true
+		}
+	case cargo.OfferStatusWaitingDriverConfirm:
+		if ownsCargo || isNegotiator {
+			cancelOwn = true
+		}
+	}
+	var endErr error
+	if cancelOwn {
+		endErr = h.repo.CancelOffer(c.Request.Context(), offerID, req.Reason)
+	} else {
+		endErr = h.repo.RejectOffer(c.Request.Context(), offerID, req.Reason)
+	}
+	if endErr != nil {
+		if errors.Is(endErr, cargo.ErrRejectionReasonRequired) {
 			resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
 			return
 		}
 		resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
 		return
 	}
-	if h.stream != nil {
-		h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, gin.H{
-			"kind":       "cargo_offer",
-			"event":      "cargo_offer_rejected",
-			"offer_id":   offerID.String(),
-			"cargo_id":   offer.CargoID.String(),
-			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-		})
+	if cancelOwn {
+		h.publishCargoOfferEndedNotifs(c, offer, cargoObj, "cargo_offer_canceled")
+		resp.OKLang(c, "ok", gin.H{"status": "CANCELED"})
+	} else {
+		h.publishCargoOfferEndedNotifs(c, offer, cargoObj, "cargo_offer_rejected")
+		resp.OKLang(c, "ok", gin.H{"status": "REJECTED"})
 	}
-	resp.OKLang(c, "ok", gin.H{"status": "rejected"})
 }
 
 // RejectOfferDriver POST /v1/driver/offers/:id/reject — отклонить входящий оффер диспетчера или отозвать свой исходящий (proposed_by=DRIVER); reason required.
@@ -2413,8 +2519,19 @@ func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 	if pb == "" {
 		pb = cargo.OfferProposedByDriver
 	}
-	if pb != cargo.OfferProposedByDispatcher && pb != cargo.OfferProposedByDriver {
-		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
+	switch offer.Status {
+	case cargo.OfferStatusWaitingDriverConfirm:
+		if pb != cargo.OfferProposedByDispatcher && pb != cargo.OfferProposedByDriverManager {
+			resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
+			return
+		}
+	case "PENDING":
+		if pb != cargo.OfferProposedByDispatcher && pb != cargo.OfferProposedByDriver {
+			resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
+			return
+		}
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
 		return
 	}
 	var req RejectOfferReq
@@ -2426,28 +2543,29 @@ func (h *CargoHandler) RejectOfferDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_too_short")
 		return
 	}
-	if err := h.repo.RejectOffer(c.Request.Context(), offerID, req.Reason); err != nil {
-		if errors.Is(err, cargo.ErrRejectionReasonRequired) {
+	cancelOwn := offer.Status == "PENDING" && pb == cargo.OfferProposedByDriver
+	var endErr error
+	if cancelOwn {
+		endErr = h.repo.CancelOffer(c.Request.Context(), offerID, req.Reason)
+	} else {
+		endErr = h.repo.RejectOffer(c.Request.Context(), offerID, req.Reason)
+	}
+	if endErr != nil {
+		if errors.Is(endErr, cargo.ErrRejectionReasonRequired) {
 			resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
 			return
 		}
 		resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
 		return
 	}
-	if h.stream != nil {
-		cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
-		if disp := tripNotifyDispatcherID(cargoObj); disp != nil && *disp != uuid.Nil {
-			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, gin.H{
-				"kind":       "cargo_offer",
-				"event":      "cargo_offer_rejected",
-				"offer_id":   offerID.String(),
-				"cargo_id":   offer.CargoID.String(),
-				"driver_id":  driverID.String(),
-				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-			})
-		}
+	cargoObj, _ := h.repo.GetByID(c.Request.Context(), offer.CargoID, false)
+	if cancelOwn {
+		h.publishCargoOfferEndedNotifs(c, offer, cargoObj, "cargo_offer_canceled")
+		resp.OKLang(c, "ok", gin.H{"status": "CANCELED"})
+	} else {
+		h.publishCargoOfferEndedNotifs(c, offer, cargoObj, "cargo_offer_rejected")
+		resp.OKLang(c, "ok", gin.H{"status": "REJECTED"})
 	}
-	resp.OKLang(c, "ok", gin.H{"status": "rejected"})
 }
 
 // GetDriverOfferInvitationStats GET /v1/driver/cargo-invitation-stats — counts for current driver (all cargos).
@@ -2477,6 +2595,24 @@ func dispatcherOwnsCargoForNegotiation(cargoObj *cargo.Cargo, dispatcherID uuid.
 	}
 	if cargoObj.CreatedByType != nil && strings.EqualFold(*cargoObj.CreatedByType, "COMPANY") &&
 		cargoObj.CompanyID != nil && companyID != nil && *cargoObj.CompanyID == *companyID {
+		return true
+	}
+	return false
+}
+
+// dispatcherCanAccessOfferForNegotiation: cargo owner/company OR driver manager who proposed (DRIVER_MANAGER) OR dispatcher recorded on offer (negotiation / accept chain).
+func dispatcherCanAccessOfferForNegotiation(cargoObj *cargo.Cargo, offer *cargo.Offer, dispatcherID uuid.UUID, companyID *uuid.UUID) bool {
+	if offer == nil {
+		return false
+	}
+	if dispatcherOwnsCargoForNegotiation(cargoObj, dispatcherID, companyID) {
+		return true
+	}
+	pb := strings.ToUpper(strings.TrimSpace(offer.ProposedBy))
+	if pb == cargo.OfferProposedByDriverManager && offer.ProposedByID != nil && *offer.ProposedByID == dispatcherID {
+		return true
+	}
+	if offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID == dispatcherID {
 		return true
 	}
 	return false

@@ -181,6 +181,10 @@ func (h *TripsHandler) getTripDispatcherParticipants(c *gin.Context, tripID uuid
 	cg, _ := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false)
 	out.CargoManagerID = tripNotifyDispatcherID(cg)
 	if offer, _ := h.cargoRepo.GetOfferByID(c.Request.Context(), t.OfferID); offer != nil {
+		if offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID != uuid.Nil {
+			out.DriverManagerID = offer.NegotiationDispatcherID
+			return out, nil
+		}
 		if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), "DRIVER_MANAGER") && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
 			out.DriverManagerID = offer.ProposedByID
 		}

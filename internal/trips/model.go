@@ -34,6 +34,12 @@ type Trip struct {
 	RatingFromDriver *float64
 	// RatingFromDispatcher — звёзды, которые cargo manager поставил водителю по этому рейсу.
 	RatingFromDispatcher *float64
+
+	// Extended ratings for Driver Manager flow
+	RatingDriverToDM *int `json:"rating_driver_to_dm,omitempty"`
+	RatingDMToDriver *int `json:"rating_dm_to_driver,omitempty"`
+	RatingDMToCM     *int `json:"rating_dm_to_cm,omitempty"`
+	RatingCMToDM     *int `json:"rating_cm_to_dm,omitempty"`
 }
 
 // CompletionPending returns true if the trip is DELIVERED and the driver has requested completion but the cargo manager has not confirmed yet.

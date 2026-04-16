@@ -62,6 +62,7 @@ var refLabels = map[string]map[string]string{
 	"cargo.offer_status.PENDING":     {"ru": "На рассмотрении", "uz": "Ko'rib chiqilmoqda", "en": "Pending", "tr": "Beklemede", "zh": "待处理"},
 	"cargo.offer_status.ACCEPTED":    {"ru": "Принят", "uz": "Qabul qilindi", "en": "Accepted", "tr": "Kabul edildi", "zh": "已接受"},
 	"cargo.offer_status.REJECTED":    {"ru": "Отклонён", "uz": "Rad etilgan", "en": "Rejected", "tr": "Reddedildi", "zh": "已拒绝"},
+	"cargo.offer_status.CANCELED":    {"ru": "Отменён", "uz": "Bekor qilindi", "en": "Canceled", "tr": "İptal edildi", "zh": "已取消"},
 	"cargo.created_by_type.ADMIN":      {"ru": "Админ", "uz": "Admin", "en": "Admin", "tr": "Admin", "zh": "管理员"},
 	"cargo.created_by_type.DISPATCHER": {"ru": "Диспетчер", "uz": "Dispetcher", "en": "Dispatcher", "tr": "Dispatçı", "zh": "调度员"},
 	"cargo.created_by_type.COMPANY":    {"ru": "Компания", "uz": "Kompaniya", "en": "Company", "tr": "Şirket", "zh": "公司"},

@@ -13,8 +13,9 @@ CREATE INDEX IF NOT EXISTS idx_driver_manager_relations_driver ON driver_manager
 ALTER TABLE offers DROP CONSTRAINT IF EXISTS offers_status_check;
 ALTER TABLE offers ADD CONSTRAINT offers_status_check CHECK (status IN ('PENDING', 'ACCEPTED', 'REJECTED', 'WAITING_DRIVER_CONFIRM'));
 
--- Добавляем ID того, кто предложил (для DRIVER_MANAGER)
+-- Добавляем ID того, кто предложил (для DRIVER_MANAGER) и кто вел переговоры
 ALTER TABLE offers ADD COLUMN IF NOT EXISTS proposed_by_id UUID;
+ALTER TABLE offers ADD COLUMN IF NOT EXISTS negotiation_dispatcher_id UUID;
 
 -- Переносим старые связи (один-к-одному) в новую таблицу
 INSERT INTO driver_manager_relations (driver_id, manager_id)

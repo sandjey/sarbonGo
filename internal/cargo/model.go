@@ -172,22 +172,24 @@ const (
 	OfferStatusPending             = "PENDING"
 	OfferStatusAccepted            = "ACCEPTED"
 	OfferStatusRejected            = "REJECTED"
+	OfferStatusCanceled            = "CANCELED" // отозван автором (своё исходящее / отмена до подтверждения водителем)
 	OfferStatusWaitingDriverConfirm = "WAITING_DRIVER_CONFIRM"
 )
 
 // Offer model (table offers).
 type Offer struct {
-	ID              uuid.UUID
-	CargoID         uuid.UUID
-	CarrierID       uuid.UUID
-	Price           float64
-	Currency        string
-	Comment         *string
-	ProposedBy      string     // DRIVER | DISPATCHER | DRIVER_MANAGER
-	ProposedByID    *uuid.UUID // ID диспетчера, если предложил диспетчер (или менеджер водителя)
-	Status          string     // PENDING, ACCEPTED, REJECTED, WAITING_DRIVER_CONFIRM
-	RejectionReason *string
-	CreatedAt       time.Time
+	ID                        uuid.UUID
+	CargoID                   uuid.UUID
+	CarrierID                 uuid.UUID
+	Price                     float64
+	Currency                  string
+	Comment                   *string
+	ProposedBy                string     // DRIVER | DISPATCHER | DRIVER_MANAGER
+	ProposedByID              *uuid.UUID // ID диспетчера, если предложил диспетчер (или менеджер водителя)
+	NegotiationDispatcherID   *uuid.UUID // DM в цепочке при WAITING_DRIVER_CONFIRM (кто предложил DRIVER_MANAGER или кто принял DISPATCHER от CM)
+	Status                    string // PENDING, ACCEPTED, REJECTED, CANCELED, WAITING_DRIVER_CONFIRM
+	RejectionReason           *string
+	CreatedAt                 time.Time
 }
 
 // DriverCargoOffer is one driver offer plus minimal cargo/trip info.
@@ -212,7 +214,7 @@ type DriverCargoOffer struct {
 	TripStatus *string
 }
 
-// DispatcherSentOffer is one sent offer (proposed_by=DISPATCHER) with cargo/trip context.
+// DispatcherSentOffer is one offer row for GET /v1/dispatchers/offers/all (DISPATCHER or DRIVER_MANAGER on linked cargo, plus cargo/trip context).
 type DispatcherSentOffer struct {
 	Offer
 	CargoStatus          CargoStatus

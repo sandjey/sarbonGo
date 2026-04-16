@@ -133,12 +133,14 @@ const swaggerHTML = `<!doctype html>
         top: 0;
         left: 0;
         right: 0;
-        height: 58px;
+        min-height: 58px;
+        height: auto;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-wrap: wrap;
         gap: 10px;
-        padding: 0 14px;
+        padding: 8px 14px;
         background: var(--menu-bg);
         backdrop-filter: blur(10px);
         border-bottom: 1px solid var(--menu-border);
@@ -351,12 +353,13 @@ const swaggerHTML = `<!doctype html>
   <body>
     <div class="sarbon-docs-hint" id="sarbon-docs-hint">
       Заголовки задаются в кнопке <b>Authorize</b>: X-Device-Type (web / ios / android), X-Language (ru / uz / en / tr / zh), X-Client-Token. Один раз выбранные значения действуют для <b>всех разделов</b> (Drivers, Cargo Manager, Driver Manager, Admin, Chat, Company). Можно выбрать любой язык и любой тип устройства.
+      Группа <b>Driver Manager</b> помечена как отдельный блок API в верхнем меню.
     </div>
     <div class="sarbon-topmenu" role="navigation" aria-label="API groups">
       <div class="brand">Sarbon API</div>
       <button class="btn" data-group="drivers">Drivers Mobile</button>
       <button class="btn" data-group="cargo">Cargo Manager</button>
-      <button class="btn" data-group="dispatchers">Driver Manager</button>
+      <button class="btn" data-group="dispatchers">Driver Manager API</button>
       <button class="btn" data-group="company">Company</button>
       <button class="btn" data-group="admin">Admin</button>
       <button class="btn" data-group="chat">Chat</button>
@@ -650,14 +653,15 @@ const swaggerHTML = `<!doctype html>
         }
 
         function applyGroupFilter(group) {
+          const g = normalizeGroup(group);
           const sections = document.querySelectorAll('#swagger-ui .opblock-tag-section');
           sections.forEach((sec) => {
             const t = getSectionTagName(sec);
-            sec.style.display = isTagInGroup(t, group) ? '' : 'none';
+            sec.style.display = isTagInGroup(t, g) ? '' : 'none';
           });
           // Доп. скрытие по пути: эндпоинты рейсов / приглашений / диспетчеров не показываем в Drivers Mobile.
           document.querySelectorAll('#swagger-ui .opblock').forEach((op) => {
-            if (group !== 'drivers') {
+            if (g !== 'drivers') {
               op.style.display = '';
               return;
             }

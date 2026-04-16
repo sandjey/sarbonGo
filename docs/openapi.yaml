@@ -103,7 +103,7 @@ tags:
     description: |
       Офферы Cargo Manager.
       - `/v1/dispatchers/offers/all` — единый список по `direction=all|incoming|outgoing` + `status` + `counterparty_id`.
-      - `/v1/dispatchers/offers/{id}/accept|reject` — принять входящий оффер водителя или отклонить входящий; **reject** также снимает **свой исходящий** оффер водителю (`proposed_by=DISPATCHER`, PENDING).
+      - `/v1/dispatchers/offers/{id}/accept|reject` — принять входящий оффер или отклонить/отозвать; **reject** для **PENDING** и **WAITING_DRIVER_CONFIRM** (см. описание метода). **Снятие своего исходящего** (`proposed_by=DISPATCHER` PENDING, или **WAITING_DRIVER_CONFIRM** у владельца груза / negotiation DM) → в БД и в `data.status` — **CANCELED**; **отказ по входящей заявке** (водитель / driver manager и т.п.) → **REJECTED**.
       В ответе списка есть `counts.incoming/outgoing`.
   - name: "Cargo Manager / Offer decision flow"
     description: |
@@ -142,11 +142,6 @@ tags:
   - name: "Cargo Manager / Driver likes"
     description: |
       **Избранные водители (Cargo Manager).** `POST` с `driver_id`, `DELETE /:driverId`, `GET` с `limit`. Предпочтительные пути: `/v1/dispatchers/driver-likes` (алиас: `/favorite-drivers`).
-  - name: "Cargo Manager / Likes"
-    description: |
-      Общая группировка избранного для Cargo Manager:
-      - грузы (`/v1/dispatchers/cargo-likes`)
-      - водители (`/v1/dispatchers/driver-likes`)
   - name: "Driver Manager"
     description: |
       Роль Driver Manager: добавление/ведение водителей, приглашения, офферы и сопровождение рейсов вместе с водителем.
@@ -265,7 +260,8 @@ tags:
       - `/v1/driver/offers/all` — единый список по `direction=all|incoming|outgoing`, фильтры `status`, `counterparty_id`.
       - `/v1/driver/cargo/{id}/offers` — отправить оффер.
       - `/v1/driver/offers/{id}/accept` — принять входящий оффер диспетчера (`proposed_by=DISPATCHER`).
-      - `/v1/driver/offers/{id}/reject` — отклонить входящий оффер диспетчера **или** отозвать **свой исходящий** (`proposed_by=DRIVER`, PENDING). Отмена рейса: `POST /v1/driver/trips/{trip_id}/cancel`. Текущий рейс: `GET /v1/driver/trips/me`.
+      - `/v1/driver/offers/{id}/reject` — отклонить входящий оффер диспетчера / отказ в **WAITING_DRIVER_CONFIRM** → **REJECTED**; **отозвать свой** исходящий (`proposed_by=DRIVER`, PENDING) → **CANCELED**. Отмена рейса: `POST /v1/driver/trips/{trip_id}/cancel`. Текущий рейс: `GET /v1/driver/trips/me`.
+      - `/v1/driver/cargo-offers` — список своих офферов по грузам с `bucket=sent|accepted|completed|rejected|canceled` (алиас `cancelled`).
       Для `/offers/all` сервер возвращает `counts.incoming/outgoing`.
   - name: "Drivers / Offer decision flow"
     description: |
@@ -346,7 +342,7 @@ tags:
     description: |
       **Справочник для раздела Cargo (грузы).** Все статусы груза, точки маршрута, офферы, типы создателя, типы ТС.
 
-      **GET /v1/reference/cargo** — полный справочник для грузов (все value в UPPERCASE). cargo_status (с description), route_point_type (LOAD, UNLOAD, CUSTOMS, TRANSIT), truck_type (TENT, REFRIGERATOR...), shipment_type (FTL, LTL…), currency (USD, UZS…), prepayment_type (BANK_TRANSFER…), remaining_type (ON_DELIVERY…), loading_type (TOP, SIDE…), offer_status (PENDING/ACCEPTED/REJECTED), created_by_type (ADMIN/DISPATCHER/COMPANY), trip_status (IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED), packaging_type (BAG, PALLETS, BULK, BOXES, HEAP). Все переданные в API значения валидируются по этим справочникам.
+      **GET /v1/reference/cargo** — полный справочник для грузов (все value в UPPERCASE). cargo_status (с description), route_point_type (LOAD, UNLOAD, CUSTOMS, TRANSIT), truck_type (TENT, REFRIGERATOR...), shipment_type (FTL, LTL…), currency (USD, UZS…), prepayment_type (BANK_TRANSFER…), remaining_type (ON_DELIVERY…), loading_type (TOP, SIDE…), offer_status (PENDING/ACCEPTED/REJECTED/CANCELED), created_by_type (ADMIN/DISPATCHER/COMPANY), trip_status (IN_PROGRESS, IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED), packaging_type (BAG, PALLETS, BULK, BOXES, HEAP). Все переданные в API значения валидируются по этим справочникам.
   - name: "Reference / Company"
     description: |
       **Справочник для раздела Company.** Типы компании, статусы компании, роли (с id и описанием) для приглашений и назначений.
@@ -875,23 +871,26 @@ components:
       description: |
         **Оффер (согласование цены)** по грузу. Поле **proposed_by** задаёт, кто предложил цену в этом оффере:
         - **DRIVER** — водитель предложил цену; принять может только владелец груза.
-        - **DISPATCHER** — Cargo Manager предложил цену водителю; принять может только этот водитель.
-        - **DRIVER_MANAGER** — менеджер водителя предложил цену на чужой груз; принять может только владелец груза. При принятии статус переходит в WAITING_DRIVER_CONFIRM (требуется подтверждение водителя).
+        - **DISPATCHER** — Cargo Manager предложил цену водителю; принять может водитель или его Driver Manager; при принятии менеджером — **WAITING_DRIVER_CONFIRM** и поле **negotiation_dispatcher_id** = этот менеджер.
+        - **DRIVER_MANAGER** — менеджер водителя предложил цену на чужой груз; принять может только владелец груза. При принятии Cargo Manager статус **WAITING_DRIVER_CONFIRM**, **negotiation_dispatcher_id** = менеджер из **proposed_by_id**.
 
         **Статусы:** 
         - PENDING — на рассмотрении;
         - ACCEPTED — принят (создан рейс);
-        - REJECTED — отклонён;
-        - WAITING_DRIVER_CONFIRM — ожидает финального подтверждения водителем (для офферов от DRIVER_MANAGER).
+        - REJECTED — отклонён стороной, которая **отказалась по чужому** предложению (входящая заявка / приглашение);
+        - CANCELED — **отменён автором** своего исходящего оффера или снят согласованный до водителя этап владельцем груза / negotiation DM (см. POST reject);
+        - WAITING_DRIVER_CONFIRM — ожидает подтверждения водителем (после согласования CM↔DM).
       properties:
         id: { type: string, format: uuid, example: "f1a2b3c4-d5e6-7890-abcd-ef1234567890", description: "UUID оффера" }
         cargo_id: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120", description: "UUID груза" }
         carrier_id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", description: "ID перевозчика (водителя)" }
         proposed_by: { type: string, enum: [DRIVER, DISPATCHER, DRIVER_MANAGER], example: "DRIVER", description: "Кто задал цену" }
+        proposed_by_id: { type: string, format: uuid, nullable: true, description: "UUID диспетчера-автора для DISPATCHER/DRIVER_MANAGER (если есть)" }
+        negotiation_dispatcher_id: { type: string, format: uuid, nullable: true, description: "Driver Manager в цепочке при WAITING_DRIVER_CONFIRM / оценках после рейса" }
         price: { type: number, example: 1500, description: "Предложенная цена" }
         currency: { type: string, example: "USD", description: "Валюта" }
         comment: { type: string, nullable: true, example: "Готов выехать завтра", description: "Комментарий" }
-        status: { type: string, enum: [PENDING, ACCEPTED, REJECTED, WAITING_DRIVER_CONFIRM], example: "PENDING", description: "Статус оффера" }
+        status: { type: string, enum: [PENDING, ACCEPTED, REJECTED, CANCELED, WAITING_DRIVER_CONFIRM], example: "PENDING", description: "Статус оффера" }
         created_at: { type: string, format: date-time, example: "2026-03-23T16:00:00Z" }
     CargoListResponse:
       type: object
@@ -1675,7 +1674,7 @@ paths:
         - С **X-User-Token** водителя: оффер считается предложением водителя (**proposed_by=DRIVER**); carrier_id должен совпадать с id водителя из JWT.
         - С **X-User-Token** диспетчера: оффер считается предложением диспетчера выбранному водителю (**proposed_by=DISPATCHER**); принять цену может только этот водитель (см. POST /api/offers/{id}/accept или POST /v1/driver/offers/{id}/accept).
 
-        **Ограничения:** у водителя не может быть второго оффера **DRIVER** по тому же грузу, пока предыдущий его оффер в статусе **PENDING** или **ACCEPTED** (после **REJECTED** можно снова). У диспетчера не может быть двух **одновременно ожидающих** (**PENDING**) исходящих офферов (**DISPATCHER**) одному и тому же водителю на тот же груз — после отклонения/снятия можно отправить новый.
+        **Ограничения:** у водителя не может быть второго оффера **DRIVER** по тому же грузу, пока предыдущий его оффер в статусе **PENDING** или **ACCEPTED** (после **REJECTED** или **CANCELED** можно снова). У диспетчера не может быть двух **одновременно ожидающих** (**PENDING**) исходящих офферов (**DISPATCHER**) одному и тому же водителю на тот же груз — после отклонения/снятия можно отправить новый.
 
         Удобный путь для водителя без ручного carrier_id: **POST /v1/driver/cargo/{id}/offers** (только price, currency, comment).
 
@@ -4353,12 +4352,14 @@ paths:
       tags: ["Cargo Manager / Offers", "Cargo Manager / Offer decision flow"]
       summary: "Отклонить оффер водителя или отозвать своё приглашение (диспетчер)"
       description: |
-        Для **своего груза** (создатель-диспетчер или компания после switch-company), оффер **PENDING**:
-        - **proposed_by=DRIVER** — отклонить входящую заявку водителя;
-        - **proposed_by=DRIVER_MANAGER** — отклонить входящую заявку менеджера водителя (обязательно с причиной);
-        - **proposed_by=DISPATCHER** — отозвать своё исходящее приглашение этому водителю.
+        Для **своего груза** (создатель-диспетчер или компания после switch-company), оффер **PENDING** или **WAITING_DRIVER_CONFIRM** (отмена до подтверждения водителем):
+        - **proposed_by=DRIVER** — отклонить входящую заявку водителя → статус оффера **REJECTED**, `data.status` = **REJECTED**;
+        - **proposed_by=DRIVER_MANAGER** — отклонить входящую заявку менеджера водителя (обязательно с причиной) → **REJECTED**;
+        - **proposed_by=DISPATCHER** — отозвать своё исходящее приглашение этому водителю → **CANCELED**, `data.status` = **CANCELED**.
+        **Driver Manager** в **WAITING_DRIVER_CONFIRM** как **negotiation_dispatcher_id** снимает сделку до ответа водителя → **CANCELED**. Иначе (входящее по грузу другого CM) → **REJECTED**.
+        SSE: уведомления **водителю**, **Cargo Manager** и **Driver Manager** (если применимо).
         **reason обязателен** (текст причины).
-        en: Reject driver offer or withdraw your dispatcher offer; reason required.
+        en: Reject incoming offer (REJECTED) or withdraw your own outgoing offer (CANCELED); reason required.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4375,7 +4376,7 @@ paths:
               properties:
                 reason: { type: string, minLength: 3, description: "Причина отказа: минимум 1 слово и минимум 3 буквы" }
       responses:
-        "200": { description: "data.status = rejected" }
+        "200": { description: "data.status = REJECTED или CANCELED (см. описание метода)" }
         "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
         "403": { description: not_your_cargo }
         "404": { description: offer_not_found }
@@ -4401,7 +4402,7 @@ paths:
               properties:
                 reason: { type: string, minLength: 3 }
       responses:
-        "200": { description: "data.status = rejected" }
+        "200": { description: "data.status = REJECTED или CANCELED (см. POST …/reject)" }
         "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
         "403": { description: not_your_cargo }
         "404": { description: offer_not_found }
@@ -4429,7 +4430,7 @@ paths:
               properties:
                 reason: { type: string, minLength: 3 }
       responses:
-        "200": { description: "data.status = rejected" }
+        "200": { description: "data.status = REJECTED или CANCELED (см. POST …/reject)" }
         "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
         "403": { description: not_your_cargo }
         "404": { description: offer_not_found }
@@ -4458,7 +4459,7 @@ paths:
               properties:
                 reason: { type: string, minLength: 3 }
       responses:
-        "200": { description: "data.status = rejected (cancelled by manager)" }
+        "200": { description: "data.status = CANCELED при отмене своего PENDING; иначе как POST …/reject" }
         "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
         "403": { description: not_your_cargo }
         "404": { description: offer_not_found }
@@ -4468,13 +4469,17 @@ paths:
       tags: ["Cargo Manager / Offers", "Cargo Manager / Offer decision flow", "Driver Manager / Offers"]
       summary: "Все офферы диспетчера (исходящие и входящие)"
       description: |
-        Единый список офферов для Cargo Manager с переключением направления:
-        - `direction=all` (по умолчанию) — оба направления в одном списке
-        - `direction=outgoing` — офферы, **отправленные мной** водителям (`proposed_by=DISPATCHER`)
-        - `direction=incoming` — офферы, **отправленные мне** водителями и менеджерами водителя (`proposed_by=DRIVER` и `proposed_by=DRIVER_MANAGER`)
+        Единый список офферов для диспетчера (JWT `freelance_dispatchers`): Cargo Manager и Driver Manager используют один и тот же путь.
+        - **Cargo Manager:** грузы, где вы создатель (`created_by_type=DISPATCHER`, `created_by_id=вы`).
+        - **Driver Manager:** дополнительно видны **ваши** исходящие офферы как менеджер (`proposed_by=DRIVER_MANAGER` и `proposed_by_id=вы`) по **любому** грузу — чтобы они попадали в список после `…/offers/send-by-driver-manager`.
+
+        Направление:
+        - `direction=all` (по умолчанию) — оба направления в одном списке (см. правила выше).
+        - `direction=outgoing` — вы как владелец груза отправили цену водителю (`proposed_by=DISPATCHER`), **или** вы как driver manager отправили оффер (`proposed_by=DRIVER_MANAGER`, `proposed_by_id=вы`).
+        - `direction=incoming` — офферы **по вашим грузам**, входящие от водителей и менеджеров (`proposed_by=DRIVER` и `proposed_by=DRIVER_MANAGER`).
 
         Структура элемента: блоки `cargo`, `offer`, `trip` (если уже создан рейс).
-        Поддерживает фильтр `status` (PENDING, ACCEPTED, REJECTED), пагинацию и счетчики `data.counts.incoming/outgoing`.
+        Поддерживает фильтр `status` (PENDING, ACCEPTED, REJECTED, CANCELED, WAITING_DRIVER_CONFIRM), пагинацию и счетчики `data.counts.incoming/outgoing`.
         **Как читать:**
         - `direction=all` + `counts` — полный обзор.
         - `direction=outgoing` — только отправленные мной.
@@ -5143,7 +5148,7 @@ paths:
 
   /v1/dispatchers/cargo-likes:
     get:
-      tags: ["Cargo Manager / Likes", "Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
+      tags: ["Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
       summary: "Список избранных грузов (Cargo likes)"
       description: |
         Список грузов в избранном у текущего Cargo Manager (JWT `freelance_dispatchers`).
@@ -5184,7 +5189,7 @@ paths:
         "500":
           description: failed_to_list_favorites
     post:
-      tags: ["Cargo Manager / Likes", "Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
+      tags: ["Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
       summary: "Добавить груз в избранное (Cargo likes)"
       description: |
         Тело: `cargo_id` — любой существующий груз. Повторное добавление → 200 `favorite_already_exists`.
@@ -5212,7 +5217,7 @@ paths:
 
   /v1/dispatchers/cargo-likes/{cargoId}:
     delete:
-      tags: ["Cargo Manager / Likes", "Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
+      tags: ["Cargo Manager / Cargo likes", "Driver Manager / Cargo likes"]
       summary: "Убрать груз из избранного (Cargo likes)"
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -5230,7 +5235,7 @@ paths:
 
   /v1/dispatchers/driver-likes:
     get:
-      tags: ["Cargo Manager / Likes", "Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
+      tags: ["Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
       summary: "Список избранных водителей (Driver likes)"
       description: |
         Список водителей в избранном у текущего Cargo Manager. Те же данные, что у устаревшего `GET /v1/dispatchers/favorite-drivers`.
@@ -5271,7 +5276,7 @@ paths:
         "500":
           description: failed_to_list_favorites
     post:
-      tags: ["Cargo Manager / Likes", "Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
+      tags: ["Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
       summary: "Добавить водителя в избранное (Driver likes)"
       description: "Тело: `driver_id`. Повтор → 200 `favorite_already_exists`."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -5298,7 +5303,7 @@ paths:
 
   /v1/dispatchers/driver-likes/{driverId}:
     delete:
-      tags: ["Cargo Manager / Likes", "Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
+      tags: ["Cargo Manager / Driver likes", "Driver Manager / Driver likes"]
       summary: "Убрать водителя из избранного (Driver likes)"
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -5369,6 +5374,31 @@ paths:
       responses:
         "200": { description: "data.items, data.total, data.page, data.limit, data.direction, data.counterparty_id, data.counts.incoming, data.counts.outgoing" }
         "400": { description: invalid_payload_detail }
+        "401": { description: unauthorized }
+        "500": { description: failed_to_list_cargo_offers }
+
+  /v1/driver/cargo-offers:
+    get:
+      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      summary: "Список своих офферов по грузам (корзины)"
+      description: |
+        Список офферов текущего водителя с кратким `cargo` и блоком `offer` (в т.ч. поле **status**: PENDING, ACCEPTED, REJECTED, CANCELED, WAITING_DRIVER_CONFIRM).
+        Query **bucket**: `sent` (по умолчанию), `accepted`, `completed`, `rejected`, `canceled` (алиас `cancelled`), пагинация `page`, `limit`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: bucket
+          in: query
+          required: false
+          schema: { type: string, example: "sent", enum: [sent, accepted, completed, rejected, canceled, cancelled] }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.items, data.total, data.page, data.limit, data.bucket; message cargo_offers_listed" }
+        "400": { description: invalid_cargo_offer_bucket }
         "401": { description: unauthorized }
         "500": { description: failed_to_list_cargo_offers }
 
@@ -5476,9 +5506,11 @@ paths:
       tags: ["Drivers / Offers", "Drivers / Completion & ratings flow"]
       summary: "Подтвердить сделку, принятую менеджером"
       description: |
-        Для офферов с **proposed_by=DRIVER_MANAGER** (ваш менеджер предложил цену за вас). Вызывается водителем, когда оффер перешёл в статус **WAITING_DRIVER_CONFIRM** (после того как Cargo Manager нажал Accept).
+        Вызывается водителем, когда оффер в статусе **WAITING_DRIVER_CONFIRM**:
+        - после того как Cargo Manager принял оффер с **proposed_by=DRIVER_MANAGER**;
+        - или после того как Driver Manager принял исходящий оффер Cargo Manager (**proposed_by=DISPATCHER**).
 
-        После подтверждения статус оффера становится ACCEPTED и создаётся Trip.
+        После подтверждения статус оффера становится ACCEPTED и создаётся Trip. SSE: **Cargo Manager** и **Driver Manager** (negotiation_dispatcher_id), если они разные.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -5535,9 +5567,10 @@ paths:
       tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
       summary: "Отклонить приглашение диспетчера или отозвать свой оффер (водитель)"
       description: |
-        Оффер с **carrier_id** = вы, статус **PENDING**:
-        - **proposed_by=DISPATCHER** — отклонить приглашение диспетчера;
-        - **proposed_by=DRIVER** — отозвать **свой** исходящий оффер по грузу.
+        Оффер с **carrier_id** = вы:
+        - статус **PENDING**: **proposed_by=DISPATCHER** — отклонить приглашение → **REJECTED**, `data.status` = **REJECTED**; **proposed_by=DRIVER** — отозвать свой исходящий оффер → **CANCELED**, `data.status` = **CANCELED**;
+        - статус **WAITING_DRIVER_CONFIRM**: отказ водителя от сделки после согласования менеджера (**proposed_by=DISPATCHER** или **DRIVER_MANAGER**) → **REJECTED**.
+        SSE: уведомления **Cargo Manager** и **Driver Manager** (если есть в цепочке).
         **reason обязателен.**
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -5555,7 +5588,7 @@ paths:
               properties:
                 reason: { type: string, minLength: 3, description: "Причина отказа: минимум 1 слово и минимум 3 буквы" }
       responses:
-        "200": { description: status rejected }
+        "200": { description: "data.status = REJECTED или CANCELED (см. описание метода)" }
         "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
         "403": { description: not_your_offer }
         "404": { description: offer_not_found }
@@ -5581,7 +5614,7 @@ paths:
               properties:
                 reason: { type: string, minLength: 3 }
       responses:
-        "200": { description: status rejected }
+        "200": { description: "data.status = REJECTED или CANCELED (см. POST …/reject)" }
         "400": { description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending }
         "403": { description: not_your_offer }
         "404": { description: offer_not_found }

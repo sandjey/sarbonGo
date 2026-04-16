@@ -186,6 +186,7 @@ func GetReferenceCargo(c *gin.Context) {
 			{Value: "PENDING", Label: reference.RefLabel("cargo.offer_status", "PENDING", lang)},
 			{Value: "ACCEPTED", Label: reference.RefLabel("cargo.offer_status", "ACCEPTED", lang)},
 			{Value: "REJECTED", Label: reference.RefLabel("cargo.offer_status", "REJECTED", lang)},
+			{Value: "CANCELED", Label: reference.RefLabel("cargo.offer_status", "CANCELED", lang)},
 		},
 		CreatedByType: []ItemWithLabel{
 			{Value: "ADMIN", Label: reference.RefLabel("cargo.created_by_type", "ADMIN", lang)},

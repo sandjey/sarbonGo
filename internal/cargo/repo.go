@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"sarbonNew/internal/cargodrivers"
@@ -938,9 +939,14 @@ func (r *Repo) SetStatus(ctx context.Context, id uuid.UUID, newStatus string) er
 func (r *Repo) GetOfferByID(ctx context.Context, offerID uuid.UUID) (*Offer, error) {
 	var o Offer
 	var rejReason string
+	var proposedByIDStr, negotiationDispStr string
 	err := r.pg.QueryRow(ctx, `
-SELECT id, cargo_id, carrier_id, price, currency, comment, COALESCE(proposed_by, 'DRIVER'), status, COALESCE(rejection_reason, ''), created_at
-FROM offers WHERE id = $1`, offerID).Scan(&o.ID, &o.CargoID, &o.CarrierID, &o.Price, &o.Currency, &o.Comment, &o.ProposedBy, &o.Status, &rejReason, &o.CreatedAt)
+SELECT id, cargo_id, carrier_id, price, currency, comment, COALESCE(proposed_by, 'DRIVER'), status, COALESCE(rejection_reason, ''), created_at,
+  COALESCE(proposed_by_id::text, ''), COALESCE(negotiation_dispatcher_id::text, '')
+FROM offers WHERE id = $1`, offerID).Scan(
+		&o.ID, &o.CargoID, &o.CarrierID, &o.Price, &o.Currency, &o.Comment, &o.ProposedBy, &o.Status, &rejReason, &o.CreatedAt,
+		&proposedByIDStr, &negotiationDispStr,
+	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -949,6 +955,16 @@ FROM offers WHERE id = $1`, offerID).Scan(&o.ID, &o.CargoID, &o.CarrierID, &o.Pr
 	}
 	if rejReason != "" {
 		o.RejectionReason = &rejReason
+	}
+	if s := strings.TrimSpace(proposedByIDStr); s != "" {
+		if u, perr := uuid.Parse(s); perr == nil && u != uuid.Nil {
+			o.ProposedByID = &u
+		}
+	}
+	if s := strings.TrimSpace(negotiationDispStr); s != "" {
+		if u, perr := uuid.Parse(s); perr == nil && u != uuid.Nil {
+			o.NegotiationDispatcherID = &u
+		}
 	}
 	return &o, nil
 }
@@ -1138,7 +1154,7 @@ WHERE (o.proposed_by_id = $1)
 }
 
 // CountDriverCargoOffersByBucket returns count of offers by driver (carrier_id) for selected bucket.
-// bucket: sent|accepted|completed|rejected.
+// bucket: sent|accepted|completed|rejected|canceled|cancelled.
 func (r *Repo) CountDriverCargoOffersByBucket(ctx context.Context, driverID uuid.UUID, bucket string) (int, error) {
 	where, err := driverCargoOffersBucketWhere(bucket)
 	if err != nil {
@@ -1154,7 +1170,7 @@ SELECT COUNT(*)
 }
 
 // ListDriverCargoOffersByBucket lists driver offers with minimal cargo info.
-// bucket: sent|accepted|completed|rejected.
+// bucket: sent|accepted|completed|rejected|canceled|cancelled.
 func (r *Repo) ListDriverCargoOffersByBucket(ctx context.Context, driverID uuid.UUID, bucket string, limit, offset int) ([]DriverCargoOffer, error) {
 	where, err := driverCargoOffersBucketWhere(bucket)
 	if err != nil {
@@ -1280,6 +1296,8 @@ func driverCargoOffersBucketWhere(bucket string) (string, error) {
 		return "o.status = 'ACCEPTED' AND c.status = 'COMPLETED'", nil
 	case "rejected", "declined":
 		return "o.status = 'REJECTED'", nil
+	case "canceled", "cancelled":
+		return "o.status = 'CANCELED'", nil
 	default:
 		return "", errors.New("cargo: invalid bucket")
 	}
@@ -1363,21 +1381,33 @@ VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, now()) RETURNING id`,
 	return id, err
 }
 
-func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
-	proposedByCond := ""
+// buildDispatcherOffersAllWhere builds WHERE for GET /v1/dispatchers/offers/all (Count + List):
+// - Cargo manager: offers on cargo created by this dispatcher (DISPATCHER + created_by_id).
+// - Driver manager: offers this dispatcher proposed as DRIVER_MANAGER on someone else's cargo.
+func buildDispatcherOffersAllWhere(direction string) (where string, err error) {
 	switch strings.ToLower(strings.TrimSpace(direction)) {
 	case "", "all", "both":
-		proposedByCond = ""
+		return `c.deleted_at IS NULL AND (
+	(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1)
+	OR (o.proposed_by = 'DRIVER_MANAGER' AND o.proposed_by_id = $1)
+)`, nil
 	case "outgoing", "from_me", "sent", "by":
-		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'"
+		return `c.deleted_at IS NULL AND (
+	(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1 AND COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER')
+	OR (o.proposed_by = 'DRIVER_MANAGER' AND o.proposed_by_id = $1)
+)`, nil
 	case "incoming", "to_me", "received":
-		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') IN ('DRIVER', 'DRIVER_MANAGER')"
+		return `c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1
+	AND COALESCE(o.proposed_by, 'DRIVER') IN ('DRIVER', 'DRIVER_MANAGER')`, nil
 	default:
-		return 0, errors.New("cargo: invalid offers direction")
+		return "", errors.New("cargo: invalid offers direction")
 	}
-	where := "c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
-	if proposedByCond != "" {
-		where += " AND " + proposedByCond
+}
+
+func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
+	where, err := buildDispatcherOffersAllWhere(direction)
+	if err != nil {
+		return 0, err
 	}
 	args := []any{dispatcherID}
 	argN := 2
@@ -1391,7 +1421,7 @@ func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.
 		args = append(args, *counterpartyID)
 	}
 	var total int
-	err := r.pg.QueryRow(ctx, `SELECT COUNT(*) FROM offers o INNER JOIN cargo c ON c.id = o.cargo_id WHERE `+where, args...).Scan(&total)
+	err = r.pg.QueryRow(ctx, `SELECT COUNT(*) FROM offers o INNER JOIN cargo c ON c.id = o.cargo_id WHERE `+where, args...).Scan(&total)
 	return total, err
 }
 
@@ -1405,20 +1435,9 @@ func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.U
 	if offset < 0 {
 		offset = 0
 	}
-	proposedByCond := ""
-	switch strings.ToLower(strings.TrimSpace(direction)) {
-	case "", "all", "both":
-		proposedByCond = ""
-	case "outgoing", "from_me", "sent", "by":
-		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'"
-	case "incoming", "to_me", "received":
-		proposedByCond = "COALESCE(o.proposed_by, 'DRIVER') IN ('DRIVER', 'DRIVER_MANAGER')"
-	default:
-		return nil, errors.New("cargo: invalid offers direction")
-	}
-	where := "c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1"
-	if proposedByCond != "" {
-		where += " AND " + proposedByCond
+	where, err := buildDispatcherOffersAllWhere(direction)
+	if err != nil {
+		return nil, err
 	}
 	args := []any{dispatcherID}
 	argN := 2
@@ -1434,7 +1453,7 @@ func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.U
 	}
 	q := `
 SELECT
-  o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DISPATCHER'), o.status, COALESCE(o.rejection_reason, ''), o.created_at,
+  o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by_id::text, ''), COALESCE(o.proposed_by, 'DISPATCHER'), o.status, COALESCE(o.rejection_reason, ''), o.created_at,
   c.status, c.name, c.vehicles_amount, COALESCE(c.vehicles_left, 0),
   (
     SELECT rp.city_code FROM route_points rp
@@ -1472,14 +1491,20 @@ LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 		var curCurrency sql.NullString
 		var tripID *uuid.UUID
 		var tripStatus sql.NullString
+		var proposedByIDStr string
 		if err := rows.Scan(
-			&row.ID, &row.CargoID, &row.CarrierID, &row.Price, &row.Currency, &row.Comment, &row.ProposedBy, &row.Status, &rejReason, &row.CreatedAt,
+			&row.ID, &row.CargoID, &row.CarrierID, &row.Price, &row.Currency, &row.Comment, &proposedByIDStr, &row.ProposedBy, &row.Status, &rejReason, &row.CreatedAt,
 			&row.CargoStatus, &cargoName, &row.CargoVehiclesAmount, &row.CargoVehiclesLeft,
 			&fromCity, &toCity,
 			&curPrice, &curCurrency,
 			&tripID, &tripStatus,
 		); err != nil {
 			return nil, err
+		}
+		if proposedByIDStr != "" {
+			if u, perr := uuid.Parse(strings.TrimSpace(proposedByIDStr)); perr == nil && u != uuid.Nil {
+				row.ProposedByID = &u
+			}
 		}
 		if rejReason != "" {
 			row.RejectionReason = &rejReason
@@ -1715,9 +1740,19 @@ FROM offers WHERE id = $1 AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')`, 
 	return cargoID, carrierID, nil
 }
 
-// SetOfferStatusWaitingDriver sets offer status to WAITING_DRIVER_CONFIRM.
-func (r *Repo) SetOfferStatusWaitingDriver(ctx context.Context, offerID uuid.UUID) error {
-	res, err := r.pg.Exec(ctx, "UPDATE offers SET status = 'WAITING_DRIVER_CONFIRM' WHERE id = $1 AND status = 'PENDING'", offerID)
+// SetOfferStatusWaitingDriver sets offer status to WAITING_DRIVER_CONFIRM and records which dispatcher is the driver-manager counterpart (ratings + notifications).
+func (r *Repo) SetOfferStatusWaitingDriver(ctx context.Context, offerID uuid.UUID, negotiationDispatcherID *uuid.UUID) error {
+	var res pgconn.CommandTag
+	var err error
+	if negotiationDispatcherID != nil && *negotiationDispatcherID != uuid.Nil {
+		res, err = r.pg.Exec(ctx, `
+UPDATE offers SET status = 'WAITING_DRIVER_CONFIRM', negotiation_dispatcher_id = $2
+WHERE id = $1 AND status = 'PENDING'`, offerID, *negotiationDispatcherID)
+	} else {
+		res, err = r.pg.Exec(ctx, `
+UPDATE offers SET status = 'WAITING_DRIVER_CONFIRM'
+WHERE id = $1 AND status = 'PENDING'`, offerID)
+	}
 	if err != nil {
 		return err
 	}
@@ -1727,15 +1762,19 @@ func (r *Repo) SetOfferStatusWaitingDriver(ctx context.Context, offerID uuid.UUI
 	return nil
 }
 
-// RejectOffer sets offer status to rejected; reason is mandatory (trimmed non-empty).
-func (r *Repo) RejectOffer(ctx context.Context, offerID uuid.UUID, reason string) error {
+// endOfferWithTerminalStatus sets REJECTED (отказ по входящему) or CANCELED (отзыв своего исходящего / отмена цепочки).
+// Allowed from PENDING or WAITING_DRIVER_CONFIRM.
+func (r *Repo) endOfferWithTerminalStatus(ctx context.Context, offerID uuid.UUID, reason, terminalStatus string) error {
 	rsn := strings.TrimSpace(reason)
 	if rsn == "" {
 		return ErrRejectionReasonRequired
 	}
+	if terminalStatus != OfferStatusRejected && terminalStatus != OfferStatusCanceled {
+		return errors.New("cargo: invalid terminal offer status")
+	}
 	res, err := r.pg.Exec(ctx,
-		"UPDATE offers SET status = 'REJECTED', rejection_reason = $2 WHERE id = $1 AND status = 'PENDING'",
-		offerID, rsn)
+		"UPDATE offers SET status = $3, rejection_reason = $2 WHERE id = $1 AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')",
+		offerID, rsn, terminalStatus)
 	if err != nil {
 		return err
 	}
@@ -1743,6 +1782,16 @@ func (r *Repo) RejectOffer(ctx context.Context, offerID uuid.UUID, reason string
 		return errors.New("cargo: offer not found or not pending")
 	}
 	return nil
+}
+
+// RejectOffer sets status REJECTED (входящий оффер отклонён).
+func (r *Repo) RejectOffer(ctx context.Context, offerID uuid.UUID, reason string) error {
+	return r.endOfferWithTerminalStatus(ctx, offerID, reason, OfferStatusRejected)
+}
+
+// CancelOffer sets status CANCELED (автор отозвал своё предложение или отменил согласование до рейса).
+func (r *Repo) CancelOffer(ctx context.Context, offerID uuid.UUID, reason string) error {
+	return r.endOfferWithTerminalStatus(ctx, offerID, reason, OfferStatusCanceled)
 }
 
 // SearchVisibility is the visibility when admin accepts moderation: "all" (SEARCHING_ALL) or "company" (SEARCHING_COMPANY).
