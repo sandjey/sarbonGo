@@ -1381,6 +1381,70 @@ VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, now()) RETURNING id`,
 	return id, err
 }
 
+func (r *Repo) CreateCargoManagerDMOffer(ctx context.Context, cargoID, cargoManagerID, driverManagerID uuid.UUID, price float64, currency, comment string) (uuid.UUID, error) {
+	var id uuid.UUID
+	cur := strings.ToUpper(strings.TrimSpace(currency))
+	if cur == "" {
+		cur = "UZS"
+	}
+	cmt := strings.TrimSpace(comment)
+	if cmt == "" {
+		cmt = ""
+	}
+	err := r.pg.QueryRow(ctx, `
+INSERT INTO cargo_manager_dm_offers (cargo_id, cargo_manager_id, driver_manager_id, price, currency, comment, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), 'PENDING', now(), now())
+RETURNING id`,
+		cargoID, cargoManagerID, driverManagerID, price, cur, cmt,
+	).Scan(&id)
+	return id, err
+}
+
+func (r *Repo) GetCargoManagerDMOfferByID(ctx context.Context, id uuid.UUID) (*CargoManagerDMOffer, error) {
+	var row CargoManagerDMOffer
+	var comment sql.NullString
+	var driverID *uuid.UUID
+	var offerID *uuid.UUID
+	var rej sql.NullString
+	err := r.pg.QueryRow(ctx, `
+SELECT id, cargo_id, cargo_manager_id, driver_manager_id, driver_id, offer_id, price, currency, comment, status, rejection_reason, created_at, updated_at
+FROM cargo_manager_dm_offers
+WHERE id = $1`, id).Scan(
+		&row.ID, &row.CargoID, &row.CargoManagerID, &row.DriverManagerID,
+		&driverID, &offerID,
+		&row.Price, &row.Currency, &comment, &row.Status, &rej,
+		&row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	row.DriverID = driverID
+	row.OfferID = offerID
+	if comment.Valid {
+		v := comment.String
+		row.Comment = &v
+	}
+	if rej.Valid {
+		v := rej.String
+		row.RejectionReason = &v
+	}
+	return &row, nil
+}
+
+func (r *Repo) AcceptCargoManagerDMOffer(ctx context.Context, reqID uuid.UUID, driverID uuid.UUID, offerID uuid.UUID) error {
+	_, err := r.pg.Exec(ctx, `
+UPDATE cargo_manager_dm_offers
+SET status = 'ACCEPTED',
+    driver_id = $2,
+    offer_id = $3,
+    updated_at = now()
+WHERE id = $1 AND status = 'PENDING'`, reqID, driverID, offerID)
+	return err
+}
+
 // buildDispatcherOffersAllWhere builds WHERE for GET /v1/dispatchers/offers/all (Count + List):
 // - Cargo manager: offers on cargo created by this dispatcher (DISPATCHER + created_by_id).
 // - Driver manager: offers this dispatcher proposed as DRIVER_MANAGER on someone else's cargo.

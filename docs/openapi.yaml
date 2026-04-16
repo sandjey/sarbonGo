@@ -105,6 +105,14 @@ tags:
       - `/v1/dispatchers/offers/all` — единый список по `direction=all|incoming|outgoing` + `status` + `counterparty_id`.
       - `/v1/dispatchers/offers/{id}/accept|reject` — принять входящий оффер или отклонить/отозвать; **reject** для **PENDING** и **WAITING_DRIVER_CONFIRM** (см. описание метода). **Снятие своего исходящего** (`proposed_by=DISPATCHER` PENDING, или **WAITING_DRIVER_CONFIRM** у владельца груза / negotiation DM) → в БД и в `data.status` — **CANCELED**; **отказ по входящей заявке** (водитель / driver manager и т.п.) → **REJECTED**.
       В ответе списка есть `counts.incoming/outgoing`.
+  - name: "Cargo Manager / Offers to Driver Manager"
+    description: |
+      Отправка оффера **на Driver Manager** без выбора водителя:
+      - Cargo Manager выбирает только **cargo** и **driver_manager_id**.
+      - Driver Manager при принятии выбирает **driver_id** (своего водителя), после чего оффер уходит водителю в `WAITING_DRIVER_CONFIRM`.
+      API:
+      - `POST /v1/dispatchers/cargo/{id}/offers/send-to-driver-manager`
+      - `POST /v1/dispatchers/driver-manager-offers/{id}/accept`
   - name: "Cargo Manager / Offer decision flow"
     description: |
       Группировка полного цикла обработки офферов Cargo Manager:
@@ -142,6 +150,11 @@ tags:
   - name: "Cargo Manager / Driver likes"
     description: |
       **Избранные водители (Cargo Manager).** `POST` с `driver_id`, `DELETE /:driverId`, `GET` с `limit`. Предпочтительные пути: `/v1/dispatchers/driver-likes` (алиас: `/favorite-drivers`).
+  - name: "Cargo Manager / Driver managers"
+    description: |
+      Каталог Driver Manager для Cargo Manager:
+      - `GET /v1/dispatchers/driver-managers` — список Driver Manager с фильтрами;
+      - `GET /v1/dispatchers/driver-managers/{dispatcherId}/drivers` — водители конкретного Driver Manager.
   - name: "Driver Manager"
     description: |
       Роль Driver Manager: добавление/ведение водителей, приглашения, офферы и сопровождение рейсов вместе с водителем.
@@ -3946,6 +3959,113 @@ paths:
         "403": { description: "driver must have accepted your invitation" }
         "404": { description: "driver not found" }
 
+  /v1/dispatchers/driver-managers:
+    get:
+      tags: ["Cargo Manager / Driver managers"]
+      summary: "Cargo Manager: список Driver Manager"
+      description: |
+        Возвращает каталог диспетчеров с ролью **DRIVER_MANAGER**.
+        Доступно только для диспетчера с ролью **CARGO_MANAGER**.
+        Фильтры: `q`, `status`, `work_status`, `has_photo`, `rating_min`, `rating_max`, пагинация `page`, `limit`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, example: "99890" }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: "active" }
+        - name: work_status
+          in: query
+          required: false
+          schema: { type: string, example: "available" }
+        - name: has_photo
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: rating_min
+          in: query
+          required: false
+          schema: { type: number, example: 3.5 }
+        - name: rating_max
+          in: query
+          required: false
+          schema: { type: number, example: 5.0 }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.items[], data.total, data.page, data.limit" }
+        "403": { description: invalid_manager_role }
+        "401": { description: dispatcher_not_found / unauthorized }
+
+  /v1/dispatchers/driver-managers/{dispatcherId}/drivers:
+    get:
+      tags: ["Cargo Manager / Driver managers"]
+      summary: "Cargo Manager: водители конкретного Driver Manager"
+      description: |
+        Возвращает водителей, связанных с указанным Driver Manager через `driver_manager_relations`.
+        Доступно только для диспетчера с ролью **CARGO_MANAGER**.
+        Фильтры: `phone`, `name`, `work_status`, `truck_type`, `driver_type`, `account_status`, `has_photo`, `sort`, `page`, `limit`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: dispatcherId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: phone
+          in: query
+          required: false
+          schema: { type: string }
+        - name: name
+          in: query
+          required: false
+          schema: { type: string }
+        - name: work_status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: truck_type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: driver_type
+          in: query
+          required: false
+          schema: { type: string }
+        - name: account_status
+          in: query
+          required: false
+          schema: { type: string }
+        - name: has_photo
+          in: query
+          required: false
+          schema: { type: boolean }
+        - name: sort
+          in: query
+          required: false
+          schema: { type: string, example: "updated_at:desc" }
+        - name: page
+          in: query
+          required: false
+          schema: { type: integer, default: 1, minimum: 1 }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+      responses:
+        "200": { description: "data.driver_manager, data.items[], data.total, data.page, data.limit, data.total_pages, data.has_next" }
+        "400": { description: invalid_id / invalid_manager_role / invalid_payload_detail }
+        "403": { description: invalid_manager_role }
+        "404": { description: dispatcher_not_found }
+
   /v1/dispatchers/trips:
     get:
       tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
@@ -4640,6 +4760,70 @@ paths:
         "403": { description: not_your_driver_or_cargo / cargo_visible_only_to_company_drivers }
         "404": { description: cargo_not_found }
         "409": { description: dispatcher_offer_already_exists / driver_offer_already_exists / cargo_slots_full }
+
+  /v1/dispatchers/cargo/{id}/offers/send-to-driver-manager:
+    post:
+      tags: ["Cargo Manager / Offers", "Cargo Manager / Offers to Driver Manager"]
+      summary: "Cargo Manager: отправить оффер на Driver Manager (без выбора driver_id)"
+      description: |
+        Cargo Manager выбирает груз (`{id}`) и `driver_manager_id`.
+        На этом шаге **driver_id не выбирается**.
+        Driver Manager затем вызывает `POST /v1/dispatchers/driver-manager-offers/{id}/accept` и выбирает `driver_id`;
+        после этого создаётся обычный `offers`-оффер в статусе `WAITING_DRIVER_CONFIRM` и уходит водителю.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [driver_manager_id, price, currency]
+              properties:
+                driver_manager_id: { type: string, format: uuid }
+                price: { type: number, example: 1500 }
+                currency: { type: string, example: "USD" }
+                comment: { type: string }
+      responses:
+        "201": { description: "data.request_id, data.status=PENDING" }
+        "400": { description: invalid_payload_detail }
+        "403": { description: not_your_cargo / invalid_manager_role }
+        "404": { description: cargo_not_found / dispatcher_not_found }
+        "500": { description: failed_to_create_offer }
+
+  /v1/dispatchers/driver-manager-offers/{id}/accept:
+    post:
+      tags: ["Driver Manager / Offers", "Cargo Manager / Offers to Driver Manager"]
+      summary: "Driver Manager: принять оффер от Cargo Manager и выбрать driver"
+      description: |
+        Driver Manager принимает запрос CM→DM и **выбирает своего водителя** (`driver_id`).
+        Результат: создаётся обычный `offers`-оффер и переводится в `WAITING_DRIVER_CONFIRM`,
+        затем событие уходит водителю; водитель подтверждает через `POST /v1/driver/offers/{id}/confirm`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [driver_id]
+              properties:
+                driver_id: { type: string, format: uuid }
+      responses:
+        "200": { description: "data.status=waiting_driver_confirm, data.offer_id" }
+        "400": { description: invalid_payload_detail / offer_not_found_or_not_pending / invalid_manager_role }
+        "403": { description: not_your_offer / not_your_driver_or_cargo / invalid_manager_role }
+        "404": { description: offer_not_found / dispatcher_not_found }
+        "500": { description: failed_to_create_offer / internal_error }
 
   /v1/dispatchers/cargo/mine:
     get:

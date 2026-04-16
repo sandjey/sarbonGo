@@ -2014,6 +2014,23 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 		return
 	}
+
+	// Backward compatibility / data-healing:
+	// Some historical rows may have proposed_by='DISPATCHER' but proposed_by_id points to a Driver Manager
+	// (manager linked to this carrier) — treat such offer as DRIVER_MANAGER offer when Cargo Manager accepts.
+	if proposedBy == cargo.OfferProposedByDispatcher && role == "dispatcher" && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil && *offer.ProposedByID != userID {
+		var dispCompanyID *uuid.UUID
+		if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+			if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+				dispCompanyID = &u
+			}
+		}
+		if dispatcherOwnsCargoForNegotiation(cargoObj, userID, dispCompanyID) && h.drivers != nil {
+			if isMgr, _ := h.drivers.IsLinked(c.Request.Context(), offer.CarrierID, *offer.ProposedByID); isMgr {
+				proposedBy = cargo.OfferProposedByDriverManager
+			}
+		}
+	}
 	switch proposedBy {
 	case cargo.OfferProposedByDriver:
 		if role != "dispatcher" {

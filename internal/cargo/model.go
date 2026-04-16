@@ -246,6 +246,23 @@ type DriverAllOffer struct {
 	TripStatus           *string
 }
 
+// CargoManagerDMOffer is a CM -> Driver Manager offer request. It becomes a normal `offers` row only after DM accepts and selects driver_id.
+type CargoManagerDMOffer struct {
+	ID             uuid.UUID
+	CargoID         uuid.UUID
+	CargoManagerID uuid.UUID
+	DriverManagerID uuid.UUID
+	DriverID       *uuid.UUID
+	OfferID        *uuid.UUID
+	Price          float64
+	Currency       string
+	Comment        *string
+	Status         string
+	RejectionReason *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // CargoPhoto is metadata for a cargo photo stored on disk.
 type CargoPhoto struct {
 	ID         uuid.UUID

@@ -587,6 +587,130 @@ func (r *Repo) ListByFreelancerID(ctx context.Context, freelancerID uuid.UUID, l
 	return list, err
 }
 
+// ListByManagerIDFilter returns drivers linked to a driver manager (driver_manager_relations) with optional filters and pagination.
+func (r *Repo) ListByManagerIDFilter(ctx context.Context, managerID uuid.UUID, f ListDriversFilter) ([]*Driver, int, error) {
+	var args []interface{}
+	argNum := 1
+	conds := []string{"rel.manager_id = $" + strconv.Itoa(argNum)}
+	args = append(args, managerID)
+	argNum++
+
+	phoneTerm := strings.TrimSpace(f.Phone)
+	if phoneTerm != "" {
+		conds = append(conds, "replace(replace(trim(d.phone), ' ', ''), '-', '') LIKE $"+strconv.Itoa(argNum))
+		args = append(args, "%"+strings.ReplaceAll(strings.ReplaceAll(phoneTerm, " ", ""), "-", "")+"%")
+		argNum++
+	}
+	if nameTerm := strings.TrimSpace(f.Name); nameTerm != "" {
+		conds = append(conds, "COALESCE(d.name,'') ILIKE $"+strconv.Itoa(argNum))
+		args = append(args, "%"+nameTerm+"%")
+		argNum++
+	}
+	if strings.TrimSpace(f.WorkStatus) != "" {
+		conds = append(conds, "d.work_status = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(f.WorkStatus))
+		argNum++
+	}
+	if strings.TrimSpace(f.TruckType) != "" {
+		conds = append(conds, "p.power_plate_type = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(strings.ToUpper(f.TruckType)))
+		argNum++
+	}
+	if strings.TrimSpace(f.DriverType) != "" {
+		conds = append(conds, "d.driver_type = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(f.DriverType))
+		argNum++
+	}
+	if strings.TrimSpace(f.AccountStatus) != "" {
+		conds = append(conds, "d.account_status = $"+strconv.Itoa(argNum))
+		args = append(args, strings.TrimSpace(f.AccountStatus))
+		argNum++
+	}
+	if f.HasPhoto != nil {
+		if *f.HasPhoto {
+			conds = append(conds, "d.photo_data IS NOT NULL")
+		} else {
+			conds = append(conds, "d.photo_data IS NULL")
+		}
+	}
+	if f.Latitude != nil && f.Longitude != nil && f.RadiusKM != nil && *f.RadiusKM > 0 {
+		conds = append(conds, "d.latitude IS NOT NULL AND d.longitude IS NOT NULL")
+		conds = append(conds, `(6371 * acos(least(1, greatest(-1,
+cos(radians($`+strconv.Itoa(argNum)+`)) * cos(radians(d.latitude)) * cos(radians(d.longitude) - radians($`+strconv.Itoa(argNum+1)+`)) +
+sin(radians($`+strconv.Itoa(argNum)+`)) * sin(radians(d.latitude))
+)))) <= $`+strconv.Itoa(argNum+2))
+		args = append(args, *f.Latitude, *f.Longitude, *f.RadiusKM)
+		argNum += 3
+	}
+
+	where := strings.Join(conds, " AND ")
+
+	var total int
+	if err := r.pg.QueryRow(ctx, `
+SELECT COUNT(*)
+FROM driver_manager_relations rel
+INNER JOIN drivers d ON d.id = rel.driver_id
+LEFT JOIN driver_powers p ON p.driver_id = d.id
+WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	order := "d.updated_at DESC"
+	if f.Sort != "" {
+		parts := strings.SplitN(f.Sort, ":", 2)
+		if len(parts) == 2 {
+			col := strings.TrimSpace(strings.ToLower(parts[0]))
+			dir := strings.TrimSpace(strings.ToUpper(parts[1]))
+			if dir != "ASC" && dir != "DESC" {
+				dir = "DESC"
+			}
+			switch col {
+			case "name":
+				order = "d.name " + dir + " NULLS LAST"
+			case "last_online_at":
+				order = "d.last_online_at " + dir + " NULLS LAST"
+			case "work_status":
+				order = "d.work_status " + dir + " NULLS LAST"
+			default:
+				order = "d.updated_at " + dir
+			}
+		}
+	}
+
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (f.Page - 1) * limit
+	if offset < 0 {
+		offset = 0
+	}
+	args = append(args, limit, offset)
+	q := `SELECT ` + driverSelectCols + `
+FROM driver_manager_relations rel
+INNER JOIN drivers d ON d.id = rel.driver_id
+LEFT JOIN driver_powers p ON p.driver_id = d.id
+LEFT JOIN driver_trailers t ON t.driver_id = d.id
+WHERE ` + where + ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(argNum) + ` OFFSET $` + strconv.Itoa(argNum+1)
+	rows, err := r.pg.Query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	var list []*Driver
+	for rows.Next() {
+		d, err := scanDriver(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		list = append(list, d)
+	}
+	return list, total, rows.Err()
+}
+
 func (r *Repo) UpdateHeartbeat(ctx context.Context, id uuid.UUID, lat, lon float64, lastOnlineAt time.Time) error {
 	const q = `
 UPDATE drivers
