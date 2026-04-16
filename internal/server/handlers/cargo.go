@@ -1077,6 +1077,9 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 		}
 	}
 	fullPath := strings.ToLower(strings.TrimSpace(c.FullPath()))
+	if fullPath == "" && c.Request != nil && c.Request.URL != nil {
+		fullPath = strings.ToLower(strings.TrimSpace(c.Request.URL.Path))
+	}
 	forceDriverManager := strings.Contains(fullPath, "/offers/send-by-driver-manager")
 	forceCargoManager := strings.Contains(fullPath, "/offers/send-by-cargo-manager")
 	proposedBy := cargo.OfferProposedByDriver
