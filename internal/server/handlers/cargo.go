@@ -1696,7 +1696,7 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 	status := strings.ToUpper(strings.TrimSpace(c.Query("status")))
 	if status != "" {
 		switch status {
-		case "PENDING", "ACCEPTED", "REJECTED":
+		case "PENDING", "ACCEPTED", "REJECTED", "WAITING_DRIVER_CONFIRM", "CANCELED":
 		default:
 			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 			return

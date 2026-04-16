@@ -987,7 +987,8 @@ func (r *Repo) GetOffersFiltered(ctx context.Context, cargoID uuid.UUID, directi
 		case "outgoing", "from_me", "sent", "by":
 			where += " AND COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'"
 		case "incoming", "to_me", "received":
-			where += " AND COALESCE(o.proposed_by, 'DRIVER') = 'DRIVER'"
+			// Incoming for cargo owner: offers from drivers and driver managers.
+			where += " AND COALESCE(o.proposed_by, 'DRIVER') IN ('DRIVER', 'DRIVER_MANAGER')"
 		default:
 			return nil, errors.New("cargo: invalid offers direction")
 		}
@@ -1003,7 +1004,8 @@ func (r *Repo) GetOffersFiltered(ctx context.Context, cargoID uuid.UUID, directi
 		argN++
 	}
 	q := `
-SELECT o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER'), o.status, COALESCE(o.rejection_reason, ''), o.created_at
+SELECT o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER'), o.status, COALESCE(o.rejection_reason, ''), o.created_at,
+  COALESCE(o.proposed_by_id::text, ''), COALESCE(o.negotiation_dispatcher_id::text, '')
 FROM offers o
 WHERE ` + where + ` ORDER BY o.created_at DESC`
 	rows, err := r.pg.Query(ctx, q, args...)
@@ -1015,12 +1017,26 @@ WHERE ` + where + ` ORDER BY o.created_at DESC`
 	for rows.Next() {
 		var o Offer
 		var rejReason string
-		err := rows.Scan(&o.ID, &o.CargoID, &o.CarrierID, &o.Price, &o.Currency, &o.Comment, &o.ProposedBy, &o.Status, &rejReason, &o.CreatedAt)
+		var proposedByIDStr, negotiationDispStr string
+		err := rows.Scan(
+			&o.ID, &o.CargoID, &o.CarrierID, &o.Price, &o.Currency, &o.Comment, &o.ProposedBy, &o.Status, &rejReason, &o.CreatedAt,
+			&proposedByIDStr, &negotiationDispStr,
+		)
 		if err != nil {
 			return nil, err
 		}
 		if rejReason != "" {
 			o.RejectionReason = &rejReason
+		}
+		if s := strings.TrimSpace(proposedByIDStr); s != "" {
+			if u, perr := uuid.Parse(s); perr == nil && u != uuid.Nil {
+				o.ProposedByID = &u
+			}
+		}
+		if s := strings.TrimSpace(negotiationDispStr); s != "" {
+			if u, perr := uuid.Parse(s); perr == nil && u != uuid.Nil {
+				o.NegotiationDispatcherID = &u
+			}
 		}
 		list = append(list, o)
 	}
