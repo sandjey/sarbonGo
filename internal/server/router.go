@@ -444,6 +444,9 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.POST("/connection-offers/decline", d2dInvH.DeclineByDispatcher)
 	dispAuthed.DELETE("/connection-offers/:token", driverInvH.CancelInvitation)
 	dispAuthed.GET("/drivers/find", driverInvH.FindDrivers)
+	// Catalog of all freelance dispatchers (same as driver dispatchers catalog), for both CARGO_MANAGER and DRIVER_MANAGER.
+	dispAuthed.GET("/dispatchers/catalog", driverDispCatalogH.ListCatalog)
+	dispAuthed.GET("/dispatchers/hint", driverDispCatalogH.HintByPhone)
 	dispAuthed.POST("/cargo/:id/offers/send-to-driver-manager", cmToDMOffersH.SendToDriverManager)
 	dispAuthed.POST("/driver-manager-offers/:id/accept", cmToDMOffersH.AcceptFromCargoManager)
 	dispAuthed.GET("/driver-managers", cmDriverManagersH.ListDriverManagersForCargoManager)

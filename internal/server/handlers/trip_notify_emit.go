@@ -21,6 +21,10 @@ func tripNotifyDispatcherID(c *cargo.Cargo) *uuid.UUID {
 }
 
 func (h *TripsHandler) notifInsert(ctx context.Context, tripID uuid.UUID, recipientKind string, recipientID uuid.UUID, eventKind string, fromSt, toSt *string) {
+	h.notifInsertExtra(ctx, tripID, recipientKind, recipientID, eventKind, fromSt, toSt, nil)
+}
+
+func (h *TripsHandler) notifInsertExtra(ctx context.Context, tripID uuid.UUID, recipientKind string, recipientID uuid.UUID, eventKind string, fromSt, toSt *string, extra map[string]any) {
 	if h.notif == nil || recipientID == uuid.Nil {
 		return
 	}
@@ -36,6 +40,9 @@ func (h *TripsHandler) notifInsert(ctx context.Context, tripID uuid.UUID, recipi
 			"trip_id":         tripID.String(),
 			"event_kind":      eventKind,
 			"created_at":      time.Now().UTC().Format(time.RFC3339Nano),
+		}
+		for k, v := range extra {
+			msg[k] = v
 		}
 		if fromSt != nil {
 			msg["from_status"] = *fromSt
@@ -72,6 +79,23 @@ func (h *TripsHandler) notifyTripTransition(ctx context.Context, before, after *
 			h.notifPair(ctx, after, cg, tripnotif.EventDelivered, strPtr(before.Status), strPtr(after.Status))
 		case trips.StatusCompleted:
 			h.notifPair(ctx, after, cg, tripnotif.EventCompleted, strPtr(before.Status), strPtr(after.Status))
+			// If this trip was negotiated via a Driver Manager, notify that manager too (DM sees only completion, then can rate driver + cargo manager).
+			if offer != nil && offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID != uuid.Nil {
+				dispToSkip := uuid.Nil
+				if disp := tripNotifyDispatcherID(cg); disp != nil {
+					dispToSkip = *disp
+				}
+				if *offer.NegotiationDispatcherID != dispToSkip {
+					extra := map[string]any{}
+					if after.DriverID != nil {
+						extra["rate_driver_id"] = after.DriverID.String()
+					}
+					if disp := tripNotifyDispatcherID(cg); disp != nil {
+						extra["rate_cargo_manager_id"] = disp.String()
+					}
+					h.notifInsertExtra(ctx, after.ID, tripnotif.RecipientDispatcher, *offer.NegotiationDispatcherID, tripnotif.EventCompleted, strPtr(before.Status), strPtr(after.Status), extra)
+				}
+			}
 		}
 	}
 

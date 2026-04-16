@@ -592,6 +592,11 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 			if dRec != nil && dRec.ManagerRole != nil {
 				role = strings.TrimSpace(*dRec.ManagerRole)
 			}
+			// Driver Manager must NOT close trip to COMPLETED. Only Cargo Manager can close.
+			if strings.EqualFold(role, dispatchers.ManagerRoleDriverManager) && trips.CompletionPending(tBefore) {
+				resp.ErrorLang(c, http.StatusForbidden, "trip_cargo_manager_completed_only")
+				return
+			}
 			if strings.EqualFold(role, dispatchers.ManagerRoleCargoManager) && !trips.CompletionPending(tBefore) {
 				resp.ErrorLang(c, http.StatusForbidden, "trip_cargo_manager_completed_only")
 				return

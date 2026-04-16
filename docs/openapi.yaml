@@ -1182,6 +1182,8 @@ components:
         event_kind: { type: string, description: "Например IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED, COMPLETION_PENDING_MANAGER" }
         from_status: { type: string, nullable: true }
         to_status: { type: string, nullable: true }
+        rate_driver_id: { type: string, format: uuid, nullable: true, description: "Если это уведомление о COMPLETED для Driver Manager: кого оценить (driver_id)." }
+        rate_cargo_manager_id: { type: string, format: uuid, nullable: true, description: "Если это уведомление о COMPLETED для Driver Manager: кого оценить (dispatcher_id cargo manager)." }
         created_at: { type: string, description: "Время генерации push (RFC3339 nano)" }
 
     SSETripStatusEvent:
@@ -4176,7 +4178,7 @@ paths:
       description: |
         Доступно в едином scope диспетчера: владелец груза, выбранная компания, либо Driver Manager из переговорной цепочки оффера.
         **Роль `CARGO_MANAGER`:** через этот метод может только **закрыть** рейс — поставить `COMPLETED`, и только когда рейс в `DELIVERED` и водитель уже запросил завершение (`POST /v1/driver/trips/{id}/confirm`). Промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) для cargo manager **запрещены** (ответ `403`, ключ `trip_cargo_manager_completed_only`); их подтверждает водитель или диспетчер с ролью `DRIVER_MANAGER`.
-        **Роль `DRIVER_MANAGER` (и прочие диспетчеры без роли cargo manager):** промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) — как раньше, совместно с водителем.
+        **Роль `DRIVER_MANAGER` (и прочие диспетчеры без роли cargo manager):** промежуточные шаги (`IN_PROGRESS`→`IN_TRANSIT`→`DELIVERED`) — как раньше, совместно с водителем. **Закрыть рейс в `COMPLETED` не может** — финальный `COMPLETED` подтверждает только cargo manager.
         **Закрытие (`COMPLETED`):** с `DELIVERED` никто не может перейти в `COMPLETED`, пока водитель не запросил завершение. Если водитель ещё не запросил — `400` `trip_completion_needs_driver_first`.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -4187,7 +4189,7 @@ paths:
       responses:
         "200": { description: data — поля рейса после шага (см. GET /api/trips/:id) }
         "400": { description: "invalid_status_transition | trip_completion_needs_driver_first | trip_completion_already_pending" }
-        "403": { description: "not your cargo | trip_cargo_manager_completed_only (CARGO_MANAGER cannot confirm non-COMPLETED steps)" }
+        "403": { description: "not your cargo | trip_cargo_manager_completed_only (only CARGO_MANAGER can confirm COMPLETED; cargo manager cannot confirm intermediate steps)" }
         "404": { description: trip not found }
 
   /v1/dispatchers/trips/{id}/cancel:
@@ -6638,12 +6640,92 @@ paths:
         "400": { description: "Неверные параметры или role (invalid_freelance_dispatcher_role)" }
         "401": { description: unauthorized }
 
+  /v1/dispatchers/dispatchers/catalog:
+    get:
+      tags: ["Cargo Manager / Dispatchers catalog", "Driver Manager / Dispatchers catalog"]
+      summary: "Каталог всех фриланс-диспетчеров (диспетчер)"
+      description: |
+        **Диспетчер (Cargo Manager или Driver Manager):** алиас для `GET /v1/driver/dispatchers/catalog`.
+        Возвращает список всех фриланс-диспетчеров с пагинацией и фильтрами.
+        **Важно:** `password` не возвращается.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, example: 20 }
+        - name: offset
+          in: query
+          required: false
+          schema: { type: integer, example: 0 }
+        - name: q
+          in: query
+          required: false
+          schema: { type: string, example: "99890" }
+        - name: phone_hint
+          in: query
+          required: false
+          schema: { type: string, example: "+99890" }
+        - name: status
+          in: query
+          required: false
+          schema: { type: string, example: "active" }
+        - name: work_status
+          in: query
+          required: false
+          schema: { type: string, example: "available" }
+        - name: has_photo
+          in: query
+          required: false
+          schema: { type: boolean, example: true }
+        - name: rating_min
+          in: query
+          required: false
+          schema: { type: number, format: float, example: 4.5 }
+        - name: rating_max
+          in: query
+          required: false
+          schema: { type: number, format: float, example: 5 }
+        - name: role
+          in: query
+          required: false
+          schema: { $ref: "#/components/schemas/FreelanceDispatcherRole" }
+          description: "Фильтр по manager_role (CARGO_MANAGER | DRIVER_MANAGER)"
+      responses:
+        "200": { description: "data.items + data.total + limit/offset" }
+        "400": { description: "Неверные параметры или role (invalid_freelance_dispatcher_role)" }
+        "401": { description: unauthorized }
+
   /v1/driver/dispatchers/hint:
     get:
       tags: ["Legacy / Deprecated"]
       summary: "Hint по номеру диспетчера (водитель)"
       description: |
         **Водитель:** быстрый поиск (typeahead) фриланс-диспетчеров по префиксу номера.
+        Параметры: `phone` (обязательно, prefix), `limit` (1..50, default 10).
+        **Важно:** `password` не возвращается.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: phone
+          in: query
+          required: true
+          schema: { type: string, example: "+99890" }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, example: 10 }
+      responses:
+        "200": { description: "data.items — массив диспетчеров" }
+        "400": { description: phone required / invalid payload }
+        "401": { description: unauthorized }
+
+  /v1/dispatchers/dispatchers/hint:
+    get:
+      tags: ["Cargo Manager / Dispatchers catalog", "Driver Manager / Dispatchers catalog"]
+      summary: "Hint по номеру диспетчера (диспетчер)"
+      description: |
+        **Диспетчер (Cargo Manager или Driver Manager):** алиас для `GET /v1/driver/dispatchers/hint`.
+        Быстрый поиск (typeahead) фриланс-диспетчеров по префиксу номера.
         Параметры: `phone` (обязательно, prefix), `limit` (1..50, default 10).
         **Важно:** `password` не возвращается.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
