@@ -450,7 +450,7 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 			"trip":              toTripResp(&t.Trip),
 		})
 	}
-	accepted, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, "ACCEPTED", "all", nil, limit, 0)
+	accepted, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, companyID, "ACCEPTED", "all", nil, limit, 0)
 	for i := range accepted {
 		o := accepted[i]
 		_, hasOpen := openOfferByID[o.ID]
@@ -473,7 +473,7 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 			},
 		})
 	}
-	rejected, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, "REJECTED", "all", nil, limit, 0)
+	rejected, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, companyID, "REJECTED", "all", nil, limit, 0)
 	for i := range rejected {
 		o := rejected[i]
 		items = append(items, gin.H{

@@ -1220,6 +1220,12 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 // ListSentOffersForDispatcher GET /v1/dispatchers/offers/all
 func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
 	page := getIntQuery(c, "page", 1)
 	if page < 1 {
 		page = 1
@@ -1260,13 +1266,13 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		counterpartyID = &id
 	}
 
-	total, err := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, direction, counterpartyID)
+	total, err := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, direction, counterpartyID)
 	if err != nil {
 		h.logger.Error("dispatcher sent offers count", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
 		return
 	}
-	rows, err := h.repo.ListDispatcherSentOffers(c.Request.Context(), dispatcherID, status, direction, counterpartyID, limit, offset)
+	rows, err := h.repo.ListDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, direction, counterpartyID, limit, offset)
 	if err != nil {
 		h.logger.Error("dispatcher sent offers list", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
@@ -1327,8 +1333,8 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		items = append(items, item)
 	}
 	h.applyIsLikedToOfferListItems(c.Request.Context(), items, &cargoAPIViewer{DispatcherID: &dispatcherID})
-	incomingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, "incoming", counterpartyID)
-	outgoingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, status, "outgoing", counterpartyID)
+	incomingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, "incoming", counterpartyID)
+	outgoingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, "outgoing", counterpartyID)
 	resp.OKLang(c, "sent_offers_listed", gin.H{
 		"items":           items,
 		"total":           total,

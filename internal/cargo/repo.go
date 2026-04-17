@@ -1464,33 +1464,42 @@ WHERE id = $1 AND status = 'PENDING'`, reqID, driverID, offerID)
 // buildDispatcherOffersAllWhere builds WHERE for GET /v1/dispatchers/offers/all (Count + List):
 // - Cargo manager: offers on cargo created by this dispatcher (DISPATCHER + created_by_id).
 // - Driver manager: offers this dispatcher proposed as DRIVER_MANAGER on someone else's cargo.
-func buildDispatcherOffersAllWhere(direction string) (where string, err error) {
+func buildDispatcherOffersAllWhere(direction string, includeCompany bool) (where string, err error) {
+	ownerCond := "(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1)"
+	if includeCompany {
+		ownerCond = "(" + ownerCond + " OR c.company_id = $2)"
+	}
 	switch strings.ToLower(strings.TrimSpace(direction)) {
 	case "", "all", "both":
 		return `c.deleted_at IS NULL AND (
-	(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1)
+	(` + ownerCond + `)
 	OR (o.proposed_by = 'DRIVER_MANAGER' AND o.proposed_by_id = $1)
 )`, nil
 	case "outgoing", "from_me", "sent", "by":
 		return `c.deleted_at IS NULL AND (
-	(UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1 AND COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER')
+	((` + ownerCond + `) AND COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER')
 	OR (o.proposed_by = 'DRIVER_MANAGER' AND o.proposed_by_id = $1)
 )`, nil
 	case "incoming", "to_me", "received":
-		return `c.deleted_at IS NULL AND UPPER(COALESCE(c.created_by_type,'')) = 'DISPATCHER' AND c.created_by_id = $1
+		return `c.deleted_at IS NULL AND (` + ownerCond + `)
 	AND COALESCE(o.proposed_by, 'DRIVER') IN ('DRIVER', 'DRIVER_MANAGER')`, nil
 	default:
 		return "", errors.New("cargo: invalid offers direction")
 	}
 }
 
-func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
-	where, err := buildDispatcherOffersAllWhere(direction)
+func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, companyID *uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
+	hasCompany := companyID != nil && *companyID != uuid.Nil
+	where, err := buildDispatcherOffersAllWhere(direction, hasCompany)
 	if err != nil {
 		return 0, err
 	}
 	args := []any{dispatcherID}
 	argN := 2
+	if hasCompany {
+		args = append(args, *companyID)
+		argN++
+	}
 	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
 		where += " AND o.status = $" + strconv.Itoa(argN)
 		args = append(args, s)
@@ -1505,7 +1514,7 @@ func (r *Repo) CountDispatcherSentOffers(ctx context.Context, dispatcherID uuid.
 	return total, err
 }
 
-func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID, limit, offset int) ([]DispatcherSentOffer, error) {
+func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.UUID, companyID *uuid.UUID, status, direction string, counterpartyID *uuid.UUID, limit, offset int) ([]DispatcherSentOffer, error) {
 	if limit < 1 {
 		limit = 30
 	}
@@ -1515,12 +1524,17 @@ func (r *Repo) ListDispatcherSentOffers(ctx context.Context, dispatcherID uuid.U
 	if offset < 0 {
 		offset = 0
 	}
-	where, err := buildDispatcherOffersAllWhere(direction)
+	hasCompany := companyID != nil && *companyID != uuid.Nil
+	where, err := buildDispatcherOffersAllWhere(direction, hasCompany)
 	if err != nil {
 		return nil, err
 	}
 	args := []any{dispatcherID}
 	argN := 2
+	if hasCompany {
+		args = append(args, *companyID)
+		argN++
+	}
 	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
 		where += " AND o.status = $" + strconv.Itoa(argN)
 		args = append(args, s)
