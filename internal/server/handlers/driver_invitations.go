@@ -1186,6 +1186,11 @@ func (h *DriverInvitationsHandler) Decline(c *gin.Context) {
 // Query: phone (search), work_status, truck_type (power_plate_type), page, limit, sort (e.g. updated_at:desc, name:asc, last_online_at:desc).
 func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+	if err != nil || disp == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+		return
+	}
 	f := drivers.ListDriversFilter{
 		Phone:      strings.TrimSpace(c.Query("phone")),
 		WorkStatus: strings.TrimSpace(c.Query("work_status")),
@@ -1204,7 +1209,15 @@ func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 			f.Limit = n
 		}
 	}
-	list, total, err := h.drv.ListByFreelancerIDFilter(c.Request.Context(), dispatcherID, f)
+	var (
+		list  []*drivers.Driver
+		total int
+	)
+	if disp.ManagerRole != nil && strings.TrimSpace(*disp.ManagerRole) == dispatchers.ManagerRoleDriverManager {
+		list, total, err = h.drv.ListByManagerIDFilter(c.Request.Context(), dispatcherID, f)
+	} else {
+		list, total, err = h.drv.ListByFreelancerIDFilter(c.Request.Context(), dispatcherID, f)
+	}
 	if err != nil {
 		h.logger.Error("list my drivers", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
