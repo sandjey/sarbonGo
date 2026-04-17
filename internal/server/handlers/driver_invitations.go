@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1213,8 +1214,39 @@ func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 		list  []*drivers.Driver
 		total int
 	)
-	if disp.ManagerRole != nil && strings.TrimSpace(*disp.ManagerRole) == dispatchers.ManagerRoleDriverManager {
-		list, total, err = h.drv.ListByManagerIDFilter(c.Request.Context(), dispatcherID, f)
+	if disp.ManagerRole != nil && strings.EqualFold(strings.TrimSpace(*disp.ManagerRole), dispatchers.ManagerRoleDriverManager) {
+		// Driver manager: merge new many-to-many link + legacy freelancer_id link.
+		listRel, _, errRel := h.drv.ListByManagerIDFilter(c.Request.Context(), dispatcherID, f)
+		if errRel != nil {
+			h.logger.Error("list my drivers by manager relation", zap.Error(errRel))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
+			return
+		}
+		listLegacy, _, errLegacy := h.drv.ListByFreelancerIDFilter(c.Request.Context(), dispatcherID, f)
+		if errLegacy != nil {
+			h.logger.Error("list my drivers by legacy freelancer", zap.Error(errLegacy))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
+			return
+		}
+		byID := make(map[string]*drivers.Driver, len(listRel)+len(listLegacy))
+		for _, d := range listRel {
+			if d != nil {
+				byID[d.ID] = d
+			}
+		}
+		for _, d := range listLegacy {
+			if d != nil {
+				byID[d.ID] = d
+			}
+		}
+		list = make([]*drivers.Driver, 0, len(byID))
+		for _, d := range byID {
+			list = append(list, d)
+		}
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].UpdatedAt.After(list[j].UpdatedAt)
+		})
+		total = len(list)
 	} else {
 		list, total, err = h.drv.ListByFreelancerIDFilter(c.Request.Context(), dispatcherID, f)
 	}
