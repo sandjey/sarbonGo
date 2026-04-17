@@ -1403,14 +1403,15 @@ func (h *CargoHandler) ListOffersForDriver(c *gin.Context) {
 	for _, row := range rows {
 		sourceRole := "DRIVER"
 		sourceID := driverID.String()
-		isIncomingRow := strings.EqualFold(strings.TrimSpace(row.ProposedBy), cargo.OfferProposedByDispatcher)
+		proposedBy := strings.ToUpper(strings.TrimSpace(row.ProposedBy))
+		isIncomingRow := proposedBy == cargo.OfferProposedByDispatcher || proposedBy == cargo.OfferProposedByDriverManager
 		if direction == "incoming" || (direction == "all" && isIncomingRow) {
 			sourceRole = "CARGO_MANAGER"
-			if row.CargoCreatedByType != nil && strings.EqualFold(strings.TrimSpace(*row.CargoCreatedByType), "driver") {
+			if proposedBy == cargo.OfferProposedByDriverManager {
 				sourceRole = "DRIVER_MANAGER"
 			}
-			if row.CargoCreatedByID != nil {
-				sourceID = row.CargoCreatedByID.String()
+			if row.ProposedByID != nil {
+				sourceID = row.ProposedByID.String()
 			} else {
 				sourceID = ""
 			}

@@ -1634,7 +1634,7 @@ func (r *Repo) CountDriverOffersAll(ctx context.Context, driverID uuid.UUID, sta
 	case "outgoing", "from_me", "sent", "by":
 		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DRIVER'")
 	case "incoming", "to_me", "received":
-		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'")
+		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') IN ('DISPATCHER', 'DRIVER_MANAGER')")
 	default:
 		return 0, errors.New("cargo: invalid offers direction")
 	}
@@ -1677,7 +1677,7 @@ func (r *Repo) ListDriverOffersAll(ctx context.Context, driverID uuid.UUID, stat
 	case "outgoing", "from_me", "sent", "by":
 		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DRIVER'")
 	case "incoming", "to_me", "received":
-		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') = 'DISPATCHER'")
+		where = append(where, "COALESCE(o.proposed_by, 'DRIVER') IN ('DISPATCHER', 'DRIVER_MANAGER')")
 	default:
 		return nil, errors.New("cargo: invalid offers direction")
 	}
@@ -1687,8 +1687,8 @@ func (r *Repo) ListDriverOffersAll(ctx context.Context, driverID uuid.UUID, stat
 		argN++
 	}
 	args = append(args, limit, offset)
-	q := `SELECT
-  o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER') AS proposed_by, o.status, o.rejection_reason, o.created_at,
+q := `SELECT
+  o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER') AS proposed_by, o.proposed_by_id, o.status, o.rejection_reason, o.created_at,
   c.status, c.name, rpf.city_code AS from_city_code, rpt.city_code AS to_city_code,
   COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0),
   p.total_amount, p.total_currency, c.created_by_type, c.created_by_id,
@@ -1724,7 +1724,7 @@ LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 		var row DriverAllOffer
 		var rej sql.NullString
 		if err := rows.Scan(
-			&row.ID, &row.CargoID, &row.CarrierID, &row.Price, &row.Currency, &row.Comment, &row.ProposedBy, &row.Status, &rej, &row.CreatedAt,
+			&row.ID, &row.CargoID, &row.CarrierID, &row.Price, &row.Currency, &row.Comment, &row.ProposedBy, &row.ProposedByID, &row.Status, &rej, &row.CreatedAt,
 			&row.CargoStatus, &row.CargoName, &row.CargoFromCityCode, &row.CargoToCityCode,
 			&row.CargoVehiclesAmount, &row.CargoVehiclesLeft,
 			&row.CargoCurrentPrice, &row.CargoCurrentCurrency, &row.CargoCreatedByType, &row.CargoCreatedByID,

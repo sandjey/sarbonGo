@@ -5555,7 +5555,7 @@ paths:
         Единый список офферов для Driver Mobile:
         - `direction=all` (по умолчанию) — оба направления в одном списке
         - `direction=outgoing` — офферы, отправленные водителем (`proposed_by=DRIVER`)
-        - `direction=incoming` — офферы/инвайты, отправленные водителю (`proposed_by=DISPATCHER`)
+        - `direction=incoming` — офферы/инвайты, отправленные водителю (`proposed_by=DISPATCHER` или `proposed_by=DRIVER_MANAGER`)
 
         Поддерживает `status`, пагинацию, фильтр по контрагенту-диспетчеру (`counterparty_id`)
         и счетчики `data.counts.incoming/outgoing`.
@@ -5563,6 +5563,8 @@ paths:
         В каждом `data.items[].offer` возвращаются:
         - `driver_id` — ID водителя (carrier);
         - `cargo_manager_id` — ID cargo manager (если груз создан диспетчером; иначе `null`).
+        - `source_role` — источник входящего оффера: `CARGO_MANAGER` или `DRIVER_MANAGER` (для исходящих у водителя: `DRIVER`);
+        - `source_id` — UUID отправителя оффера (`offers.proposed_by_id` для входящих).
         **Как читать:**
         - `direction=all` + `counts` — общий обзор.
         - `direction=incoming` — приглашения/офферы, отправленные мне.
