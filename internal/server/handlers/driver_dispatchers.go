@@ -38,13 +38,32 @@ func (h *DriverDispatchersHandler) ListMyDispatchers(c *gin.Context) {
 	}
 	items := make([]gin.H, 0)
 
-	// 1) Freelance dispatcher (driver accepted invitation from this dispatcher)
+	// 1) Freelance driver managers (many-to-many link).
+	seenFreelance := make(map[uuid.UUID]bool)
+	managerIDs, merr := h.drv.ListManagerIDsByDriver(c.Request.Context(), driverID)
+	if merr != nil {
+		h.logger.Error("list driver managers", zap.Error(merr))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_dispatchers")
+		return
+	}
+	for _, dispID := range managerIDs {
+		if seenFreelance[dispID] {
+			continue
+		}
+		seenFreelance[dispID] = true
+		d, err := h.disp.FindByID(c.Request.Context(), dispID)
+		if err == nil && d != nil {
+			items = append(items, dispatcherToItem(d, "freelance", nil))
+		}
+	}
+	// Backward compatibility for legacy single-link field.
 	if drv.FreelancerID != nil && *drv.FreelancerID != "" {
-		dispID, err := uuid.Parse(*drv.FreelancerID)
-		if err == nil {
-			d, err := h.disp.FindByID(c.Request.Context(), dispID)
-			if err == nil && d != nil {
-				items = append(items, dispatcherToItem(d, "freelance", nil))
+		if dispID, err := uuid.Parse(*drv.FreelancerID); err == nil {
+			if !seenFreelance[dispID] {
+				d, err := h.disp.FindByID(c.Request.Context(), dispID)
+				if err == nil && d != nil {
+					items = append(items, dispatcherToItem(d, "freelance", nil))
+				}
 			}
 		}
 	}
@@ -156,13 +175,19 @@ func (h *DriverDispatchersHandler) UnlinkDispatcher(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_dispatcher_id")
 		return
 	}
-	ok, err := h.drv.UnlinkFromFreelancer(c.Request.Context(), driverID, dispatcherID)
+	removedRel, err := h.drv.UnlinkManager(c.Request.Context(), driverID, dispatcherID)
 	if err != nil {
-		h.logger.Error("driver unlink dispatcher", zap.Error(err))
+		h.logger.Error("driver unlink manager relation", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_unlink")
 		return
 	}
-	if !ok {
+	removedLegacy, err := h.drv.UnlinkFromFreelancer(c.Request.Context(), driverID, dispatcherID)
+	if err != nil {
+		h.logger.Error("driver unlink dispatcher legacy", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_unlink")
+		return
+	}
+	if !removedRel && !removedLegacy {
 		resp.ErrorLang(c, http.StatusForbidden, "dispatcher_not_linked_to_you")
 		return
 	}
@@ -170,6 +195,14 @@ func (h *DriverDispatchersHandler) UnlinkDispatcher(c *gin.Context) {
 }
 
 func (h *DriverDispatchersHandler) findLinkedDispatcher(c *gin.Context, drv *drivers.Driver, dispatcherID uuid.UUID) (*dispatchers.Dispatcher, string, *string, bool, error) {
+	if driverUUID, perr := uuid.Parse(drv.ID); perr == nil && driverUUID != uuid.Nil {
+		if linked, err := h.drv.IsLinked(c.Request.Context(), driverUUID, dispatcherID); err == nil && linked {
+			d, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+			if err == nil && d != nil {
+				return d, "freelance", nil, true, nil
+			}
+		}
+	}
 	if drv.FreelancerID != nil && *drv.FreelancerID != "" {
 		freelancerID, err := uuid.Parse(*drv.FreelancerID)
 		if err == nil && freelancerID == dispatcherID {

@@ -264,6 +264,27 @@ func (r *Repo) IsLinked(ctx context.Context, driverID, managerID uuid.UUID) (boo
 	return exists, err
 }
 
+// ListManagerIDsByDriver returns all manager IDs linked to driver in many-to-many relation.
+func (r *Repo) ListManagerIDsByDriver(ctx context.Context, driverID uuid.UUID) ([]uuid.UUID, error) {
+	const q = `SELECT manager_id FROM driver_manager_relations WHERE driver_id = $1 ORDER BY created_at DESC`
+	rows, err := r.pg.Query(ctx, q, driverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]uuid.UUID, 0)
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		if id != uuid.Nil {
+			out = append(out, id)
+		}
+	}
+	return out, rows.Err()
+}
+
 // UnlinkFromFreelancer removes driver from dispatcher (sets freelancer_id = NULL). Only if driver is currently linked to this freelancer.
 func (r *Repo) UnlinkFromFreelancer(ctx context.Context, driverID, freelancerID uuid.UUID) (bool, error) {
 	const q = `UPDATE drivers SET freelancer_id = NULL, updated_at = now() WHERE id = $1 AND freelancer_id = $2`

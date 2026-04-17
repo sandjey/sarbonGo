@@ -65,10 +65,12 @@ func (h *DriverToDispatcherInvitationsHandler) CreateFromDriver(c *gin.Context) 
 	}
 	// If driver already linked to this dispatcher, no need to invite
 	if disp != nil {
-		drv, _ := h.drv.FindByID(c.Request.Context(), driverID)
-		if drv != nil && drv.FreelancerID != nil && *drv.FreelancerID == disp.ID {
-			resp.ErrorLang(c, http.StatusConflict, "already_linked_to_this_dispatcher")
-			return
+		if dispID, perr := uuid.Parse(strings.TrimSpace(disp.ID)); perr == nil && dispID != uuid.Nil {
+			isLinked, _ := h.drv.IsLinked(c.Request.Context(), driverID, dispID)
+			if isLinked {
+				resp.ErrorLang(c, http.StatusConflict, "already_linked_to_this_dispatcher")
+				return
+			}
 		}
 	}
 	token, err := h.repo.Create(c.Request.Context(), driverID, phone, 7*24*time.Hour)
@@ -249,14 +251,48 @@ func (h *DriverToDispatcherInvitationsHandler) AcceptByDispatcher(c *gin.Context
 		resp.ErrorLang(c, http.StatusForbidden, "invitation_sent_to_another_phone")
 		return
 	}
+	// Enforce many-to-many connection limits symmetrically (max 10 per side).
+	dCount, err := h.drv.GetDriverCount(c.Request.Context(), dispatcherID)
+	if err != nil {
+		h.logger.Error("get manager driver count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if dCount >= 10 {
+		resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
+		return
+	}
+	mCount, err := h.drv.GetManagerCount(c.Request.Context(), inv.DriverID)
+	if err != nil {
+		h.logger.Error("get driver manager count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if mCount >= 10 {
+		resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
+		return
+	}
+	isLinked, _ := h.drv.IsLinked(c.Request.Context(), inv.DriverID, dispatcherID)
+	if isLinked {
+		resp.ErrorLang(c, http.StatusConflict, "already_linked_to_this_dispatcher")
+		return
+	}
 	ok, err := h.repo.SetStatusIfPending(c.Request.Context(), token, drivertodispatcherinvitations.StatusAccepted)
 	if err != nil || !ok {
 		resp.ErrorLang(c, http.StatusBadRequest, "invitation_not_found_or_expired")
 		return
 	}
+	if err := h.drv.LinkManager(c.Request.Context(), inv.DriverID, dispatcherID); err != nil {
+		_ = h.repo.RevertToPending(c.Request.Context(), token)
+		h.logger.Error("dispatcher accept driver invitation link manager", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
+		return
+	}
+	// Legacy single-link fallback for old flows.
 	if err := h.drv.SetFreelancerID(c.Request.Context(), inv.DriverID, dispatcherID); err != nil {
 		_ = h.repo.RevertToPending(c.Request.Context(), token)
-		h.logger.Error("dispatcher accept driver invitation", zap.Error(err))
+		_, _ = h.drv.UnlinkManager(c.Request.Context(), inv.DriverID, dispatcherID)
+		h.logger.Error("dispatcher accept driver invitation set freelancer", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
 		return
 	}
