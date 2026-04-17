@@ -1633,6 +1633,226 @@ LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
 	return list, rows.Err()
 }
 
+// CountCargoManagerDMOffersForDispatcher counts pending/accepted CM<->DM pre-offers for dispatcher list.
+func (r *Repo) CountCargoManagerDMOffersForDispatcher(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
+	where := []string{"1=1"}
+	args := []any{}
+	argN := 1
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "", "all", "both":
+		where = append(where, "(r.cargo_manager_id = $"+strconv.Itoa(argN)+" OR r.driver_manager_id = $"+strconv.Itoa(argN)+")")
+		args = append(args, dispatcherID)
+		argN++
+	case "outgoing", "from_me", "sent", "by":
+		where = append(where, "r.cargo_manager_id = $"+strconv.Itoa(argN))
+		args = append(args, dispatcherID)
+		argN++
+	case "incoming", "to_me", "received":
+		where = append(where, "r.driver_manager_id = $"+strconv.Itoa(argN))
+		args = append(args, dispatcherID)
+		argN++
+	default:
+		return 0, errors.New("cargo: invalid offers direction")
+	}
+	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
+		where = append(where, "r.status = $"+strconv.Itoa(argN))
+		args = append(args, s)
+		argN++
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		switch strings.ToLower(strings.TrimSpace(direction)) {
+		case "incoming", "to_me", "received":
+			where = append(where, "r.cargo_manager_id = $"+strconv.Itoa(argN))
+		default:
+			where = append(where, "r.driver_manager_id = $"+strconv.Itoa(argN))
+		}
+		args = append(args, *counterpartyID)
+	}
+	var total int
+	err := r.pg.QueryRow(ctx, `SELECT COUNT(*) FROM cargo_manager_dm_offers r INNER JOIN cargo c ON c.id=r.cargo_id WHERE c.deleted_at IS NULL AND `+strings.Join(where, " AND "), args...).Scan(&total)
+	return total, err
+}
+
+// ListCargoManagerDMOffersForDispatcher lists CM->DM requests as dispatcher offers rows.
+func (r *Repo) ListCargoManagerDMOffersForDispatcher(ctx context.Context, dispatcherID uuid.UUID, status, direction string, counterpartyID *uuid.UUID, limit, offset int) ([]DispatcherSentOffer, error) {
+	if limit < 1 {
+		limit = 30
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	where := []string{"1=1"}
+	args := []any{}
+	argN := 1
+	switch strings.ToLower(strings.TrimSpace(direction)) {
+	case "", "all", "both":
+		where = append(where, "(r.cargo_manager_id = $"+strconv.Itoa(argN)+" OR r.driver_manager_id = $"+strconv.Itoa(argN)+")")
+		args = append(args, dispatcherID)
+		argN++
+	case "outgoing", "from_me", "sent", "by":
+		where = append(where, "r.cargo_manager_id = $"+strconv.Itoa(argN))
+		args = append(args, dispatcherID)
+		argN++
+	case "incoming", "to_me", "received":
+		where = append(where, "r.driver_manager_id = $"+strconv.Itoa(argN))
+		args = append(args, dispatcherID)
+		argN++
+	default:
+		return nil, errors.New("cargo: invalid offers direction")
+	}
+	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
+		where = append(where, "r.status = $"+strconv.Itoa(argN))
+		args = append(args, s)
+		argN++
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		switch strings.ToLower(strings.TrimSpace(direction)) {
+		case "incoming", "to_me", "received":
+			where = append(where, "r.cargo_manager_id = $"+strconv.Itoa(argN))
+		default:
+			where = append(where, "r.driver_manager_id = $"+strconv.Itoa(argN))
+		}
+		args = append(args, *counterpartyID)
+		argN++
+	}
+	q := `SELECT
+  r.id, r.cargo_id, r.driver_manager_id AS carrier_id, r.price, r.currency, r.comment, r.cargo_manager_id::text AS proposed_by_id, 'DISPATCHER' AS proposed_by, r.status, '' AS rejection_reason, r.created_at,
+  c.status, c.name, c.vehicles_amount, COALESCE(c.vehicles_left, 0),
+  (
+    SELECT rp.city_code FROM route_points rp
+    WHERE rp.cargo_id = c.id AND rp.is_main_load = true
+    ORDER BY rp.point_order LIMIT 1
+  ) AS from_city_code,
+  (
+    SELECT rp.city_code FROM route_points rp
+    WHERE rp.cargo_id = c.id AND rp.is_main_unload = true
+    ORDER BY rp.point_order LIMIT 1
+  ) AS to_city_code,
+  p.total_amount, p.total_currency,
+  NULL::uuid AS trip_id, NULL::text AS trip_status
+FROM cargo_manager_dm_offers r
+INNER JOIN cargo c ON c.id = r.cargo_id
+LEFT JOIN payments p ON p.cargo_id = c.id
+WHERE c.deleted_at IS NULL AND ` + strings.Join(where, " AND ") + `
+ORDER BY r.created_at DESC
+LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
+	args = append(args, limit, offset)
+	rows, err := r.pg.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []DispatcherSentOffer
+	for rows.Next() {
+		var row DispatcherSentOffer
+		var rejReason string
+		var cargoName sql.NullString
+		var fromCity sql.NullString
+		var toCity sql.NullString
+		var curPrice sql.NullFloat64
+		var curCurrency sql.NullString
+		var tripID *uuid.UUID
+		var tripStatus sql.NullString
+		var proposedByIDStr string
+		if err := rows.Scan(
+			&row.ID, &row.CargoID, &row.CarrierID, &row.Price, &row.Currency, &row.Comment, &proposedByIDStr, &row.ProposedBy, &row.Status, &rejReason, &row.CreatedAt,
+			&row.CargoStatus, &cargoName, &row.CargoVehiclesAmount, &row.CargoVehiclesLeft,
+			&fromCity, &toCity,
+			&curPrice, &curCurrency,
+			&tripID, &tripStatus,
+		); err != nil {
+			return nil, err
+		}
+		if proposedByIDStr != "" {
+			if u, perr := uuid.Parse(strings.TrimSpace(proposedByIDStr)); perr == nil && u != uuid.Nil {
+				row.ProposedByID = &u
+			}
+		}
+		if cargoName.Valid {
+			v := cargoName.String
+			row.CargoName = &v
+		}
+		if fromCity.Valid {
+			v := fromCity.String
+			row.CargoFromCityCode = &v
+		}
+		if toCity.Valid {
+			v := toCity.String
+			row.CargoToCityCode = &v
+		}
+		if curPrice.Valid {
+			v := curPrice.Float64
+			row.CargoCurrentPrice = &v
+		}
+		if curCurrency.Valid {
+			v := curCurrency.String
+			row.CargoCurrentCurrency = &v
+		}
+		row.TripID = tripID
+		if tripStatus.Valid {
+			v := tripStatus.String
+			row.TripStatus = &v
+		}
+		list = append(list, row)
+	}
+	return list, rows.Err()
+}
+
+// GetCargoManagerDMOffersForCargo maps CM->DM requests to Offer for /api/cargo/:id/offers.
+func (r *Repo) GetCargoManagerDMOffersForCargo(ctx context.Context, cargoID uuid.UUID, direction, status string, counterpartyID *uuid.UUID) ([]Offer, error) {
+	where := []string{"r.cargo_id = $1"}
+	args := []any{cargoID}
+	argN := 2
+	if d := strings.ToLower(strings.TrimSpace(direction)); d != "" {
+		switch d {
+		case "outgoing", "from_me", "sent", "by":
+			// CM->DM requests are outgoing from cargo owner side.
+		case "incoming", "to_me", "received":
+			return []Offer{}, nil
+		default:
+			return nil, errors.New("cargo: invalid offers direction")
+		}
+	}
+	if s := strings.ToUpper(strings.TrimSpace(status)); s != "" {
+		where = append(where, "r.status = $"+strconv.Itoa(argN))
+		args = append(args, s)
+		argN++
+	}
+	if counterpartyID != nil && *counterpartyID != uuid.Nil {
+		where = append(where, "r.driver_manager_id = $"+strconv.Itoa(argN))
+		args = append(args, *counterpartyID)
+	}
+	q := `SELECT r.id, r.cargo_id, r.driver_manager_id, r.price, r.currency, r.comment, r.status, r.created_at,
+COALESCE(r.cargo_manager_id::text, '')
+FROM cargo_manager_dm_offers r
+WHERE ` + strings.Join(where, " AND ") + `
+ORDER BY r.created_at DESC`
+	rows, err := r.pg.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list := make([]Offer, 0)
+	for rows.Next() {
+		var o Offer
+		var proposedByIDStr string
+		if err := rows.Scan(&o.ID, &o.CargoID, &o.CarrierID, &o.Price, &o.Currency, &o.Comment, &o.Status, &o.CreatedAt, &proposedByIDStr); err != nil {
+			return nil, err
+		}
+		o.ProposedBy = OfferProposedByDispatcher
+		if s := strings.TrimSpace(proposedByIDStr); s != "" {
+			if u, perr := uuid.Parse(s); perr == nil && u != uuid.Nil {
+				o.ProposedByID = &u
+			}
+		}
+		list = append(list, o)
+	}
+	return list, rows.Err()
+}
+
 func (r *Repo) CountDriverOffersAll(ctx context.Context, driverID uuid.UUID, status, direction string, counterpartyID *uuid.UUID) (int, error) {
 	where := []string{"o.carrier_id = $1"}
 	args := []any{driverID}

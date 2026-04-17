@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1266,17 +1267,44 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		counterpartyID = &id
 	}
 
-	total, err := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, direction, counterpartyID)
+	totalMain, err := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, direction, counterpartyID)
 	if err != nil {
 		h.logger.Error("dispatcher sent offers count", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
 		return
 	}
-	rows, err := h.repo.ListDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, direction, counterpartyID, limit, offset)
+	totalDM, err := h.repo.CountCargoManagerDMOffersForDispatcher(c.Request.Context(), dispatcherID, status, direction, counterpartyID)
+	if err != nil {
+		h.logger.Error("dispatcher cm-dm offers count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
+		return
+	}
+	windowLimit := offset + limit
+	if windowLimit < limit {
+		windowLimit = limit
+	}
+	rows, err := h.repo.ListDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, direction, counterpartyID, windowLimit, 0)
 	if err != nil {
 		h.logger.Error("dispatcher sent offers list", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
 		return
+	}
+	dmRows, err := h.repo.ListCargoManagerDMOffersForDispatcher(c.Request.Context(), dispatcherID, status, direction, counterpartyID, windowLimit, 0)
+	if err != nil {
+		h.logger.Error("dispatcher cm-dm offers list", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_sent_offers")
+		return
+	}
+	rows = append(rows, dmRows...)
+	sort.Slice(rows, func(i, j int) bool { return rows[i].CreatedAt.After(rows[j].CreatedAt) })
+	if offset >= len(rows) {
+		rows = []cargo.DispatcherSentOffer{}
+	} else {
+		end := offset + limit
+		if end > len(rows) {
+			end = len(rows)
+		}
+		rows = rows[offset:end]
 	}
 	items := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
@@ -1333,19 +1361,21 @@ func (h *CargoHandler) ListSentOffersForDispatcher(c *gin.Context) {
 		items = append(items, item)
 	}
 	h.applyIsLikedToOfferListItems(c.Request.Context(), items, &cargoAPIViewer{DispatcherID: &dispatcherID})
-	incomingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, "incoming", counterpartyID)
-	outgoingCount, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, "outgoing", counterpartyID)
+	incomingMain, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, "incoming", counterpartyID)
+	outgoingMain, _ := h.repo.CountDispatcherSentOffers(c.Request.Context(), dispatcherID, companyID, status, "outgoing", counterpartyID)
+	incomingDM, _ := h.repo.CountCargoManagerDMOffersForDispatcher(c.Request.Context(), dispatcherID, status, "incoming", counterpartyID)
+	outgoingDM, _ := h.repo.CountCargoManagerDMOffersForDispatcher(c.Request.Context(), dispatcherID, status, "outgoing", counterpartyID)
 	resp.OKLang(c, "sent_offers_listed", gin.H{
 		"items":           items,
-		"total":           total,
+		"total":           totalMain + totalDM,
 		"page":            page,
 		"limit":           limit,
 		"status":          status,
 		"direction":       direction,
 		"counterparty_id": counterpartyID,
 		"counts": gin.H{
-			"incoming": incomingCount,
-			"outgoing": outgoingCount,
+			"incoming": incomingMain + incomingDM,
+			"outgoing": outgoingMain + outgoingDM,
 		},
 	})
 }
@@ -1743,6 +1773,18 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_offers")
 		return
 	}
+	dmOffers, err := h.repo.GetCargoManagerDMOffersForCargo(c.Request.Context(), id, direction, status, counterpartyID)
+	if err != nil {
+		if strings.Contains(err.Error(), "invalid offers direction") {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+		h.logger.Error("cargo list cm-dm offers", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_offers")
+		return
+	}
+	offers = append(offers, dmOffers...)
+	sort.Slice(offers, func(i, j int) bool { return offers[i].CreatedAt.After(offers[j].CreatedAt) })
 
 	cargoObj, _ := h.repo.GetByID(c.Request.Context(), id, false)
 	cargoMini := gin.H(nil)
