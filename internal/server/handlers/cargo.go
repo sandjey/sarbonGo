@@ -2369,7 +2369,16 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 	cargoID, carrierID, err := h.repo.AcceptOfferTx(c.Request.Context(), tx, offerID)
 	if err != nil {
 		h.logger.Error("driver confirm offer accept tx", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
+		switch {
+		case errors.Is(err, cargo.ErrOfferNotFoundOrNotPending):
+			resp.ErrorWithDataLang(c, http.StatusNotFound, "offer_not_found_or_not_pending", gin.H{"reason": "offer_not_pending", "offer_id": offerID.String()})
+		case errors.Is(err, cargo.ErrCargoNotSearching):
+			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_not_searching", gin.H{"reason": "cargo_not_searching", "offer_id": offerID.String()})
+		case errors.Is(err, cargo.ErrCargoSlotsFull):
+			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{"reason": "cargo_slots_full", "offer_id": offerID.String()})
+		default:
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", gin.H{"reason": "accept_failed", "offer_id": offerID.String()})
+		}
 		return
 	}
 

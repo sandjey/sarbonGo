@@ -1751,7 +1751,7 @@ func (r *Repo) ListCargoManagerDMOffersForDispatcher(ctx context.Context, dispat
 		argN++
 	}
 	q := `SELECT
-  r.id, r.cargo_id, r.driver_manager_id AS carrier_id, r.price, r.currency, r.comment, r.cargo_manager_id::text AS proposed_by_id, 'DISPATCHER' AS proposed_by, r.status, '' AS rejection_reason, r.created_at,
+  r.id, r.cargo_id, r.driver_manager_id AS carrier_id, r.price, r.currency, r.comment, r.cargo_manager_id::text AS proposed_by_id, 'DISPATCHER' AS proposed_by, COALESCE(o.status, r.status) AS status, '' AS rejection_reason, r.created_at,
   c.status, c.name, c.vehicles_amount, COALESCE(c.vehicles_left, 0),
   (
     SELECT rp.city_code FROM route_points rp
@@ -1764,10 +1764,12 @@ func (r *Repo) ListCargoManagerDMOffersForDispatcher(ctx context.Context, dispat
     ORDER BY rp.point_order LIMIT 1
   ) AS to_city_code,
   p.total_amount, p.total_currency,
-  NULL::uuid AS trip_id, NULL::text AS trip_status
+  t.id AS trip_id, t.status AS trip_status
 FROM cargo_manager_dm_offers r
 INNER JOIN cargo c ON c.id = r.cargo_id
 LEFT JOIN payments p ON p.cargo_id = c.id
+LEFT JOIN offers o ON o.id = r.offer_id
+LEFT JOIN trips t ON t.offer_id = r.offer_id
 WHERE c.deleted_at IS NULL AND ` + strings.Join(where, " AND ") + `
 ORDER BY r.created_at DESC
 LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
@@ -1857,9 +1859,10 @@ func (r *Repo) GetCargoManagerDMOffersForCargo(ctx context.Context, cargoID uuid
 		where = append(where, "r.driver_manager_id = $"+strconv.Itoa(argN))
 		args = append(args, *counterpartyID)
 	}
-	q := `SELECT r.id, r.cargo_id, r.driver_manager_id, r.price, r.currency, r.comment, r.status, r.created_at,
+	q := `SELECT r.id, r.cargo_id, r.driver_manager_id, r.price, r.currency, r.comment, COALESCE(o.status, r.status), r.created_at,
 COALESCE(r.cargo_manager_id::text, '')
 FROM cargo_manager_dm_offers r
+LEFT JOIN offers o ON o.id = r.offer_id
 WHERE ` + strings.Join(where, " AND ") + `
 ORDER BY r.created_at DESC`
 	rows, err := r.pg.Query(ctx, q, args...)
