@@ -282,6 +282,12 @@ tags:
       - `/v1/driver/offers/{id}/reject` — отклонить входящий оффер диспетчера / отказ в **WAITING_DRIVER_CONFIRM** → **REJECTED**; **отозвать свой** исходящий (`proposed_by=DRIVER`, PENDING) → **CANCELED**. Отмена рейса: `POST /v1/driver/trips/{trip_id}/cancel`. Текущий рейс: `GET /v1/driver/trips/me`.
       - `/v1/driver/cargo-offers` — список своих офферов по грузам с `bucket=sent|accepted|completed|rejected|canceled` (алиас `cancelled`).
       Для `/offers/all` сервер возвращает `counts.incoming/outgoing`.
+  - name: "Drivers / Cargo offers"
+    description: |
+      Явная группировка cargo offer API для Driver Mobile:
+      - список офферов: `/v1/driver/offers/all`, `/v1/driver/cargo-offers`;
+      - отправка оффера: `/v1/driver/cargo/{id}/offers`;
+      - решения по офферу: `accept`, `confirm`, `reject`.
   - name: "Drivers / Offer decision flow"
     description: |
       Группировка сценария водителя по офферам от диспетчера:
@@ -5549,7 +5555,7 @@ paths:
 
   /v1/driver/offers/all:
     get:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Все офферы водителя (входящие и исходящие)"
       description: |
         Единый список офферов для Driver Mobile:
@@ -5609,7 +5615,7 @@ paths:
 
   /v1/driver/cargo-offers:
     get:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Список своих офферов по грузам (корзины)"
       description: |
         Список офферов текущего водителя с кратким `cargo` и блоком `offer` (в т.ч. поле **status**: PENDING, ACCEPTED, REJECTED, CANCELED, WAITING_DRIVER_CONFIRM).
@@ -5634,7 +5640,7 @@ paths:
 
   /v1/driver/cargo/{id}/offers:
     post:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Оффер по грузу со своей ценой"
       description: |
         Водитель отправляет запрос на перевозку с **предложенной ценой** (`proposed_by=DRIVER`). Диспетчер подтверждает через `POST /v1/dispatchers/offers/{id}/accept` или `POST /api/offers/{id}/accept` (JWT диспетчера). После принятия цена в `payment` груза обновляется.
@@ -5664,7 +5670,7 @@ paths:
 
   /v1/driver/cargo/{id}/offers/send:
     post:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Alias: отправить оффер по грузу"
       description: "Эквивалент `POST /v1/driver/cargo/{id}/offers`."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -5693,7 +5699,7 @@ paths:
 
   /v1/driver/offers/{id}/accept:
     post:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Принять цену от диспетчера"
       description: |
         Для офферов с **proposed_by=DISPATCHER** (диспетчер указал цену вам). Тот же обработчик, что `POST /api/offers/{id}/accept` с JWT водителя. **`{id}` — только UUID оффера** в пути; query/body не задают оффер.
@@ -5715,7 +5721,7 @@ paths:
 
   /v1/driver/offers/{id}/accept-from-dispatcher:
     post:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Alias: принять оффер от dispatcher"
       description: "Эквивалент `POST /v1/driver/offers/{id}/accept`."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -5733,7 +5739,7 @@ paths:
 
   /v1/driver/offers/{id}/confirm:
     post:
-      tags: ["Drivers / Offers", "Drivers / Completion & ratings flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Completion & ratings flow"]
       summary: "Подтвердить сделку, принятую менеджером"
       description: |
         Вызывается водителем, когда оффер в статусе **WAITING_DRIVER_CONFIRM**:
@@ -5757,7 +5763,7 @@ paths:
 
   /v1/driver/offers/{id}/confirm-driver-manager-flow:
     post:
-      tags: ["Drivers / Offers", "Drivers / Completion & ratings flow", "Drivers / Offer minimal"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Completion & ratings flow", "Drivers / Offer minimal"]
       summary: "Alias: подтвердить flow от Driver Manager"
       description: "Эквивалент `POST /v1/driver/offers/{id}/confirm`."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -5775,7 +5781,7 @@ paths:
 
   /v1/driver/offers/{id}:
     get:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Получить один оффер (водитель) + полный cargo"
       description: |
         Возвращает один оффер по `offer_id` из path (`{id}`) и **полный связанный cargo** (как карточка груза: route_points, payment и пр.).
@@ -5794,7 +5800,7 @@ paths:
 
   /v1/driver/offers/{id}/reject:
     post:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Отклонить приглашение диспетчера или отозвать свой оффер (водитель)"
       description: |
         Оффер с **carrier_id** = вы:
@@ -5825,7 +5831,7 @@ paths:
 
   /v1/driver/offers/{id}/reject-with-reason:
     post:
-      tags: ["Drivers / Offers", "Drivers / Offer decision flow", "Drivers / Offer minimal"]
+      tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow", "Drivers / Offer minimal"]
       summary: "Alias: отклонить оффер с причиной"
       description: "Эквивалент `POST /v1/driver/offers/{id}/reject`."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]

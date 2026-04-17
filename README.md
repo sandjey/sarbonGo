@@ -13,6 +13,12 @@ go run ./cmd/admin -login admin -password "Secret123" -name "Main Admin"
 docker compose up -d --build
 ```
 
+Windows (PowerShell) logs:
+
+```powershell
+docker compose logs -f api
+```
+
 2) Open API:
 
 - API: `http://localhost:8080`
@@ -21,6 +27,7 @@ docker compose up -d --build
 Notes:
 - Migrations run automatically on API startup (`cmd/api`).
 - In Docker mode, `DATABASE_URL` and `REDIS_ADDR` are overridden to internal service names (`postgres`, `redis`).
+- `.env` is required for both local run and Docker run.
 
 ## Run without Docker
 
