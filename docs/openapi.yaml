@@ -6406,7 +6406,7 @@ paths:
         - name: limit
           in: query
           required: false
-          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+          schema: { type: integer, default: 20, minimum: 1, maximum: 10000 }
         - name: offset
           in: query
           required: false
@@ -6590,7 +6590,7 @@ paths:
       description: |
         **Водитель:** вернуть список всех фриланс-диспетчеров с пагинацией и фильтрами.
         Фильтры:
-        - `limit` 1..100 (default 20)
+        - `limit` 1..10000 (default 20)
         - `offset` >=0 (default 0)
         - `q` — поиск по `phone` или `name` (ILIKE)
         - `phone_hint` — prefix по `phone` (LIKE 'prefix%')
@@ -6605,7 +6605,7 @@ paths:
         - name: limit
           in: query
           required: false
-          schema: { type: integer, example: 20 }
+          schema: { type: integer, minimum: 1, maximum: 10000, example: 20 }
         - name: offset
           in: query
           required: false
@@ -6661,7 +6661,7 @@ paths:
         - name: limit
           in: query
           required: false
-          schema: { type: integer, example: 20 }
+          schema: { type: integer, minimum: 1, maximum: 10000, example: 20 }
         - name: offset
           in: query
           required: false

@@ -27,7 +27,7 @@ func NewDriverDispatchersCatalogHandler(logger *zap.Logger, disp *dispatchers.Re
 func (h *DriverDispatchersCatalogHandler) ListCatalog(c *gin.Context) {
 	limit := parseIntDefault(c.Query("limit"), 20)
 	offset := parseIntDefault(c.Query("offset"), 0)
-	if limit < 1 || limit > 100 || offset < 0 {
+	if limit < 1 || limit > 10000 || offset < 0 {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
