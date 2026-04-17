@@ -2528,7 +2528,49 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 	}
 	offer, err := h.repo.GetOfferByID(c.Request.Context(), offerID)
 	if err != nil || offer == nil {
-		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
+		// Fallback: CM->DM pre-offer requests use cargo_manager_dm_offers.request_id,
+		// not offers.id. Allow DM reject / CM cancel via the same endpoint aliases.
+		reqRow, reqErr := h.repo.GetCargoManagerDMOfferByID(c.Request.Context(), offerID)
+		if reqErr != nil || reqRow == nil {
+			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found")
+			return
+		}
+		var req RejectOfferReq
+		if err := c.ShouldBindJSON(&req); err != nil {
+			resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_required")
+			return
+		}
+		if !isValidRejectReason(req.Reason) {
+			resp.ErrorLang(c, http.StatusBadRequest, "rejection_reason_too_short")
+			return
+		}
+		if dispatcherID == reqRow.DriverManagerID {
+			if err := h.repo.RejectCargoManagerDMOfferByDriverManager(c.Request.Context(), offerID, dispatcherID, req.Reason); err != nil {
+				if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
+					resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
+					return
+				}
+				h.logger.Error("reject cm-dm request by driver manager", zap.Error(err))
+				resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+				return
+			}
+			resp.OKLang(c, "ok", gin.H{"status": "REJECTED"})
+			return
+		}
+		if dispatcherID == reqRow.CargoManagerID {
+			if err := h.repo.CancelCargoManagerDMOfferByCargoManager(c.Request.Context(), offerID, dispatcherID, req.Reason); err != nil {
+				if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
+					resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
+					return
+				}
+				h.logger.Error("cancel cm-dm request by cargo manager", zap.Error(err))
+				resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+				return
+			}
+			resp.OKLang(c, "ok", gin.H{"status": "CANCELED"})
+			return
+		}
+		resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
 		return
 	}
 	pb := strings.ToUpper(strings.TrimSpace(offer.ProposedBy))

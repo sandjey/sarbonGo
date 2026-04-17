@@ -148,7 +148,26 @@ func (h *TripsHandler) GetMyCurrentTrip(c *gin.Context) {
 		resp.OKLang(c, "ok", gin.H{"trip": nil})
 		return
 	}
-	resp.OKLang(c, "ok", gin.H{"trip": toTripResp(t)})
+	tripOut := toTripResp(t)
+	if h.cargoRepo != nil {
+		if offer, err := h.cargoRepo.GetOfferByID(c.Request.Context(), t.OfferID); err == nil && offer != nil {
+			// If the deal went through driver manager flow, expose driver_manager_id.
+			if offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID != uuid.Nil {
+				tripOut["driver_manager_id"] = offer.NegotiationDispatcherID.String()
+			} else if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDriverManager) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
+				tripOut["driver_manager_id"] = offer.ProposedByID.String()
+			}
+			// Otherwise expose cargo_manager_id for direct cargo manager flow.
+			if _, hasDM := tripOut["driver_manager_id"]; !hasDM {
+				if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDispatcher) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
+					tripOut["cargo_manager_id"] = offer.ProposedByID.String()
+				} else if cg, cerr := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false); cerr == nil && cg != nil && cg.CreatedByType != nil && strings.EqualFold(strings.TrimSpace(*cg.CreatedByType), "dispatcher") && cg.CreatedByID != nil && *cg.CreatedByID != uuid.Nil {
+					tripOut["cargo_manager_id"] = cg.CreatedByID.String()
+				}
+			}
+		}
+	}
+	resp.OKLang(c, "ok", gin.H{"trip": tripOut})
 }
 
 // ListForCargoManager GET /v1/dispatchers/trips — list trips for dispatcher-owned cargo (or switched company cargo).

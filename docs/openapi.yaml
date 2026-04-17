@@ -5971,6 +5971,9 @@ paths:
       description: |
         Одна строка из `trips` для текущего водителя: статус **не** `COMPLETED` и **не** `CANCELLED`, выбирается по наибольшему `updated_at`.
         Если такого рейса нет — `data.trip` равен `null` (не 404).
+        В `data.trip` дополнительно возвращается менеджер сделки:
+        - `driver_manager_id` — если рейс был согласован через Driver Manager flow;
+        - `cargo_manager_id` — если рейс был согласован напрямую с Cargo Manager.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       responses:
         "200":
@@ -5991,6 +5994,17 @@ paths:
                             nullable: true
                             allOf:
                               - $ref: "#/components/schemas/Trip"
+                            properties:
+                              driver_manager_id:
+                                type: string
+                                format: uuid
+                                nullable: true
+                                description: "UUID driver manager, если рейс через менеджера водителя"
+                              cargo_manager_id:
+                                type: string
+                                format: uuid
+                                nullable: true
+                                description: "UUID cargo manager, если рейс напрямую с cargo manager"
         "401": { description: unauthorized }
         "500": { description: failed_to_list }
 

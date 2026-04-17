@@ -1461,6 +1461,38 @@ WHERE id = $1 AND status = 'PENDING'`, reqID, driverID, offerID)
 	return err
 }
 
+func (r *Repo) RejectCargoManagerDMOfferByDriverManager(ctx context.Context, reqID, driverManagerID uuid.UUID, reason string) error {
+	tag, err := r.pg.Exec(ctx, `
+UPDATE cargo_manager_dm_offers
+SET status = 'REJECTED',
+    rejection_reason = NULLIF(TRIM($3), ''),
+    updated_at = now()
+WHERE id = $1 AND driver_manager_id = $2 AND status = 'PENDING'`, reqID, driverManagerID, reason)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrOfferNotFoundOrNotPending
+	}
+	return nil
+}
+
+func (r *Repo) CancelCargoManagerDMOfferByCargoManager(ctx context.Context, reqID, cargoManagerID uuid.UUID, reason string) error {
+	tag, err := r.pg.Exec(ctx, `
+UPDATE cargo_manager_dm_offers
+SET status = 'CANCELED',
+    rejection_reason = NULLIF(TRIM($3), ''),
+    updated_at = now()
+WHERE id = $1 AND cargo_manager_id = $2 AND status = 'PENDING'`, reqID, cargoManagerID, reason)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrOfferNotFoundOrNotPending
+	}
+	return nil
+}
+
 // buildDispatcherOffersAllWhere builds WHERE for GET /v1/dispatchers/offers/all (Count + List):
 // - Cargo manager: offers on cargo created by this dispatcher (DISPATCHER + created_by_id).
 // - Driver manager: offers this dispatcher proposed as DRIVER_MANAGER on someone else's cargo.
