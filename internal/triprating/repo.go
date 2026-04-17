@@ -140,11 +140,12 @@ func (r *Repo) TripCompleted(ctx context.Context, tripID uuid.UUID) (bool, error
 }
 
 // TripDriverFinished returns true when driver side is finished:
-// either full COMPLETED, or DELIVERED with pending_confirm_to=dispatcher.
+// either full COMPLETED, or DELIVERED with driver completion request pending manager confirmation.
 func (r *Repo) TripDriverFinished(ctx context.Context, tripID uuid.UUID) (bool, error) {
 	var st string
 	var pendingTo *string
-	err := r.pg.QueryRow(ctx, `SELECT status, pending_confirm_to FROM trips WHERE id = $1`, tripID).Scan(&st, &pendingTo)
+	var driverConfirmedAt *string
+	err := r.pg.QueryRow(ctx, `SELECT status, pending_confirm_to, driver_confirmed_at::text FROM trips WHERE id = $1`, tripID).Scan(&st, &pendingTo, &driverConfirmedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -154,7 +155,10 @@ func (r *Repo) TripDriverFinished(ctx context.Context, tripID uuid.UUID) (bool, 
 	if st == "COMPLETED" {
 		return true, nil
 	}
-	if st == "DELIVERED" && pendingTo != nil && strings.EqualFold(strings.TrimSpace(*pendingTo), "dispatcher") {
+	if st == "DELIVERED" &&
+		pendingTo != nil &&
+		driverConfirmedAt != nil &&
+		strings.EqualFold(strings.TrimSpace(*pendingTo), "COMPLETED") {
 		return true, nil
 	}
 	return false, nil
