@@ -223,7 +223,7 @@ func (h *TripsHandler) PostDriverRateDispatcher(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")
 		return
 	}
-	ok, err := h.rating.TripCompleted(c.Request.Context(), tripID)
+	ok, err := h.rating.TripDriverFinished(c.Request.Context(), tripID)
 	if err != nil || !ok {
 		resp.ErrorLang(c, http.StatusBadRequest, "trip_rating_not_completed")
 		return
