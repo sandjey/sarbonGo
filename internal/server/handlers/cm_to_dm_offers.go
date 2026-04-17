@@ -186,7 +186,18 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 	)
 	if err != nil {
 		h.logger.Error("cm->dm accept create offer", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
+		switch {
+		case errors.Is(err, cargo.ErrDriverOfferAlreadyExists):
+			resp.ErrorLang(c, http.StatusConflict, "driver_offer_already_exists")
+		case errors.Is(err, cargo.ErrDispatcherOfferAlreadyExists):
+			resp.ErrorLang(c, http.StatusConflict, "dispatcher_offer_already_exists")
+		case errors.Is(err, cargo.ErrCargoSlotsFull):
+			resp.ErrorLang(c, http.StatusConflict, "cargo_slots_full")
+		case errors.Is(err, cargo.ErrCargoNotSearching):
+			resp.ErrorLang(c, http.StatusBadRequest, "cargo_not_searching")
+		default:
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
+		}
 		return
 	}
 	if err := h.cargo.SetOfferStatusWaitingDriver(c.Request.Context(), offerID, &driverManagerID); err != nil {

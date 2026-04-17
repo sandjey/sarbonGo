@@ -492,7 +492,8 @@ func (h *DriverInvitationsHandler) GetMyDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
 		return
 	}
-	if drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String() {
+	linked, _ := h.drv.IsLinked(c.Request.Context(), driverID, dispatcherID)
+	if !linked && (drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String()) {
 		resp.ErrorLang(c, http.StatusForbidden, "driver_not_linked")
 		return
 	}
