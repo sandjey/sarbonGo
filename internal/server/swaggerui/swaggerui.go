@@ -537,9 +537,13 @@ const swaggerHTML = `<!doctype html>
           'Drivers / Dispatcher likes',
           'Drivers / Offers',
           'Drivers / Trips',
+          'Notifications / Driver mobile',
           'Notifications and ratings / Driver',
+          'SSE / Driver mobile (FCM-aligned)',
           'SSE / Driver — Trip notifications',
           'SSE / Driver — Trip status',
+          'SSE / Driver — Cargo offers',
+          'SSE / Driver — Connections',
           'Cargo Manager',
           'Cargo Manager / Auth',
           'Cargo Manager / Registration',
@@ -549,9 +553,12 @@ const swaggerHTML = `<!doctype html>
           'Cargo Manager / Offers',
           'Cargo Manager / Offers to Driver Manager',
           'Cargo Manager / Trips',
+          'Notifications / Cargo manager mobile',
           'Notifications and ratings / Cargo manager',
           'SSE / Cargo manager — Trip notifications',
           'SSE / Cargo manager — Trip status',
+          'SSE / Cargo manager — Cargo offers',
+          'SSE / Cargo manager — Connections',
           'Cargo Manager / Cargo likes',
           'Cargo Manager / Driver likes',
           'Cargo Manager / Driver managers',
@@ -564,6 +571,10 @@ const swaggerHTML = `<!doctype html>
           'Driver Manager / Drivers catalog',
           'Driver Manager / My drivers',
           'Driver Manager / Notifications',
+          'SSE / Driver Manager — Trip notifications',
+          'SSE / Driver Manager — Trip status',
+          'SSE / Driver Manager — Cargo offers',
+          'SSE / Driver Manager — Connections',
           'Driver Manager / Offers',
           'Driver Manager / Trips',
           'Driver Manager / Completion & ratings flow',
@@ -607,6 +618,7 @@ const swaggerHTML = `<!doctype html>
           var t = (typeof tag === 'string' ? tag : '').trim();
           var tLower = t.toLowerCase();
           if (group === 'drivers') {
+            if (t === 'Notifications / Driver mobile') return true;
             if (t.startsWith('Notifications and ratings / Driver')) return true;
             if (t.startsWith('SSE / Driver')) return true;
             if (!t.startsWith('Drivers /')) return false;
@@ -623,6 +635,10 @@ const swaggerHTML = `<!doctype html>
               'Driver Manager / Drivers catalog',
               'Driver Manager / My drivers',
               'Driver Manager / Notifications',
+              'SSE / Driver Manager — Trip notifications',
+              'SSE / Driver Manager — Trip status',
+              'SSE / Driver Manager — Cargo offers',
+              'SSE / Driver Manager — Connections',
               'Driver Manager / Offers',
               'Driver Manager / Trips',
               'Driver Manager / Completion & ratings flow',
@@ -631,8 +647,10 @@ const swaggerHTML = `<!doctype html>
           }
           if (group === 'admin') return t.startsWith('Admin /');
           if (group === 'cargo') {
+            if (t === 'Notifications / Cargo manager mobile') return true;
             if (t.startsWith('Notifications and ratings / Cargo manager')) return true;
             if (t.startsWith('SSE / Cargo manager')) return true;
+            if (t.startsWith('SSE / Driver Manager')) return true;
             return t === 'Cargo Manager' || t.startsWith('Cargo Manager /');
           }
           if (group === 'chat') return t.startsWith('Chat') || t.startsWith('Calls');

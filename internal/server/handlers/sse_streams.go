@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"time"
@@ -34,6 +35,18 @@ func (h *SSEStreamsHandler) writeData(c *gin.Context, flusher http.Flusher, b []
 	}
 	flusher.Flush()
 	return nil
+}
+
+// mergeStreamMeta adds FCM-aligned top-level keys (same names as push data map) onto the JSON line.
+func mergeStreamMeta(streamKind, recipientKind string, recipientID uuid.UUID, inner []byte) ([]byte, error) {
+	var m map[string]any
+	if err := json.Unmarshal(inner, &m); err != nil {
+		m = map[string]any{"_parse_error": true}
+	}
+	m["stream_kind"] = streamKind
+	m["recipient_kind"] = recipientKind
+	m["recipient_id"] = recipientID.String()
+	return json.Marshal(m)
 }
 
 func (h *SSEStreamsHandler) runSSE(c *gin.Context, subscribe func() (<-chan []byte, func())) {
@@ -83,11 +96,27 @@ func (h *SSEStreamsHandler) runSSE(c *gin.Context, subscribe func() (<-chan []by
 	}
 }
 
-// DriverTripNotificationsSSE GET /v1/driver/sse/trip-notifications
+// DriverTripNotificationsSSE GET /v1/driver/sse/trip-notifications — полный inbox (рейсы + офферы + connection_offer).
 func (h *SSEStreamsHandler) DriverTripNotificationsSSE(c *gin.Context) {
 	id := c.MustGet(mw.CtxDriverID).(uuid.UUID)
 	h.runSSE(c, func() (<-chan []byte, func()) {
 		return h.hub.SubscribeNotifications(tripnotif.RecipientDriver, id)
+	})
+}
+
+// DriverCargoOffersSSE GET /v1/driver/sse/cargo-offers — только события kind=cargo_offer.
+func (h *SSEStreamsHandler) DriverCargoOffersSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeCargoOfferNotifications(tripnotif.RecipientDriver, id)
+	})
+}
+
+// DriverConnectionsSSE GET /v1/driver/sse/connections — только kind=connection_offer.
+func (h *SSEStreamsHandler) DriverConnectionsSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeConnectionNotifications(tripnotif.RecipientDriver, id)
 	})
 }
 
@@ -99,38 +128,9 @@ func (h *SSEStreamsHandler) DriverTripStatusSSE(c *gin.Context) {
 	})
 }
 
-// DispatcherTripNotificationsSSE GET /v1/dispatchers/sse/trip-notifications
-func (h *SSEStreamsHandler) DispatcherTripNotificationsSSE(c *gin.Context) {
-	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	h.runSSE(c, func() (<-chan []byte, func()) {
-		return h.hub.SubscribeNotifications(tripnotif.RecipientDispatcher, id)
-	})
-}
-
-// DispatcherTripStatusSSE GET /v1/dispatchers/sse/trip-status
-func (h *SSEStreamsHandler) DispatcherTripStatusSSE(c *gin.Context) {
-	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	h.runSSE(c, func() (<-chan []byte, func()) {
-		return h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
-	})
-}
-
-// DispatcherDriverUpdatesSSE GET /v1/dispatchers/sse/driver-updates
-func (h *SSEStreamsHandler) DispatcherDriverUpdatesSSE(c *gin.Context) {
-	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	h.runSSE(c, func() (<-chan []byte, func()) {
-		return h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
-	})
-}
-
-// DispatcherUnifiedNotificationsSSE GET /v1/dispatchers/sse/notifications
-// One stream for dispatchers (both Cargo Manager and Driver Manager):
-// merges notifications, trip status and driver updates.
-//
-// Mux is done in this goroutine (no extra "out" channel): a goroutine blocked on send to an
-// intermediate channel while the client is slow on writeData would deadlock the whole stream.
-func (h *SSEStreamsHandler) DispatcherUnifiedNotificationsSSE(c *gin.Context) {
-	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+// DriverRealtimeSSE GET /v1/driver/sse/realtime — один поток: уведомления + trip_status с полями как у FCM data (stream_kind, recipient_*).
+func (h *SSEStreamsHandler) DriverRealtimeSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDriverID).(uuid.UUID)
 	if h.hub == nil {
 		c.Status(http.StatusServiceUnavailable)
 		return
@@ -146,12 +146,10 @@ func (h *SSEStreamsHandler) DispatcherUnifiedNotificationsSSE(c *gin.Context) {
 	c.Header("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
 
-	notifCh, unNotif := h.hub.SubscribeNotifications(tripnotif.RecipientDispatcher, id)
-	tripCh, unTrip := h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
-	drvCh, unDrv := h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
+	notifCh, unNotif := h.hub.SubscribeNotifications(tripnotif.RecipientDriver, id)
+	tripCh, unTrip := h.hub.SubscribeTripStatus(tripnotif.RecipientDriver, id)
 	defer unNotif()
 	defer unTrip()
-	defer unDrv()
 
 	if _, err := io.WriteString(c.Writer, ": sse connected\n\n"); err != nil {
 		return
@@ -174,23 +172,64 @@ func (h *SSEStreamsHandler) DispatcherUnifiedNotificationsSSE(c *gin.Context) {
 			if !ok {
 				return
 			}
-			if err := h.writeData(c, flusher, msg); err != nil {
+			out, err := mergeStreamMeta("notifications", tripnotif.RecipientDriver, id, msg)
+			if err != nil {
+				continue
+			}
+			if err := h.writeData(c, flusher, out); err != nil {
 				return
 			}
 		case msg, ok := <-tripCh:
 			if !ok {
 				return
 			}
-			if err := h.writeData(c, flusher, msg); err != nil {
-				return
+			out, err := mergeStreamMeta("trip_status", tripnotif.RecipientDriver, id, msg)
+			if err != nil {
+				continue
 			}
-		case msg, ok := <-drvCh:
-			if !ok {
-				return
-			}
-			if err := h.writeData(c, flusher, msg); err != nil {
+			if err := h.writeData(c, flusher, out); err != nil {
 				return
 			}
 		}
 	}
+}
+
+// DispatcherTripNotificationsSSE GET /v1/dispatchers/sse/trip-notifications — только trip_notification.
+func (h *SSEStreamsHandler) DispatcherTripNotificationsSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeTripUserNotifications(tripnotif.RecipientDispatcher, id)
+	})
+}
+
+// DispatcherCargoOffersSSE GET /v1/dispatchers/sse/cargo-offers — только cargo_offer.
+func (h *SSEStreamsHandler) DispatcherCargoOffersSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeCargoOfferNotifications(tripnotif.RecipientDispatcher, id)
+	})
+}
+
+// DispatcherConnectionsSSE GET /v1/dispatchers/sse/connections — только connection_offer.
+func (h *SSEStreamsHandler) DispatcherConnectionsSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeConnectionNotifications(tripnotif.RecipientDispatcher, id)
+	})
+}
+
+// DispatcherTripStatusSSE GET /v1/dispatchers/sse/trip-status
+func (h *SSEStreamsHandler) DispatcherTripStatusSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
+	})
+}
+
+// DispatcherDriverUpdatesSSE GET /v1/dispatchers/sse/driver-updates
+func (h *SSEStreamsHandler) DispatcherDriverUpdatesSSE(c *gin.Context) {
+	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.runSSE(c, func() (<-chan []byte, func()) {
+		return h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
+	})
 }

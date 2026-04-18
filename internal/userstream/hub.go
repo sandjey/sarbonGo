@@ -2,6 +2,7 @@ package userstream
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -12,18 +13,24 @@ const subChanBuf = 48
 // Hub delivers JSON payloads to SSE subscribers keyed by recipient_kind + recipient_id (UUID of driver or dispatcher app user).
 // One process only: for horizontal scaling add Redis Pub/Sub and bridge to this hub per instance.
 type Hub struct {
-	mu        sync.RWMutex
-	notif     map[string][]chan []byte
-	trips     map[string][]chan []byte
-	drv       map[string][]chan []byte
-	onPublish func(streamKind, recipientKind string, recipientID uuid.UUID, payload []byte)
+	mu              sync.RWMutex
+	notif           map[string][]chan []byte // full inbox (trip + cargo_offer + connection_offer)
+	tripUserNotif   map[string][]chan []byte // kind=trip_notification only
+	cargoOfferNotif map[string][]chan []byte // kind=cargo_offer only
+	connNotif       map[string][]chan []byte // kind=connection_offer only
+	trips           map[string][]chan []byte
+	drv             map[string][]chan []byte
+	onPublish       func(streamKind, recipientKind string, recipientID uuid.UUID, payload []byte)
 }
 
 func NewHub() *Hub {
 	return &Hub{
-		notif: make(map[string][]chan []byte),
-		trips: make(map[string][]chan []byte),
-		drv:   make(map[string][]chan []byte),
+		notif:           make(map[string][]chan []byte),
+		tripUserNotif:   make(map[string][]chan []byte),
+		cargoOfferNotif: make(map[string][]chan []byte),
+		connNotif:       make(map[string][]chan []byte),
+		trips:           make(map[string][]chan []byte),
+		drv:             make(map[string][]chan []byte),
 	}
 }
 
@@ -31,7 +38,8 @@ func subKey(recipientKind string, recipientID uuid.UUID) string {
 	return recipientKind + ":" + recipientID.String()
 }
 
-// SubscribeNotifications registers a subscriber for trip_user_notifications–style pushes.
+// SubscribeNotifications registers a subscriber for the full notification inbox
+// (trip_notification, cargo_offer, connection_offer) for this recipient.
 func (h *Hub) SubscribeNotifications(recipientKind string, recipientID uuid.UUID) (ch <-chan []byte, unsubscribe func()) {
 	if h == nil || recipientID == uuid.Nil {
 		return nil, func() {}
@@ -42,6 +50,45 @@ func (h *Hub) SubscribeNotifications(recipientKind string, recipientID uuid.UUID
 	h.notif[k] = append(h.notif[k], c)
 	h.mu.Unlock()
 	return c, func() { h.remove(h.notif, k, c) }
+}
+
+// SubscribeTripUserNotifications registers only trip_notification payloads (рейсы / trip_user_notifications).
+func (h *Hub) SubscribeTripUserNotifications(recipientKind string, recipientID uuid.UUID) (ch <-chan []byte, unsubscribe func()) {
+	if h == nil || recipientID == uuid.Nil {
+		return nil, func() {}
+	}
+	c := make(chan []byte, subChanBuf)
+	k := subKey(recipientKind, recipientID)
+	h.mu.Lock()
+	h.tripUserNotif[k] = append(h.tripUserNotif[k], c)
+	h.mu.Unlock()
+	return c, func() { h.remove(h.tripUserNotif, k, c) }
+}
+
+// SubscribeCargoOfferNotifications registers only cargo_offer SSE payloads.
+func (h *Hub) SubscribeCargoOfferNotifications(recipientKind string, recipientID uuid.UUID) (ch <-chan []byte, unsubscribe func()) {
+	if h == nil || recipientID == uuid.Nil {
+		return nil, func() {}
+	}
+	c := make(chan []byte, subChanBuf)
+	k := subKey(recipientKind, recipientID)
+	h.mu.Lock()
+	h.cargoOfferNotif[k] = append(h.cargoOfferNotif[k], c)
+	h.mu.Unlock()
+	return c, func() { h.remove(h.cargoOfferNotif, k, c) }
+}
+
+// SubscribeConnectionNotifications registers only connection_offer payloads (приглашения, связи).
+func (h *Hub) SubscribeConnectionNotifications(recipientKind string, recipientID uuid.UUID) (ch <-chan []byte, unsubscribe func()) {
+	if h == nil || recipientID == uuid.Nil {
+		return nil, func() {}
+	}
+	c := make(chan []byte, subChanBuf)
+	k := subKey(recipientKind, recipientID)
+	h.mu.Lock()
+	h.connNotif[k] = append(h.connNotif[k], c)
+	h.mu.Unlock()
+	return c, func() { h.remove(h.connNotif, k, c) }
 }
 
 // SubscribeTripStatus registers a subscriber for trip status snapshots.
@@ -85,7 +132,17 @@ func (h *Hub) remove(m map[string][]chan []byte, k string, c chan []byte) {
 	}
 }
 
-// PublishNotification sends one SSE payload to all notification-stream subscribers for this recipient.
+func notificationKindFromJSON(b []byte) string {
+	var m map[string]any
+	if json.Unmarshal(b, &m) != nil {
+		return ""
+	}
+	k, _ := m["kind"].(string)
+	return strings.TrimSpace(k)
+}
+
+// PublishNotification sends to the full inbox and to a typed sub-stream by JSON `kind`
+// (trip_notification | cargo_offer | connection_offer) for filtered SSE endpoints.
 func (h *Hub) PublishNotification(recipientKind string, recipientID uuid.UUID, v any) {
 	if h == nil || recipientID == uuid.Nil {
 		return
@@ -94,7 +151,16 @@ func (h *Hub) PublishNotification(recipientKind string, recipientID uuid.UUID, v
 	if err != nil {
 		return
 	}
-	h.broadcast(h.notif, subKey(recipientKind, recipientID), b)
+	k := subKey(recipientKind, recipientID)
+	h.broadcast(h.notif, k, b)
+	switch notificationKindFromJSON(b) {
+	case "trip_notification":
+		h.broadcast(h.tripUserNotif, k, b)
+	case "cargo_offer":
+		h.broadcast(h.cargoOfferNotif, k, b)
+	case "connection_offer":
+		h.broadcast(h.connNotif, k, b)
+	}
 	h.mu.RLock()
 	cb := h.onPublish
 	h.mu.RUnlock()

@@ -179,6 +179,44 @@ func (h *TripsHandler) MarkAllTripNotificationsReadDispatcher(c *gin.Context) {
 	h.markAllTripNotificationsRead(c, tripnotif.RecipientDispatcher, dispID)
 }
 
+// --- Mobile-friendly aliases: /v1/driver/notifications and /v1/dispatchers/notifications ---
+
+// ListNotificationsDriver GET /v1/driver/notifications — alias for driver mobile app.
+func (h *TripsHandler) ListNotificationsDriver(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	h.listTripNotifications(c, tripnotif.RecipientDriver, driverID)
+}
+
+// ListNotificationsDispatcher GET /v1/dispatchers/notifications
+func (h *TripsHandler) ListNotificationsDispatcher(c *gin.Context) {
+	dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.listTripNotifications(c, tripnotif.RecipientDispatcher, dispID)
+}
+
+// PatchNotificationReadDriver PATCH /v1/driver/notifications/:id — mark one notification as read.
+func (h *TripsHandler) PatchNotificationReadDriver(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	h.markTripNotificationRead(c, tripnotif.RecipientDriver, driverID)
+}
+
+// PatchNotificationReadDispatcher PATCH /v1/dispatchers/notifications/:id
+func (h *TripsHandler) PatchNotificationReadDispatcher(c *gin.Context) {
+	dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.markTripNotificationRead(c, tripnotif.RecipientDispatcher, dispID)
+}
+
+// ReadAllNotificationsDriver POST /v1/driver/notifications/read-all
+func (h *TripsHandler) ReadAllNotificationsDriver(c *gin.Context) {
+	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	h.markAllTripNotificationsRead(c, tripnotif.RecipientDriver, driverID)
+}
+
+// ReadAllNotificationsDispatcher POST /v1/dispatchers/notifications/read-all
+func (h *TripsHandler) ReadAllNotificationsDispatcher(c *gin.Context) {
+	dispID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	h.markAllTripNotificationsRead(c, tripnotif.RecipientDispatcher, dispID)
+}
+
 // profileTripRatingBody: trip_id — за какой завершённый рейс ставится оценка (аудит и проверка прав);
 // оцениваемый человек задаётся путём (/dispatchers/{id} или /drivers/{id}) — это рейтинг профиля.
 type profileTripRatingBody struct {

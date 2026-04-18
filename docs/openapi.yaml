@@ -7,7 +7,7 @@ info:
 
     **Как пользоваться Swagger:**
     1. Нажмите **Authorize** и укажите заголовки: **X-Device-Type** (web / ios / android), **X-Language** (ru / uz / en / tr / zh), **X-Client-Token**. Они обязательны для всех запросов к /v1 и /api.
-    2. Для методов, требующих авторизации, дополнительно укажите **X-User-Token** (JWT access_token после входа водителя, диспетчера или админа). Для **SSE** (`GET /v1/driver/sse/...`, `GET /v1/dispatchers/sse/...`) в браузере можно передать тот же JWT в query **`token`** (см. описания этих путей), если нельзя задать заголовок.
+    2. Для методов, требующих авторизации, дополнительно укажите **X-User-Token** (JWT access_token после входа водителя, диспетчера или админа). Для **SSE** (`GET /v1/driver/sse/...`, `GET /v1/dispatchers/sse/...`) в браузере можно передать тот же JWT в query **`token`** (см. описания этих путей), если нельзя задать заголовок. **Потоки разделены по задачам:** для водителя рекомендуется **`GET /v1/driver/sse/realtime`** (совпадает с полями FCM `data`); для диспетчеров — отдельные **`/sse/trip-notifications`**, **`/sse/cargo-offers`**, **`/sse/connections`**, **`/sse/trip-status`**, **`/sse/driver-updates`** (единый `/dispatchers/sse/notifications` удалён).
     3. Вкладки (теги) сверху группируют методы по ролям: водители, Cargo Manager, Driver Manager, админ, чат, компании, справочники (Reference).
 
     **Категории API:** Водители (Drivers) — регистрация, профиль, KYC, рейсы; Cargo Manager — грузы, офферы, переговоры и связанные рейсы; Driver Manager — водители, приглашения и подбор грузов для водителей; Админ — компании и владельцы; Справочники (Reference) — города, типы кузова, статусы.
@@ -169,7 +169,8 @@ tags:
   - name: "Driver Manager / Driver likes"
     description: "Избранные водители Driver Manager: add/list/delete через /v1/dispatchers/driver-likes."
   - name: "Driver Manager / Notifications"
-    description: "SSE-уведомления Driver Manager о смене данных водителя (когда меняет водитель или диспетчер)."
+    description: |
+      Real-time для Driver Manager: отдельные SSE **`/v1/dispatchers/sse/trip-notifications`**, **`/sse/cargo-offers`**, **`/sse/connections`**, **`/sse/trip-status`**, **`/sse/driver-updates`** (см. теги **SSE / Driver Manager — …**). Уведомления о смене данных водителя — поток **`driver_update`** на **`/sse/driver-updates`**.
   - name: "Driver Manager / Connect offers"
     description: |
       Connection offer (связь водитель ↔ driver manager, не cargo offer):
@@ -243,24 +244,6 @@ tags:
       **Уведомления:** те же события, плюс отдельное уведомление `COMPLETION_PENDING_MANAGER`, когда водитель запросил закрытие рейса и ждёт вашего `POST /v1/dispatchers/trips/{id}/confirm-transition` с переводом в `COMPLETED`. Список: `GET /v1/dispatchers/trip-notifications` — в каждом элементе **`message`** по **`X-Language`**.
 
       **Оценка (профиль водителя):** после `COMPLETED` — `POST /v1/dispatchers/drivers/{driver_id}/rating` с `{"trip_id":"…","stars":1..5}` (шаг **0.5**). В пути — оцениваемый **водитель**; `trip_id` — контекст завершённого рейса. Агрегат пишется в `drivers.rating`.
-  - name: SSE / Driver — Trip notifications
-    description: |
-      **Server-Sent Events (водитель):** поток новых записей уведомлений по рейсу (те же события, что попадают в `GET /v1/driver/trip-notifications`), без опроса списка.
-
-      **Авторизация:** заголовок **X-User-Token** или query **`?token=`** (JWT access) — в браузере `EventSource` нельзя задать произвольные заголовки, поэтому для веба используйте `?token=...` вместе с базовыми заголовками (`X-Device-Type`, `X-Language`, `X-Client-Token`).
-
-      **Формат:** ответ `200`, `Content-Type: text/event-stream`. Каждое событие — строки `data: {JSON}\n\n`. В JSON поле **`kind`** = `trip_notification` (см. схему `SSETripNotificationEvent`). Периодически приходит комментарий `: ping` для поддержания соединения.
-
-      **Один инстанс API:** хаб в памяти процесса; при нескольких подах за балансировщиком подключите общий брокер (например Redis Pub/Sub), иначе клиент не получит события с другого пода.
-  - name: SSE / Driver — Trip status
-    description: |
-      **SSE (водитель):** поток снимков статуса рейса (`kind: trip_status`) при переходах, отмене, появлении нового рейса после принятия оффера и т.д. Детали полей — схема `SSETripStatusEvent`. Авторизация и ограничения — как у **SSE / Driver — Trip notifications**.
-  - name: SSE / Cargo manager — Trip notifications
-    description: |
-      **SSE (диспетчер / cargo manager):** поток уведомлений по рейсу для JWT диспетчера (аналог `GET /v1/dispatchers/trip-notifications`). **`?token=`** или **X-User-Token**; базовые заголовки обязательны.
-  - name: SSE / Cargo manager — Trip status
-    description: |
-      **SSE (диспетчер):** поток `trip_status` для грузов, где вы фриланс-автор (`created_by_type=DISPATCHER` и ваш `created_by_id`) — та же аудитория, что и push уведомлений по рейсу для диспетчера. Для грузов только компании событие уходит водителю на рейсе; диспетчеру компании этот поток может не приходить (как и записи в `trip_user_notifications`).
   - name: Drivers / Cargo view
     description: |
       Просмотр и поиск грузов для водителя:
@@ -418,11 +401,66 @@ tags:
       **GET /v1/reference/dispatchers** возвращает (все value в верхнем регистре): work_status (AVAILABLE, BUSY, OFFLINE); **manager_roles** и дубликат **roles** — допустимые значения поля `role` (CARGO_MANAGER, DRIVER_MANAGER).
 
       **GET /v1/reference/cities** — справочник всех городов мира (tidwall/cities + UZ/AE/TM/KG/TJ); in-memory, быстрый API; коды TAS, SAM, DXB и т.д.; query country_code — фильтр по стране.
+  - name: "Notifications / Driver mobile"
+    description: |
+      **Уведомления для мобильного приложения водителя** (короткий путь `/v1/driver/notifications`).
+
+      Три метода:
+      - **`GET /v1/driver/notifications`** — список всех входящих уведомлений (`items[]`, `unread_count`).
+      - **`PATCH /v1/driver/notifications/{id}`** — отметить одно уведомление как прочитанное.
+      - **`POST /v1/driver/notifications/read-all`** — отметить **все** непрочитанные как прочитанные.
+
+      Поля каждого элемента: `id`, `trip_id`, `event_kind`, `step`, `from_status`, `to_status`, `message` (текст по `X-Language`), `read`, `read_at`, `created_at`.
+
+      Фильтр: `?unread_only=true` + `?limit=1..100` (default 30). Авторизация: **X-User-Token**.
+
+      Старые пути `/trip-notifications` сохранены.
+  - name: "Notifications / Cargo manager mobile"
+    description: |
+      **Уведомления для мобильного приложения диспетчера** (короткий путь `/v1/dispatchers/notifications`).
+
+      - **`GET /v1/dispatchers/notifications`** — список (`items[]`, `unread_count`).
+      - **`PATCH /v1/dispatchers/notifications/{id}`** — прочитать одно.
+      - **`POST /v1/dispatchers/notifications/read-all`** — прочитать все.
+
+      Дополнительные события vs водитель: `COMPLETION_PENDING_MANAGER` (водитель ждёт вашего `confirm-transition`).
+  - name: "SSE / Driver mobile (FCM-aligned)"
+    description: |
+      **Один SSE для мобильного приложения водителя**, совместимый с полями **Firebase FCM `data`**: в каждой строке `data:` добавляются **`stream_kind`** (`notifications` | `trip_status`), **`recipient_kind`**, **`recipient_id`**, плюс исходный JSON события (`kind`, `trip_id`, …).
+      Путь: **`GET /v1/driver/sse/realtime`**. Узкие потоки (`/sse/trip-notifications`, `/sse/cargo-offers`, `/sse/connections`, `/sse/trip-status`) остаются для отладки или лёгких клиентов.
+  - name: "SSE / Driver — Trip notifications"
+    description: |
+      Полный inbox уведомлений водителя (**`trip_notification`**, **`cargo_offer`**, **`connection_offer`**) в `text/event-stream`.
+      Авторизация: **X-User-Token** или query **`token`** + базовые заголовки. Периодически `: ping`. Один инстанс API — при нескольких репликах нужен общий pub/sub.
+  - name: "SSE / Driver — Trip status"
+    description: "Только снимки рейса (`kind: trip_status`) для водителя."
+  - name: "SSE / Driver — Cargo offers"
+    description: "Только события **`kind=cargo_offer`** (создание/смена статуса оффера) для водителя."
+  - name: "SSE / Driver — Connections"
+    description: "Только **`kind=connection_offer`** (приглашения в связь с диспетчером/компанией) для водителя."
+  - name: "SSE / Cargo manager — Trip notifications"
+    description: "Только **`kind=trip_notification`** (рейсы, ожидание завершения и т.д.) для диспетчера в роли Cargo Manager (тот же JWT, что и у Driver Manager)."
+  - name: "SSE / Cargo manager — Trip status"
+    description: "Только **`kind=trip_status`** для диспетчера (Cargo / Driver Manager по scope груза и оффера)."
+  - name: "SSE / Cargo manager — Cargo offers"
+    description: "Только **`kind=cargo_offer`** для диспетчера (входящие/исходящие офферы по грузам и переговорам)."
+  - name: "SSE / Cargo manager — Connections"
+    description: "Только **`kind=connection_offer`** и аналогичные приглашения для диспетчера (входящие/исходящие связи с водителями)."
+  - name: "SSE / Driver Manager — Trip notifications"
+    description: "Узкий поток только **`trip_notification`** для Driver Manager (тот же `/v1/dispatchers/sse/...`, что и у Cargo Manager)."
+  - name: "SSE / Driver Manager — Trip status"
+    description: "Узкий поток **`trip_status`** для Driver Manager."
+  - name: "SSE / Driver Manager — Cargo offers"
+    description: "Узкий поток **`cargo_offer`** для Driver Manager."
+  - name: "SSE / Driver Manager — Connections"
+    description: "Узкий поток **`connection_offer`** для Driver Manager."
   - name: Chat
     description: |
       **Универсальный чат (driver ↔ dispatcher и др.)**
       **Кто вызывает:** Водитель, диспетчер или админ (JWT в X-User-Token). Для тестов в Swagger можно передать **X-User-ID** (UUID пользователя) вместо JWT.
-      **Поток (как в Telegram):** поиск контакта по телефону — **GET /v1/chat/user-finder** (алиасы **GET /v1/driver/user-finder**, **GET /v1/dispatchers/user-finder** с тем же JWT). Аватар собеседника — **GET /v1/chat/users/{id}/photo**. Список диалогов — **GET /v1/chat/conversations** (peer_name, peer_photo_url, последнее сообщение, unread_count, peer_read_my_last). Открытие чата / прочитано: **POST /v1/chat/conversations/{id}/read** или **GET** сообщений с `mark_read=1`. Далее: POST /v1/chat/conversations (peer_id) → GET/POST /v1/chat/conversations/:id/messages. PATCH/DELETE /v1/chat/messages/:id. Presence: GET /v1/chat/presence/:user_id. WebSocket: GET /v1/chat/ws?token=JWT.
+      **Поток (как в Telegram):** поиск контакта по телефону — **GET /v1/chat/user-finder** (алиасы **GET /v1/driver/user-finder**, **GET /v1/dispatchers/user-finder** с тем же JWT). Аватар собеседника — **GET /v1/chat/users/{id}/photo**. Список диалогов — **GET /v1/chat/conversations** (peer_name, peer_photo_url, последнее сообщение, unread_count, peer_read_my_last). Открытие чата / прочитано: **POST /v1/chat/conversations/{id}/read** или **GET** сообщений с `mark_read=1`. Далее: POST /v1/chat/conversations (peer_id) → GET/POST /v1/chat/conversations/:id/messages. PATCH/DELETE /v1/chat/messages/:id. Presence: GET /v1/chat/presence/:user_id.
+
+      **Живые сообщения и typing:** только **WebSocket** **`GET /v1/chat/ws?token=JWT`** (и базовые query `device_type`, `language`, `client_token` при необходимости). Отдельного SSE для текста чата **нет** — мобильный клиент держит WS; FCM дублирует только краткое уведомление о новом сообщении при настроенном push.
   - name: Calls (Voice)
     description: |
       **Голосовые звонки (как Telegram по архитектуре):** медиа (аудио) идёт по **WebRTC**, а этот раздел отвечает за **создание/статусы звонка** и **signaling** через WebSocket чата.
@@ -493,6 +531,45 @@ components:
       name: X-User-ID
       description: 'Для теста чата в Swagger — UUID пользователя (водитель/диспетчер). Подставляется вместо JWT.'
   schemas:
+    NotificationItem:
+      type: object
+      description: Одна запись из ленты уведомлений (`GET /v1/driver/notifications` и `/v1/dispatchers/notifications`).
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID уведомления — передаётся в `PATCH /notifications/{id}`.
+        trip_id:
+          type: string
+          format: uuid
+          description: UUID рейса, которого касается событие.
+        event_kind:
+          type: string
+          enum: [IN_TRANSIT, DELIVERED, COMPLETED, CANCELLED, COMPLETION_PENDING_MANAGER]
+          description: Тип события. `COMPLETION_PENDING_MANAGER` — только для диспетчера.
+        step:
+          type: string
+          description: Текущий шаг — обычно совпадает с `to_status` или `event_kind`.
+        from_status:
+          type: string
+          nullable: true
+        to_status:
+          type: string
+          nullable: true
+        message:
+          type: string
+          description: Читаемый текст по заголовку `X-Language` (ru/uz/en/tr/zh).
+        read:
+          type: boolean
+          description: true если уведомление уже прочитано.
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required: [id, trip_id, event_kind, step, message, read, created_at]
     Envelope:
       type: object
       properties:
@@ -4294,6 +4371,75 @@ paths:
         "403": { description: not your cargo }
         "404": { description: trip not found }
 
+  /v1/dispatchers/notifications:
+    get:
+      tags: ["Notifications / Cargo manager mobile", "Notifications and ratings / Cargo manager"]
+      summary: "GET список уведомлений диспетчера (mobile)"
+      description: |
+        Короткий алиас **`/v1/dispatchers/trip-notifications`**.
+        Дополнительно: событие **`COMPLETION_PENDING_MANAGER`** (водитель ждёт вашего `confirm-transition`).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: unread_only
+          in: query
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: "data.items[], data.unread_count"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/NotificationItem" }
+                  unread_count: { type: integer }
+        "401": { description: unauthorized }
+
+  /v1/dispatchers/notifications/read-all:
+    post:
+      tags: ["Notifications / Cargo manager mobile", "Notifications and ratings / Cargo manager"]
+      summary: "POST отметить все уведомления прочитанными (диспетчер)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200":
+          description: "data.updated"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+
+  /v1/dispatchers/notifications/{id}:
+    patch:
+      tags: ["Notifications / Cargo manager mobile", "Notifications and ratings / Cargo manager"]
+      summary: "PATCH отметить одно уведомление прочитанным (диспетчер)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: UUID уведомления (id из списка)
+      responses:
+        "200":
+          description: "data.id, data.read=true"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  read: { type: boolean, example: true }
+        "400": { description: invalid_id }
+        "401": { description: unauthorized }
+        "404": { description: trip_notification_not_found }
+
   /v1/dispatchers/trip-notifications:
     get:
       tags: ["Notifications and ratings / Cargo manager"]
@@ -4334,48 +4480,16 @@ paths:
         "200": { description: ok }
         "404": { description: trip_notification_not_found }
 
-  /v1/dispatchers/sse/notifications:
-    get:
-      tags: ["SSE / Cargo manager — Trip notifications", "SSE / Cargo manager — Trip status", "Driver Manager / Notifications"]
-      summary: "Единый SSE поток уведомлений диспетчера (Cargo Manager + Driver Manager)"
-      description: |
-        Единый real-time канал (`text/event-stream`) для всех ключевых событий диспетчера.
-        Подходит для обеих ролей: **Cargo Manager** и **Driver Manager**.
-
-        В одном потоке приходят payload разных типов:
-        - `kind=trip_notification` — события из trip notifications;
-        - `kind=trip_status` — изменения статусов рейса;
-        - `kind=cargo_offer` — создание/принятие/отклонение/отмена оффера;
-        - `kind=driver_update` — изменения данных привязанных водителей.
-
-        Для `kind=cargo_offer` сервер добавляет **`sse_id`** (UUID строка) — уникальный id события для дедупа на клиенте.
-        События **cargo_offer** доставляются и **Cargo Manager** (автор груза DISPATCHER и/или автор DISPATCHER-оффера), и **Driver Manager** (`negotiation_dispatcher_id`), в т.ч. при принятии оффера **водителем** (раньше уведомление уходило в неверный канал).
-
-        **JWT:** заголовок **X-User-Token** или query **`token`** для EventSource. Базовые заголовки обязательны.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: token
-          in: query
-          required: false
-          schema: { type: string }
-          description: JWT access при отсутствии X-User-Token.
-      responses:
-        "200":
-          description: "text/event-stream; `data:` содержит unified event payload"
-          content:
-            text/event-stream:
-              schema: { type: string }
-        "401": { description: unauthorized }
-
   /v1/dispatchers/sse/trip-notifications:
     get:
-      tags: ["SSE / Cargo manager — Trip notifications", "Driver Manager / Notifications"]
-      summary: "SSE: поток новых уведомлений по рейсу (диспетчер)"
+      tags: ["SSE / Cargo manager — Trip notifications", "SSE / Driver Manager — Trip notifications"]
+      summary: "SSE: только уведомления по рейсу (trip_notification)"
       description: |
-        Аналог `GET /v1/dispatchers/trip-notifications`, но события приходят в реальном времени (`text/event-stream`).
-        Доступно для диспетчера в едином scope (Cargo Manager и Driver Manager).
+        Поток **`kind=trip_notification`** (события рейса и ожидание завершения). Офферы и connection_offer **не** смешиваются — см. отдельные пути **`/sse/cargo-offers`** и **`/sse/connections`**.
 
-        **JWT:** заголовок **X-User-Token** или query **`token`** для EventSource. Базовые заголовки обязательны.
+        **Роли:** один JWT диспетчера для Cargo Manager и Driver Manager; события приходят, если вы в scope уведомления (владелец груза, negotiation DM и т.д., как в `GET /v1/dispatchers/trip-notifications`).
+
+        **JWT:** **X-User-Token** или query **`token`**. Базовые заголовки обязательны (или query `device_type`, `language`, `client_token`).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: token
@@ -4391,9 +4505,53 @@ paths:
               schema: { type: string }
         "401": { description: unauthorized }
 
+  /v1/dispatchers/sse/cargo-offers:
+    get:
+      tags: ["SSE / Cargo manager — Cargo offers", "SSE / Driver Manager — Cargo offers"]
+      summary: "SSE: только события офферов по грузу (cargo_offer)"
+      description: |
+        Поток **`kind=cargo_offer`** (создание, смена статуса, ожидание водителя и т.д.). Для дедупа на клиенте в payload есть **`sse_id`** (UUID).
+
+        **JWT / базовые заголовки:** как у остальных `GET /v1/dispatchers/sse/*`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream; строки `data:` с JSON (`kind`, `event`, `offer_id`, …)"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
+
+  /v1/dispatchers/sse/connections:
+    get:
+      tags: ["SSE / Cargo manager — Connections", "SSE / Driver Manager — Connections"]
+      summary: "SSE: приглашения и связи (connection_offer)"
+      description: |
+        Поток **`kind=connection_offer`** (приглашение водителя, входящие/исходящие связи между водителем и диспетчером).
+
+        **JWT / базовые заголовки:** как у остальных `GET /v1/dispatchers/sse/*`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
+
   /v1/dispatchers/sse/trip-status:
     get:
-      tags: ["SSE / Cargo manager — Trip status", "Driver Manager / Notifications"]
+      tags: ["SSE / Cargo manager — Trip status", "SSE / Driver Manager — Trip status"]
       summary: "SSE: изменения статуса рейса (диспетчер)"
       description: |
         Поток `trip_status` для рейсов из видимого scope диспетчера:
@@ -6133,6 +6291,76 @@ paths:
         "403": { description: trip not assigned to you }
         "404": { description: trip not found }
 
+  /v1/driver/notifications:
+    get:
+      tags: ["Notifications / Driver mobile", "Notifications and ratings / Driver"]
+      summary: "GET список уведомлений водителя (mobile)"
+      description: |
+        Короткий алиас **`/v1/driver/trip-notifications`** для мобильного приложения.
+        Поля каждого элемента: `id`, `trip_id`, `event_kind`, `step`, `from_status`, `to_status`, `message` (по `X-Language`), `read`, `read_at`, `created_at`.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: unread_only
+          in: query
+          schema: { type: boolean, default: false }
+          description: Если true — только непрочитанные.
+        - name: limit
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: "data.items[], data.unread_count"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/NotificationItem" }
+                  unread_count: { type: integer }
+        "401": { description: unauthorized }
+
+  /v1/driver/notifications/read-all:
+    post:
+      tags: ["Notifications / Driver mobile", "Notifications and ratings / Driver"]
+      summary: "POST отметить все уведомления прочитанными (водитель)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200":
+          description: "data.updated — кол-во обновлённых записей"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+
+  /v1/driver/notifications/{id}:
+    patch:
+      tags: ["Notifications / Driver mobile", "Notifications and ratings / Driver"]
+      summary: "PATCH отметить одно уведомление прочитанным (водитель)"
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+          description: UUID уведомления (поле `id` из списка, не `trip_id`)
+      responses:
+        "200":
+          description: "data.id, data.read=true"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  read: { type: boolean, example: true }
+        "400": { description: invalid_id }
+        "401": { description: unauthorized }
+        "404": { description: trip_notification_not_found }
+
   /v1/driver/trip-notifications:
     get:
       tags: ["Notifications and ratings / Driver"]
@@ -6175,18 +6403,42 @@ paths:
         "200": { description: ok }
         "404": { description: trip_notification_not_found }
 
+  /v1/driver/sse/realtime:
+    get:
+      tags: ["SSE / Driver mobile (FCM-aligned)", "Drivers / Trips"]
+      summary: "SSE: один поток уведомлений + trip_status (как FCM data)"
+      description: |
+        Рекомендуемый поток для **мобильного приложения водителя**. Объединяет:
+        - все push из категории **notifications** (офферы `cargo_offer`, приглашения `connection_offer`, `trip_notification` и др.);
+        - снимки рейса **`kind=trip_status`** (как отдельный FCM `stream_kind=trip_status`).
+
+        В **каждой** строке `data:` сервер добавляет поля **`stream_kind`** (`notifications` | `trip_status`), **`recipient_kind`**, **`recipient_id`** — те же имена, что и в **Firebase `data`**, чтобы один парсер обрабатывал SSE и push.
+
+        **Авторизация:** **X-User-Token** или query **`token`** + базовые заголовки (или query `device_type`, `language`, `client_token`).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream; `data:` — JSON с `stream_kind` + полезная нагрузка"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
+
   /v1/driver/sse/trip-notifications:
     get:
       tags: ["SSE / Driver — Trip notifications"]
-      summary: "SSE: поток новых уведомлений по рейсу (водитель)"
+      summary: "SSE: полный inbox уведомлений (рейсы + офферы + связи)"
       description: |
-        **Server-Sent Events.** Держите один GET открытым; сервер пушит строки `data: {JSON}\n\n` при каждой новой записи в `trip_user_notifications` для вашего `driver_id`.
+        **Server-Sent Events.** Полный поток без фильтра: `trip_notification`, `cargo_offer`, `connection_offer` (как раньше в одном канале).
 
-        **Авторизация:** обычно **X-User-Token**. В браузере с `EventSource` передайте тот же JWT в query **`token`** (см. параметр ниже).
+        Для **production** предпочтительнее **`GET /v1/driver/sse/realtime`** — тот же контент плюс `trip_status` и поля, выровненные с FCM.
 
-        После события при необходимости обновите ленту: `GET /v1/driver/trip-notifications` (там есть `message` по языку).
-
-        **Масштабирование:** один процесс API — при нескольких репликах нужен общий pub/sub.
+        **Авторизация:** **X-User-Token** или query **`token`**.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: token
@@ -6202,6 +6454,46 @@ paths:
               schema:
                 type: string
                 example: "data: {\"kind\":\"trip_notification\",\"notification_id\":\"...\",\"trip_id\":\"...\",\"event_kind\":\"IN_TRANSIT\",\"created_at\":\"2026-04-10T12:00:00Z\"}\n\n"
+        "401": { description: unauthorized }
+
+  /v1/driver/sse/cargo-offers:
+    get:
+      tags: ["SSE / Driver — Cargo offers", "Drivers / Offers"]
+      summary: "SSE: только cargo_offer для водителя"
+      description: |
+        Узкий поток только событий **`kind=cargo_offer`**. Полезно, если основной клиент слушает **`/sse/realtime`**, а отдельный экран — только офферы.
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream"
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { description: unauthorized }
+
+  /v1/driver/sse/connections:
+    get:
+      tags: ["SSE / Driver — Connections", "Drivers / Driver invitations"]
+      summary: "SSE: только connection_offer для водителя"
+      description: |
+        Узкий поток **`kind=connection_offer`** (приглашения в связь с диспетчером/компанией).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      parameters:
+        - name: token
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: "text/event-stream"
+          content:
+            text/event-stream:
+              schema: { type: string }
         "401": { description: unauthorized }
 
   /v1/driver/sse/trip-status:

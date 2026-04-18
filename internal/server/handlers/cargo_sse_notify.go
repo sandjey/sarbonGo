@@ -11,7 +11,7 @@ import (
 	"sarbonNew/internal/userstream"
 )
 
-// ensureSSEID adds a stable dedup id for clients (dispatcher unified SSE / EventSource).
+// ensureSSEID adds a stable dedup id for clients (SSE `cargo_offer` streams / EventSource dedup).
 func ensureSSEID(payload gin.H) {
 	if payload == nil {
 		return
