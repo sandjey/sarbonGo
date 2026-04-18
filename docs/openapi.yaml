@@ -7,7 +7,7 @@ info:
 
     **Как пользоваться Swagger:**
     1. Нажмите **Authorize** и укажите заголовки: **X-Device-Type** (web / ios / android), **X-Language** (ru / uz / en / tr / zh), **X-Client-Token**. Они обязательны для всех запросов к /v1 и /api.
-    2. Для методов, требующих авторизации, дополнительно укажите **X-User-Token** (JWT access_token после входа водителя, диспетчера или админа). Для **SSE** (`GET /v1/driver/sse/...`, `GET /v1/dispatchers/sse/...`) в браузере можно передать тот же JWT в query **`token`** (см. описания этих путей), если нельзя задать заголовок. **Потоки разделены по задачам:** для водителя рекомендуется **`GET /v1/driver/sse/realtime`** (совпадает с полями FCM `data`); для диспетчеров — отдельные **`/sse/trip-notifications`**, **`/sse/cargo-offers`**, **`/sse/connections`**, **`/sse/trip-status`**, **`/sse/driver-updates`** (единый `/dispatchers/sse/notifications` удалён).
+    2. Для методов, требующих авторизации, дополнительно укажите **X-User-Token** (JWT access_token после входа водителя, диспетчера или админа). Для **SSE** (`GET /v1/driver/sse/...`, `GET /v1/dispatchers/sse/...`) в браузере можно передать тот же JWT в query **`token`** (см. описания этих путей), если нельзя задать заголовок. **Потоки разделены по задачам:** для водителя рекомендуется **`GET /v1/driver/sse/realtime`** (совпадает с полями FCM `data`); для диспетчеров в **этой сокращённой спецификации** описаны **`GET /v1/dispatchers/sse/trip-notifications`** и **`GET /v1/dispatchers/sse/trip-status`** — остальные узкие SSE-потоки диспетчера остаются на сервере, но здесь не дублируются.
     3. Вкладки (теги) сверху группируют методы по ролям: водители, Cargo Manager, Driver Manager, админ, чат, компании, справочники (Reference).
 
     **Категории API:** Водители (Drivers) — регистрация, профиль, KYC, рейсы; Cargo Manager — грузы, офферы, переговоры и связанные рейсы; Driver Manager — водители, приглашения и подбор грузов для водителей; Админ — компании и владельцы; Справочники (Reference) — города, типы кузова, статусы.
@@ -89,8 +89,7 @@ tags:
   - name: "Cargo Manager / Cargo CRUD"
     description: |
       Создание, получение, обновление, удаление и статусы грузов, включая фото груза.
-      Также содержит справочник типов груза для форм Cargo Manager:
-      - `GET /v1/dispatchers/cargo-types` — список `cargo_types` с названием на языке из `X-Language`.
+      Тип груза для форм: **`GET /v1/reference/cargo-types/hint?q=…`** (или поле в ответах списков грузов).
   - name: "Cargo Manager / View Cargo"
     description: |
       Просмотр грузов Cargo Manager.
@@ -126,7 +125,7 @@ tags:
     description: |
       **Рейсы Cargo Manager (диспетчер / компания).** Требуется X-User-Token (dispatcher).
 
-      - **GET /v1/dispatchers/trips** — список рейсов по **своим** грузам (и грузам выбранной компании после `switch-company`).
+      - **GET /v1/dispatchers/trips** — список рейсов по **своим** грузам и грузам компании в текущем контексте JWT (`company_id`, если применимо).
         Фильтры: `cargo_id`, `driver_id`, `status` (через запятую), пагинация `limit`, `offset`,
         сортировка `sort=created_at|updated_at` + `order=asc|desc`.
       - **GET /v1/dispatchers/cargo/{id}/trips** — рейсы конкретного груза по `cargo_id` (только если груз ваш).
@@ -168,9 +167,6 @@ tags:
     description: "Избранные грузы Driver Manager: add/list/delete через /v1/dispatchers/cargo-likes."
   - name: "Driver Manager / Driver likes"
     description: "Избранные водители Driver Manager: add/list/delete через /v1/dispatchers/driver-likes."
-  - name: "Driver Manager / Notifications"
-    description: |
-      Real-time для Driver Manager: отдельные SSE **`/v1/dispatchers/sse/trip-notifications`**, **`/sse/cargo-offers`**, **`/sse/connections`**, **`/sse/trip-status`**, **`/sse/driver-updates`** (см. теги **SSE / Driver Manager — …**). Уведомления о смене данных водителя — поток **`driver_update`** на **`/sse/driver-updates`**.
   - name: "Driver Manager / Connect offers"
     description: |
       Connection offer (связь водитель ↔ driver manager, не cargo offer):
@@ -180,7 +176,7 @@ tags:
   - name: "Driver Manager / Drivers catalog"
     description: "Каталог/поиск водителей (по телефону, фильтры, гео) для дальнейших приглашений."
   - name: "Driver Manager / My drivers"
-    description: "Мои водители: список, отвязка, управление данными транспорта (тягач/прицеп) для привязанных водителей."
+    description: "Мои водители: список, отвязка; правки тягача/прицепа привязанного водителя — отдельные ручки на сервере, в этой спецификации не описаны."
   - name: "Driver Manager / Offers"
     description: |
       Минимальный cargo-offer flow для Driver Manager (ровно 6 API):
@@ -193,7 +189,7 @@ tags:
   - name: "Driver Manager / Trips"
     description: |
       Рейсы Driver Manager:
-      - по своим грузам и в выбранной компании (после switch-company),
+      - по своим грузам и грузам компании в текущем контексте JWT,
       - а также по рейсам, где вы участвуете в переговорной цепочке оффера
         (`offers.proposed_by=DRIVER_MANAGER` с вашим `proposed_by_id`
         или `offers.negotiation_dispatcher_id=вы`).
@@ -209,7 +205,7 @@ tags:
         - cargo manager (`/v1/dispatchers/dispatchers/{dispatcherId}/rating`).
   - name: "Company / Dispatcher (приглашённый)"
     description: |
-      **Диспетчер компании — только через приглашение.** GET /v1/dispatchers/companies (мои компании), POST /v1/dispatchers/auth/switch-company. Приглашение: POST /v1/dispatchers/companies/:companyId/invitations, accept, decline.
+      **Диспетчер компании — только через приглашение.** Сценарии «мои компании», смена контекста компании и приглашения по companyId реализованы на сервере, но в этой сокращённой спецификации не описаны; в Swagger смотрите остальные разделы диспетчера (рейсы, офферы, профиль).
   - name: Drivers / Trips
     description: |
       **Рейсы водителя.** Требуется X-User-Token (driver).
@@ -415,15 +411,6 @@ tags:
       Фильтр: `?unread_only=true` + `?limit=1..100` (default 30). Авторизация: **X-User-Token**.
 
       Старые пути `/trip-notifications` сохранены.
-  - name: "Notifications / Cargo manager mobile"
-    description: |
-      **Уведомления для мобильного приложения диспетчера** (короткий путь `/v1/dispatchers/notifications`).
-
-      - **`GET /v1/dispatchers/notifications`** — список (`items[]`, `unread_count`).
-      - **`PATCH /v1/dispatchers/notifications/{id}`** — прочитать одно.
-      - **`POST /v1/dispatchers/notifications/read-all`** — прочитать все.
-
-      Дополнительные события vs водитель: `COMPLETION_PENDING_MANAGER` (водитель ждёт вашего `confirm-transition`).
   - name: "SSE / Driver mobile (FCM-aligned)"
     description: |
       **Один SSE для мобильного приложения водителя**, совместимый с полями **Firebase FCM `data`**: в каждой строке `data:` добавляются **`stream_kind`** (`notifications` | `trip_status`), **`recipient_kind`**, **`recipient_id`**, плюс исходный JSON события (`kind`, `trip_id`, …).
@@ -442,18 +429,10 @@ tags:
     description: "Только **`kind=trip_notification`** (рейсы, ожидание завершения и т.д.) для диспетчера в роли Cargo Manager (тот же JWT, что и у Driver Manager)."
   - name: "SSE / Cargo manager — Trip status"
     description: "Только **`kind=trip_status`** для диспетчера (Cargo / Driver Manager по scope груза и оффера)."
-  - name: "SSE / Cargo manager — Cargo offers"
-    description: "Только **`kind=cargo_offer`** для диспетчера (входящие/исходящие офферы по грузам и переговорам)."
-  - name: "SSE / Cargo manager — Connections"
-    description: "Только **`kind=connection_offer`** и аналогичные приглашения для диспетчера (входящие/исходящие связи с водителями)."
   - name: "SSE / Driver Manager — Trip notifications"
     description: "Узкий поток только **`trip_notification`** для Driver Manager (тот же `/v1/dispatchers/sse/...`, что и у Cargo Manager)."
   - name: "SSE / Driver Manager — Trip status"
     description: "Узкий поток **`trip_status`** для Driver Manager."
-  - name: "SSE / Driver Manager — Cargo offers"
-    description: "Узкий поток **`cargo_offer`** для Driver Manager."
-  - name: "SSE / Driver Manager — Connections"
-    description: "Узкий поток **`connection_offer`** для Driver Manager."
   - name: Chat
     description: |
       **Универсальный чат (driver ↔ dispatcher и др.)**
@@ -533,7 +512,7 @@ components:
   schemas:
     NotificationItem:
       type: object
-      description: Одна запись из ленты уведомлений (`GET /v1/driver/notifications` и `/v1/dispatchers/notifications`).
+      description: Одна запись из ленты уведомлений (`GET /v1/driver/notifications` или, для диспетчера по рейсам, элементы `GET /v1/dispatchers/trip-notifications`).
       properties:
         id:
           type: string
@@ -1627,84 +1606,6 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
-  /api/cargo/{id}:
-    get:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "3. Получить груз по ID (карточка)"
-      description: |
-        **Кто вызывает:** Водитель (перед отправкой оффера), диспетчер, компания, админ.
-        **Назначение:** Детальная карточка груза с точками маршрута и блоком оплаты.
-
-        **Логика:** По id возвращается одна запись из cargo; к ней подгружаются все route_points (по point_order) и одна запись payment (если есть). Удалённые грузы не возвращаются (404).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
-          description: "UUID груза"
-      responses:
-        "200":
-          description: "data содержит груз + route_points + payment"
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data: { $ref: "#/components/schemas/CargoDetailResponse" }
-        "404":
-          description: "Груз не найден или удалён"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
-    put:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "4. Обновить груз"
-      description: |
-        **Кто вызывает:** Диспетчер, компания, админ. Водитель не редактирует грузы.
-        **Назначение:** Редактирование груза (поля груза, точки маршрута, оплата).
-
-        **Логика:** Передаются только те поля, которые нужно изменить (частичное обновление). После перехода в статус assigned (и далее) менять маршрут и оплату нельзя — запрос вернёт 400. Можно менять контакт/комментарии. Если переданы route_points — старые точки заменяются на новый набор (при условии что статус ещё не assigned/in_transit/delivered).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
-      requestBody:
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/CargoUpdateRequest" }
-      responses:
-        "200":
-          description: "Обновление применено. data.id = id груза."
-        "400":
-          description: "Валидация не прошла или нельзя редактировать после assigned"
-        "404":
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
-    delete:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "5. Удалить груз (soft delete)"
-      description: |
-        **Кто вызывает:** Диспетчер, компания, админ.
-        **Назначение:** Мягкое удаление груза (deleted_at). В списках и по ID такой груз больше не возвращается.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
-      responses:
-        "200":
-          description: "Груз помечен удалённым"
-        "400":
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
   /api/cargo/{id}/status:
     patch:
       tags: ["Cargo Manager / Cargo CRUD"]
@@ -1818,113 +1719,13 @@ paths:
                           counterparty_id: { type: string, format: uuid, nullable: true }
         "400":
           description: invalid_payload_detail / invalid_id
-    post:
-      tags: ["Cargo Manager / Offers"]
-      summary: "8. Создать оффер (водитель или диспетчер)"
-      description: |
-        **Назначение:** Предложить **цену** по грузу (переговоры). В теле: carrier_id (водитель-исполнитель), price, currency, comment.
-
-        - С **X-User-Token** водителя: оффер считается предложением водителя (**proposed_by=DRIVER**); carrier_id должен совпадать с id водителя из JWT.
-        - С **X-User-Token** диспетчера: оффер считается предложением диспетчера выбранному водителю (**proposed_by=DISPATCHER**); принять цену может только этот водитель (см. POST /api/offers/{id}/accept или POST /v1/driver/offers/{id}/accept).
-
-        **Ограничения:** у водителя не может быть второго оффера **DRIVER** по тому же грузу, пока предыдущий его оффер в статусе **PENDING** или **ACCEPTED** (после **REJECTED** или **CANCELED** можно снова). У диспетчера не может быть двух **одновременно ожидающих** (**PENDING**) исходящих офферов (**DISPATCHER**) одному и тому же водителю на тот же груз — после отклонения/снятия можно отправить новый.
-
-        Удобный путь для водителя без ручного carrier_id: **POST /v1/driver/cargo/{id}/offers** (только price, currency, comment).
-
-        Для грузов SEARCHING_COMPANY оффер могут отправить только водители той же компании.
-
-        **Логика:** запись в offers со status=PENDING. В ответе data.id — UUID оффера.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
-          description: "UUID груза"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/OfferCreateRequest" }
-            example:
-              carrier_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-              price: 1500
-              currency: "USD"
-              comment: "Готов выехать завтра, своя тентовая фура"
-      responses:
-        "201":
-          description: "Оффер создан. data.id — UUID оффера."
-        "400":
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
-        "409":
-          description: "dispatcher_offer_already_exists | driver_offer_already_exists | cargo_slots_full"
-  /api/offers/{id}/accept:
-    post:
-      tags: ["Legacy / Deprecated"]
-      summary: "9. Принять оффер (согласовать цену)"
-      description: |
-        **Обязательно:** заголовок **X-User-Token** (JWT).
-
-        - Если в оффере **proposed_by=DRIVER** (водитель предложил цену): принять может только **диспетчер** — владелец груза: создатель груза `DISPATCHER` (тот же `user_id`), **или** груз компании (`created_by_type=COMPANY`) при совпадении `company_id` с JWT после switch-company.
-        - Если **proposed_by=DISPATCHER** (диспетчер предложил цену водителю): принять может только **водитель** из carrier_id этого оффера.
-
-        **Ошибки (data не null):** в `data.reason` машинный код: `offer_not_pending`, `cargo_slots_full`, `cargo_not_searching`, `driver_busy`, `driver_cargo_link_conflict`, `trip_create_failed`, `trip_assign_driver_failed`, `accept_failed`, `transaction_aborted`.
-
-        После принятия: у оффера **status=ACCEPTED**; создаётся рейс с **договорной ценой** на рейсе (`agreed_price`, `agreed_currency` = цена оффера). **Сумма в payments по грузу не меняется** (объявленная цена груза остаётся). В ответе: **trip_id**, **agreed_price**, **agreed_currency**.
-
-        **Идентификатор оффера задаётся только в пути** (`{id}` = `offer_id`). `trip_id`, `cargo_id` или дублирующий `offer_id` в query/body **не** участвуют в выборе оффера.
-
-        Алиасы с тем же телом: **POST /v1/dispatchers/offers/{id}/accept** (диспетчер), **POST /v1/driver/offers/{id}/accept** (водитель).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "e5f6a7b8-c9d0-1234-ef56-789012345678" }
-          description: "UUID оффера (offer_id), только из path"
-      responses:
-        "200":
-          description: "data: cargo_id, offer_id, status=ACCEPTED"
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          cargo_id: { type: string, format: uuid }
-                          offer_id: { type: string, format: uuid }
-                          trip_id: { type: string, format: uuid, nullable: true, description: "Созданный рейс (IN_PROGRESS); присутствует если рейс создан" }
-                          driver_id: { type: string, format: uuid, nullable: true, description: "UUID водителя-перевозчика; присутствует если рейс создан" }
-                          status: { type: string, example: "accepted" }
-                          agreed_price: { type: number, format: double, description: "Договор на рейсе (копия с оффера)" }
-                          agreed_currency: { type: string, example: "USD" }
-        "400":
-          description: "Некорректный id или proposed_by в БД"
-        "401":
-          description: "Нет X-User-Token"
-        "403":
-          description: "Неверная роль для данного proposed_by (см. описание)"
-        "404":
-          description: "offer_not_found_or_not_pending; data.reason=offer_not_pending"
-        "409":
-          description: "cargo_slots_full / cargo_not_searching / driver_busy; см. data.reason"
-        "500":
-          description: "failed_to_accept; см. data.reason (trip_create_failed и т.д.)"
-
   /api/cargo/photos:
     post:
       tags: ["Cargo Manager / Cargo CRUD"]
       summary: "Загрузить фото без cargo_id (временное)"
       description: |
         Загрузка фото **до** создания груза. `multipart/form-data`, поле **photo**. Макс. 10 MB; image/jpeg, image/png, image/webp.
-        В ответе `data.id` и `data.url` (`/api/cargo/photos/{id}`) — передайте одно из них в массиве `photos` при `POST /api/cargo`.
-        Просмотр файла: `GET /api/cargo/photos/{photoId}`.
+        В ответе `data.id` и `data.url` — передайте одно из них в массиве `photos` при `POST /api/cargo`. Дополнительные HTTP-ручки для pending-фото и альбома груза остаются на сервере, но не описаны в этой сокращённой спецификации.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
       requestBody:
         required: true
@@ -1955,225 +1756,6 @@ paths:
                           url: { type: string, example: "/api/cargo/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
         "400":
           description: "Нет файла, тип или размер"
-
-  /api/cargo/photos/{photoId}:
-    get:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "Скачать временное фото (до привязки к грузу)"
-      description: |
-        Бинарное содержимое pending-фото, загруженного через `POST /api/cargo/photos`. После успешного `POST /api/cargo` с этим id в `photos` запись удаляется — используйте URL груза.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: photoId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        "200":
-          description: "Бинарное изображение"
-        "404":
-          description: "Нет такого pending-фото"
-
-  /api/cargo/{id}/photos:
-    get:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "10. Список фото груза"
-      description: |
-        Возвращает список всех фото груза (метаданные + URL для скачивания).
-        Каждое фото содержит id, mime-тип, размер, дату загрузки и URL для получения бинарного файла.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
-          description: "UUID груза"
-      responses:
-        "200":
-          description: "Список фото груза"
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          items:
-                            type: array
-                            items:
-                              type: object
-                              properties:
-                                id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-                                mime: { type: string, example: "image/jpeg" }
-                                size_bytes: { type: integer, format: int64, example: 245760 }
-                                created_at: { type: string, format: date-time, example: "2026-03-23T16:00:00Z" }
-                                url: { type: string, example: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-              examples:
-                en: { summary: "English", value: { status: "success", code: 200, description: "OK", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
-                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Успешно", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
-                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Muvaffaqiyatli", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
-                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Başarılı", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
-                zh: { summary: "中文", value: { status: "success", code: 200, description: "成功", data: { items: [{ id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", mime: "image/jpeg", size_bytes: 245760, created_at: "2026-03-23T16:00:00Z", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }] } } }
-        "404": { description: "Груз не найден" }
-    post:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "11. Загрузить фото груза"
-      description: |
-        Загружает одно фото груза. Файл отправляется через multipart/form-data, поле **photo**.
-        Макс. размер 10 MB. Допустимые типы: image/jpeg, image/png, image/webp.
-        Фото сохраняется на диск, в БД записываются метаданные.
-        Возвращает id фото и url для скачивания.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
-          description: "UUID груза"
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [photo]
-              properties:
-                photo:
-                  type: string
-                  format: binary
-                  description: "Файл изображения (JPEG, PNG или WebP, макс. 10 MB)"
-      responses:
-        "200":
-          description: "Фото загружено"
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          id: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-                          url: { type: string, example: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-              examples:
-                en: { summary: "English", value: { status: "success", code: 200, description: "Photo uploaded", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
-                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Фото загружено", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
-                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Foto yuklandi", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
-                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Fotoğraf yüklendi", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
-                zh: { summary: "中文", value: { status: "success", code: 200, description: "照片已上传", data: { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", url: "/api/cargo/ebc30874-161a-4c29-b284-139e4e7d9120/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890" } } }
-        "400":
-          description: "Нет файла, неверный тип или размер > 10MB"
-          content:
-            application/json:
-              examples:
-                no_file: { summary: "Нет файла", value: { status: "error", code: 400, description: "Missing or invalid file: use form field 'photo'", data: null } }
-                too_large: { summary: "Файл слишком большой", value: { status: "error", code: 400, description: "File too large (max 10 MB)", data: null } }
-                wrong_type: { summary: "Неверный тип", value: { status: "error", code: 400, description: "Allowed types: image/jpeg, image/png", data: null } }
-        "404": { description: "Груз не найден" }
-
-  /api/cargo/{id}/photos/{photoId}:
-    get:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "12. Скачать фото груза (бинарный файл)"
-      description: |
-        Возвращает бинарное содержимое фото по photoId с заголовком Content-Type (image/jpeg, image/png или image/webp).
-        Используется для отображения фото в UI.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
-          description: "UUID груза"
-        - name: photoId
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-          description: "UUID фото"
-      responses:
-        "200":
-          description: "Бинарное содержимое изображения"
-          content:
-            image/jpeg: { schema: { type: string, format: binary } }
-            image/png: { schema: { type: string, format: binary } }
-            image/webp: { schema: { type: string, format: binary } }
-        "404": { description: "Фото не найдено" }
-    delete:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "13. Удалить фото груза"
-      description: |
-        Удаляет фото груза — файл с диска и запись из БД.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "ebc30874-161a-4c29-b284-139e4e7d9120" }
-          description: "UUID груза"
-        - name: photoId
-          in: path
-          required: true
-          schema: { type: string, format: uuid, example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890" }
-          description: "UUID фото"
-      responses:
-        "200":
-          description: "Фото удалено"
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          deleted: { type: boolean, example: true }
-              examples:
-                en: { summary: "English", value: { status: "success", code: 200, description: "Photo deleted", data: { deleted: true } } }
-                ru: { summary: "Русский", value: { status: "success", code: 200, description: "Фото удалено", data: { deleted: true } } }
-                uz: { summary: "O'zbek", value: { status: "success", code: 200, description: "Foto o'chirildi", data: { deleted: true } } }
-                tr: { summary: "Türkçe", value: { status: "success", code: 200, description: "Fotoğraf silindi", data: { deleted: true } } }
-                zh: { summary: "中文", value: { status: "success", code: 200, description: "照片已删除", data: { deleted: true } } }
-        "404": { description: "Фото не найдено" }
-
-  /api/trips:
-    get:
-      tags: ["Cargo Manager", "Drivers / Trips"]
-      summary: "Список рейсов по грузу"
-      description: |
-        Query cargo_id (обязателен) — **все рейсы** по этому грузу (несколько машин).
-        В каждом элементе `items[]` дополнительно:
-        - `cargo`: `cargo_type_name`, `weight`, `volume`
-        - `driver`: `phone`, `name`
-        Базовые заголовки.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: cargo_id
-          in: query
-          required: true
-          schema: { type: string, format: uuid, example: "b2c3d4e5-f6a7-8901-bcde-f12345678901" }
-      responses:
-        "200":
-          description: items — массив рейсов + вложенные `cargo` и `driver`
-  /api/trips/{id}:
-    get:
-      tags: ["Cargo Manager", "Drivers / Trips"]
-      summary: "Рейс по ID"
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        "200": { description: "Рейс (id, cargo_id, offer_id, agreed_price, agreed_currency, driver_id, status, …)" }
-        "404": { description: Рейс не найден }
 
   /v1/driver/transport-options:
     get:
@@ -3423,13 +3005,6 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Envelope" }
-    delete:
-      tags: ["Cargo Manager / Profile", "Driver Manager / Profile"]
-      summary: Удалить профиль диспетчера (архивация)
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200": { description: OK }
-
   /v1/dispatchers/driver-invitations:
     post:
       tags: ["Driver Manager / Connections"]
@@ -3631,94 +3206,6 @@ paths:
                   dispatcher: { $ref: "#/components/schemas/Dispatcher" }
         "401": { description: Сессия/OTP неверны }
         "409": { description: Телефон уже занят }
-
-  /v1/dispatchers/companies:
-    get:
-      tags: ["Company / Dispatcher (приглашённый)"]
-      summary: "Список моих компаний"
-      description: "Компании, где диспетчер приглашён (диспетчер не создаёт компанию). Требуется X-User-Token."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200": { description: "data.items — массив объектов с полями id, name, type, role" }
-
-  /v1/dispatchers/auth/switch-company:
-    post:
-      tags: ["Cargo Manager / Auth", "Driver Manager / Auth"]
-      summary: "Переключить контекст на компанию"
-      description: "Тело: company_id (UUID). В ответе — access_token, refresh_token, expires_in, expires_at (Unix), refresh_expires_in, refresh_expires_at (Unix)."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                company_id: { type: string, format: uuid }
-              required: [company_id]
-      responses:
-        "200": { description: "access_token, refresh_token, expires_in, expires_at, refresh_expires_in, refresh_expires_at (все даты — Unix)" }
-        "403": { description: company not found or access denied }
-
-  /v1/dispatchers/companies/{companyId}/invitations:
-    post:
-      tags: ["Company / Dispatcher (приглашённый)"]
-      summary: "Пригласить диспетчера в компанию (по телефону)"
-      description: "Тело: phone, role (dispatcher | top_dispatcher). Требуется доступ к компании. В ответе — token для accept."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: companyId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                phone: { type: string, example: "+998901234567" }
-                role: { type: string, enum: [dispatcher, top_dispatcher] }
-              required: [phone, role]
-      responses:
-        "201": { description: data.token, data.expires_in_hours }
-        "403": { description: access denied }
-
-  /v1/dispatchers/invitations/accept:
-    post:
-      tags: ["Company / Dispatcher (приглашённый)"]
-      summary: "Принять приглашение в компанию"
-      description: "Тело: token. Телефон диспетчера должен совпадать с приглашением. Требуется X-User-Token (dispatcher)."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                token: { type: string }
-              required: [token]
-      responses:
-        "200": { description: data.company_id }
-        "400": { description: invitation not found or expired }
-        "403": { description: invitation was sent to another phone }
-
-  /v1/dispatchers/invitations/decline:
-    post:
-      tags: ["Company / Dispatcher (приглашённый)"]
-      summary: "Отклонить приглашение"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                token: { type: string }
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200": { description: declined }
 
   /v1/dispatchers/connection-offers:
     get:
@@ -4035,64 +3522,6 @@ paths:
         "200": { description: "data.message = unlinked" }
         "403": { description: "driver not found or not linked to you" }
 
-  /v1/dispatchers/drivers/{driverId}/power:
-    put:
-      tags: ["Driver Manager / My drivers"]
-      summary: "Добавить или изменить тягач водителя"
-      description: |
-        **Диспетчер:** добавить/обновить данные тягача для водителя. Водитель должен быть принят по приглашению (freelancer_id = текущий диспетчер). Данные сохраняются и отображаются у водителя. Тело: power_plate_type, power_plate_number, power_tech_series, power_tech_number, power_owner_name, power_scan_status (все опционально для частичного обновления).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: driverId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                power_plate_type: { type: string, example: "TRACTOR" }
-                power_plate_number: { type: string }
-                power_tech_series: { type: string }
-                power_tech_number: { type: string }
-                power_owner_name: { type: string }
-                power_scan_status: { type: boolean }
-      responses:
-        "200": { description: "data.event = updated, data.driver — полный объект водителя с тягачом" }
-        "403": { description: "driver must have accepted your invitation" }
-        "404": { description: "driver not found" }
-
-  /v1/dispatchers/drivers/{driverId}/trailer:
-    put:
-      tags: ["Driver Manager / My drivers"]
-      summary: "Добавить или изменить прицеп водителя"
-      description: |
-        **Диспетчер:** добавить/обновить данные прицепа для водителя. Водитель должен быть принят по приглашению (freelancer_id = текущий диспетчер). Данные сохраняются и отображаются у водителя. Тело: trailer_plate_type, trailer_plate_number, trailer_tech_series, trailer_tech_number, trailer_owner_name, trailer_scan_status (все опционально).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: driverId
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                trailer_plate_type: { type: string, example: "TENTED" }
-                trailer_plate_number: { type: string }
-                trailer_tech_series: { type: string }
-                trailer_tech_number: { type: string }
-                trailer_owner_name: { type: string }
-                trailer_scan_status: { type: boolean }
-      responses:
-        "200": { description: "data.event = updated, data.driver — полный объект водителя с прицепом" }
-        "403": { description: "driver must have accepted your invitation" }
-        "404": { description: "driver not found" }
-
   /v1/dispatchers/driver-managers:
     get:
       tags: ["Cargo Manager / Driver managers"]
@@ -4207,7 +3636,7 @@ paths:
       description: |
         Возвращает рейсы по грузам, к которым у диспетчера есть доступ:
         - грузы созданные этим диспетчером (`created_by_type=DISPATCHER`), или
-        - грузы выбранной компании после `POST /v1/dispatchers/auth/switch-company` (`created_by_type=COMPANY` + `company_id` из JWT/контекста), или
+        - грузы компании в текущем контексте JWT (`created_by_type=COMPANY` + `company_id` из JWT/контекста), или
         - рейсы, где диспетчер участвует как Driver Manager в цепочке оффера (`offers.proposed_by=DRIVER_MANAGER` с вашим `proposed_by_id` или `offers.negotiation_dispatcher_id=вы`).
 
         Фильтры:
@@ -4255,7 +3684,7 @@ paths:
     get:
       tags: ["Cargo Manager / Trips", "Driver Manager / Trips"]
       summary: "Рейсы по cargo_id (диспетчер)"
-      description: "Возвращает все рейсы указанного груза. Доступно владельцу груза (диспетчер/компания после switch-company) или Driver Manager, участвующему в офферах этого груза."
+      description: "Возвращает все рейсы указанного груза. Доступно владельцу груза (диспетчер или компания в текущем контексте JWT) или Driver Manager, участвующему в офферах этого груза."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4371,75 +3800,6 @@ paths:
         "403": { description: not your cargo }
         "404": { description: trip not found }
 
-  /v1/dispatchers/notifications:
-    get:
-      tags: ["Notifications / Cargo manager mobile", "Notifications and ratings / Cargo manager"]
-      summary: "GET список уведомлений диспетчера (mobile)"
-      description: |
-        Короткий алиас **`/v1/dispatchers/trip-notifications`**.
-        Дополнительно: событие **`COMPLETION_PENDING_MANAGER`** (водитель ждёт вашего `confirm-transition`).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: unread_only
-          in: query
-          schema: { type: boolean, default: false }
-        - name: limit
-          in: query
-          schema: { type: integer, default: 30, minimum: 1, maximum: 100 }
-      responses:
-        "200":
-          description: "data.items[], data.unread_count"
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  items:
-                    type: array
-                    items: { $ref: "#/components/schemas/NotificationItem" }
-                  unread_count: { type: integer }
-        "401": { description: unauthorized }
-
-  /v1/dispatchers/notifications/read-all:
-    post:
-      tags: ["Notifications / Cargo manager mobile", "Notifications and ratings / Cargo manager"]
-      summary: "POST отметить все уведомления прочитанными (диспетчер)"
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200":
-          description: "data.updated"
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  updated: { type: integer }
-
-  /v1/dispatchers/notifications/{id}:
-    patch:
-      tags: ["Notifications / Cargo manager mobile", "Notifications and ratings / Cargo manager"]
-      summary: "PATCH отметить одно уведомление прочитанным (диспетчер)"
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-          description: UUID уведомления (id из списка)
-      responses:
-        "200":
-          description: "data.id, data.read=true"
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  id: { type: string, format: uuid }
-                  read: { type: boolean, example: true }
-        "400": { description: invalid_id }
-        "401": { description: unauthorized }
-        "404": { description: trip_notification_not_found }
-
   /v1/dispatchers/trip-notifications:
     get:
       tags: ["Notifications and ratings / Cargo manager"]
@@ -4485,7 +3845,7 @@ paths:
       tags: ["SSE / Cargo manager — Trip notifications", "SSE / Driver Manager — Trip notifications"]
       summary: "SSE: только уведомления по рейсу (trip_notification)"
       description: |
-        Поток **`kind=trip_notification`** (события рейса и ожидание завершения). Офферы и connection_offer **не** смешиваются — см. отдельные пути **`/sse/cargo-offers`** и **`/sse/connections`**.
+        Поток **`kind=trip_notification`** (события рейса и ожидание завершения). Другие виды событий (офферы, связи) в этот поток **не** подмешиваются; для них на сервере есть отдельные SSE-пути, не описанные в этой сокращённой спецификации.
 
         **Роли:** один JWT диспетчера для Cargo Manager и Driver Manager; события приходят, если вы в scope уведомления (владелец груза, negotiation DM и т.д., как в `GET /v1/dispatchers/trip-notifications`).
 
@@ -4500,50 +3860,6 @@ paths:
       responses:
         "200":
           description: "text/event-stream; `data:` — #/components/schemas/SSETripNotificationEvent"
-          content:
-            text/event-stream:
-              schema: { type: string }
-        "401": { description: unauthorized }
-
-  /v1/dispatchers/sse/cargo-offers:
-    get:
-      tags: ["SSE / Cargo manager — Cargo offers", "SSE / Driver Manager — Cargo offers"]
-      summary: "SSE: только события офферов по грузу (cargo_offer)"
-      description: |
-        Поток **`kind=cargo_offer`** (создание, смена статуса, ожидание водителя и т.д.). Для дедупа на клиенте в payload есть **`sse_id`** (UUID).
-
-        **JWT / базовые заголовки:** как у остальных `GET /v1/dispatchers/sse/*`.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: token
-          in: query
-          required: false
-          schema: { type: string }
-      responses:
-        "200":
-          description: "text/event-stream; строки `data:` с JSON (`kind`, `event`, `offer_id`, …)"
-          content:
-            text/event-stream:
-              schema: { type: string }
-        "401": { description: unauthorized }
-
-  /v1/dispatchers/sse/connections:
-    get:
-      tags: ["SSE / Cargo manager — Connections", "SSE / Driver Manager — Connections"]
-      summary: "SSE: приглашения и связи (connection_offer)"
-      description: |
-        Поток **`kind=connection_offer`** (приглашение водителя, входящие/исходящие связи между водителем и диспетчером).
-
-        **JWT / базовые заголовки:** как у остальных `GET /v1/dispatchers/sse/*`.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: token
-          in: query
-          required: false
-          schema: { type: string }
-      responses:
-        "200":
-          description: "text/event-stream"
           content:
             text/event-stream:
               schema: { type: string }
@@ -4567,28 +3883,6 @@ paths:
       responses:
         "200":
           description: "text/event-stream; `data:` — #/components/schemas/SSETripStatusEvent"
-          content:
-            text/event-stream:
-              schema: { type: string }
-        "401": { description: unauthorized }
-
-  /v1/dispatchers/sse/driver-updates:
-    get:
-      tags: ["Driver Manager / Notifications"]
-      summary: "SSE поток изменений данных моих водителей"
-      description: |
-        Возвращает `text/event-stream` с событиями `kind=driver_update` для текущего диспетчера,
-        когда водитель меняет свой профиль/тягач/прицеп или когда диспетчер меняет данные водителя.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: token
-          in: query
-          required: false
-          description: JWT access token (для браузерного EventSource, если нельзя передать X-User-Token заголовком)
-          schema: { type: string }
-      responses:
-        "200":
-          description: "text/event-stream; `data:` содержит driver_update payload"
           content:
             text/event-stream:
               schema: { type: string }
@@ -4651,11 +3945,11 @@ paths:
       tags: ["Cargo Manager / Offers", "Cargo Manager / Offer decision flow"]
       summary: "Принять оффер водителя (его цену)"
       description: |
-        Для офферов с **proposed_by=DRIVER**. Подтверждаете предложенную водителем цену; создаётся рейс с договорной ценой на рейсе; **payments** груза не меняются. Эквивалентно `POST /api/offers/{id}/accept` с JWT диспетчера-владельца груза (фриланс-автор груза **или** компания через switch-company).
+        Для офферов с **proposed_by=DRIVER**. Подтверждаете предложенную водителем цену; создаётся рейс с договорной ценой на рейсе; **payments** груза не меняются. Доступно владельцу груза: фриланс-автор груза **или** диспетчер компании в текущем контексте JWT.
 
         Тело запроса не требуется. **`{id}` в пути — это только UUID оффера** (`offer_id`); query/body для выбора оффера не используются.
 
-        При ошибке смотрите **data.reason** (см. описание `POST /api/offers/{id}/accept`).
+        При ошибке смотрите **data.reason** в теле ответа.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4714,7 +4008,7 @@ paths:
       summary: "Получить один оффер (диспетчер) + полный cargo"
       description: |
         Возвращает один оффер по `offer_id` из path (`{id}`) и **полный связанный cargo** (как карточка груза: route_points, payment и пр.).
-        Доступно только владельцу груза: диспетчер-создатель груза или диспетчер выбранной компании после switch-company.
+        Доступно только владельцу груза: диспетчер-создатель груза или диспетчер компании в текущем контексте JWT.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4732,7 +4026,7 @@ paths:
       tags: ["Cargo Manager / Offers", "Cargo Manager / Offer decision flow"]
       summary: "Отклонить оффер водителя или отозвать своё приглашение (диспетчер)"
       description: |
-        Для **своего груза** (создатель-диспетчер или компания после switch-company), оффер **PENDING** или **WAITING_DRIVER_CONFIRM** (отмена до подтверждения водителем):
+        Для **своего груза** (создатель-диспетчер или компания в текущем контексте JWT), оффер **PENDING** или **WAITING_DRIVER_CONFIRM** (отмена до подтверждения водителем):
         - **proposed_by=DRIVER** — отклонить входящую заявку водителя → статус оффера **REJECTED**, `data.status` = **REJECTED**;
         - **proposed_by=DRIVER_MANAGER** — отклонить входящую заявку менеджера водителя (обязательно с причиной) → **REJECTED**;
         - **proposed_by=DISPATCHER** — отозвать своё исходящее приглашение этому водителю → **CANCELED**, `data.status` = **CANCELED**.
@@ -4908,36 +4202,12 @@ paths:
         "401": { description: unauthorized }
         "500": { description: failed_to_list_sent_offers }
 
-  /v1/dispatchers/cargo/{id}/offers/send:
-    post:
-      tags: ["Cargo Manager / Offers"]
-      summary: "Отправить cargo offer по выбранному водителю (alias)"
-      description: "Эквивалент `POST /api/cargo/{id}/offers`."
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/OfferCreateRequest" }
-      responses:
-        "201": { description: created }
-        "400": { description: invalid_payload_detail / cargo_not_searching }
-        "403": { description: not_your_driver_or_cargo / cargo_visible_only_to_company_drivers }
-        "404": { description: cargo_not_found }
-        "409": { description: dispatcher_offer_already_exists / driver_offer_already_exists / cargo_slots_full }
-
   /v1/dispatchers/cargo/{id}/offers/send-by-driver-manager:
     post:
       tags: ["Driver Manager / Offers"]
       summary: "Driver Manager: отправить cargo offer (alias)"
       description: |
-        Явный endpoint для Driver Manager.
-        Эквивалент `POST /v1/dispatchers/cargo/{id}/offers/send` и `POST /api/cargo/{id}/offers`.
+        Явный endpoint для Driver Manager: исходящий cargo offer с телом **`OfferCreateRequest`** (`carrier_id`, цена, валюта, комментарий). Семантика совпадает с прямым созданием исходящего оффера на сервере (legacy-алиасы в этой спецификации не описаны).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -4960,7 +4230,7 @@ paths:
     post:
       tags: ["Cargo Manager / Offers"]
       summary: "Cargo Manager: отправить cargo offer (alias)"
-      description: "Эквивалент `POST /v1/dispatchers/cargo/{id}/offers/send`."
+      description: "Отправить исходящий cargo offer выбранному водителю (`carrier_id` в теле); то же тело и проверки, что у соседнего `…/send-by-driver-manager`."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -5107,38 +4377,6 @@ paths:
         "401": { description: unauthorized }
         "500": { description: failed_to_list }
 
-  /v1/dispatchers/cargo-types:
-    get:
-      tags: ["Cargo Manager / Cargo CRUD"]
-      summary: "Типы груза для Cargo Manager (локализованные по X-Language)"
-      description: |
-        Возвращает список типов груза из таблицы `cargo_types` для форм создания/редактирования груза.
-        Название `name` выбирается по заголовку `X-Language` (`ru|uz|en|tr|zh`).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      responses:
-        "200":
-          description: "data.items[]: id, code, name — только одно поле `name` на языке из X-Language (остальные локали в ответе не отдаются)"
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Envelope"
-                  - type: object
-                    properties:
-                      data:
-                        type: object
-                        properties:
-                          items:
-                            type: array
-                            items:
-                              type: object
-                              properties:
-                                id: { type: string, format: uuid }
-                                code: { type: string, example: "GRANIT" }
-                                name: { type: string, example: "Гранит" }
-        "401": { description: unauthorized }
-        "500": { description: failed_to_list }
-
   /v1/dispatchers/cargo/all:
     get:
       tags: ["Cargo Manager / View Cargo"]
@@ -5200,79 +4438,6 @@ paths:
         "200": { description: "data.items, data.total" }
         "401": { description: unauthorized }
         "500": { description: failed_to_list }
-
-  /v1/dispatchers/cargo/{id}/negotiation:
-    get:
-      tags: ["Legacy / Deprecated"]
-      summary: "Переговоры по грузу (офферы + рейсы)"
-      description: |
-        Все офферы по грузу: **proposed_by**, **status**, **price**, **waits_accept_from** (DRIVER | DISPATCHER для PENDING).
-        Если оффер принят — поля **trip_id**, **trip_status**, **agreed_price**, **agreed_currency**, **driver_id**.
-        **cargo_listing_payment** — объявленная сумма в payments (без подмены договором).
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      responses:
-        "200": { description: "data.items, data.cargo_id, data.cargo_listing_payment" }
-        "403": { description: not_your_cargo }
-        "404": { description: cargo_not_found }
-
-  /v1/dispatchers/cargo/{id}/drivers:
-    get:
-      tags: ["Legacy / Deprecated"]
-      summary: "Список водителей по грузу (multi-vehicle)"
-      description: |
-        Возвращает связи водитель↔груз из `cargo_drivers` для указанного груза.
-        Доступно только для грузов, созданных текущим фриланс-диспетчером.
-        Ответы на 5 языках.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-        - name: limit
-          in: query
-          schema: { type: integer, default: 200 }
-      responses:
-        "200":
-          description: "data.items — список driver_id/status; data.vehicles_amount и data.vehicles_left"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
-
-  /v1/dispatchers/cargo/{id}/drivers/remove:
-    post:
-      tags: ["Legacy / Deprecated"]
-      summary: "Убрать водителя с груза (освободить слот)"
-      description: |
-        Помечает связь водитель↔груз как CANCELLED. Если рейс уже был в LOADING или позже, возвращает один слот в vehicles_left.
-        Доступно только для грузов, созданных текущим фриланс-диспетчером.
-        Ответы на 5 языках.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema: { type: string, format: uuid }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                driver_id: { type: string, format: uuid }
-              required: [driver_id]
-      responses:
-        "200":
-          description: "updated"
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Envelope" }
 
   /v1/dispatchers/cargo/export.xlsx:
     get:
@@ -5853,7 +5018,7 @@ paths:
       tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Оффер по грузу со своей ценой"
       description: |
-        Водитель отправляет запрос на перевозку с **предложенной ценой** (`proposed_by=DRIVER`). Диспетчер подтверждает через `POST /v1/dispatchers/offers/{id}/accept` или `POST /api/offers/{id}/accept` (JWT диспетчера). После принятия цена в `payment` груза обновляется.
+        Водитель отправляет запрос на перевозку с **предложенной ценой** (`proposed_by=DRIVER`). Диспетчер подтверждает через `POST /v1/dispatchers/offers/{id}/accept` (JWT диспетчера-владельца груза). После принятия цена в `payment` груза обновляется.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -5912,7 +5077,7 @@ paths:
       tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Offer decision flow"]
       summary: "Принять цену от диспетчера"
       description: |
-        Для офферов с **proposed_by=DISPATCHER** (диспетчер указал цену вам). Тот же обработчик, что `POST /api/offers/{id}/accept` с JWT водителя. **`{id}` — только UUID оффера** в пути; query/body не задают оффер.
+        Для офферов с **proposed_by=DISPATCHER** (диспетчер указал цену вам). **`{id}` — только UUID оффера** в пути; query/body не задают оффер.
 
         При ошибке смотрите **data.reason**.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
@@ -7081,30 +6246,6 @@ paths:
       summary: "Hint по номеру диспетчера (водитель)"
       description: |
         **Водитель:** быстрый поиск (typeahead) фриланс-диспетчеров по префиксу номера.
-        Параметры: `phone` (обязательно, prefix), `limit` (1..50, default 10).
-        **Важно:** `password` не возвращается.
-      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
-      parameters:
-        - name: phone
-          in: query
-          required: true
-          schema: { type: string, example: "+99890" }
-        - name: limit
-          in: query
-          required: false
-          schema: { type: integer, example: 10 }
-      responses:
-        "200": { description: "data.items — массив диспетчеров" }
-        "400": { description: phone required / invalid payload }
-        "401": { description: unauthorized }
-
-  /v1/dispatchers/dispatchers/hint:
-    get:
-      tags: ["Cargo Manager / Dispatchers catalog", "Driver Manager / Dispatchers catalog"]
-      summary: "Hint по номеру диспетчера (диспетчер)"
-      description: |
-        **Диспетчер (Cargo Manager или Driver Manager):** алиас для `GET /v1/driver/dispatchers/hint`.
-        Быстрый поиск (typeahead) фриланс-диспетчеров по префиксу номера.
         Параметры: `phone` (обязательно, prefix), `limit` (1..50, default 10).
         **Важно:** `password` не возвращается.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
