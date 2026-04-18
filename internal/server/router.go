@@ -196,6 +196,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 		})
 	}
 
+	pushAdminH := handlers.NewPushAdminHandler(logger, pushSvc, cfg)
+
 	callsRepo := calls.NewRepo(deps.PG)
 	callsLimiter := calls.NewCreateLimiter(deps.Redis, cfg.CallsCreateLimit, cfg.CallsCreateWindow)
 	callsH := handlers.NewCallsHandler(logger, callsRepo, chatRepo, chatHub, callsLimiter, cfg.CallsRingingTimeout)
@@ -339,6 +341,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	adminAuthed.GET("/cargo/moderation", adminCargoModH.ListPending)
 	adminAuthed.POST("/cargo/:id/moderation/accept", adminCargoModH.Accept)
 	adminAuthed.POST("/cargo/:id/moderation/reject", adminCargoModH.Reject)
+	adminAuthed.GET("/push/status", pushAdminH.Status)
+	adminAuthed.POST("/push/send", pushAdminH.SendTest)
 
 	driverAuthed := v1.Group("/driver")
 	driverAuthed.Use(mw.RequireDriver(jwtm, refreshStore))

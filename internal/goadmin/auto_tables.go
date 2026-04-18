@@ -24,9 +24,16 @@ type columnMeta struct {
 }
 
 var (
-	reNonAlphaNum = regexp.MustCompile(`[^a-zA-Z0-9]+`)
-	autoTableNames []string
+	reNonAlphaNum   = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+	autoTableNames  []string
+	extraTableNames []string // custom (non-auto) registered tables
 )
+
+// RegisterCustomTableNames appends extra table names (custom generators) so they
+// appear on the dashboard alongside auto-generated ones.
+func RegisterCustomTableNames(names ...string) {
+	extraTableNames = append(extraTableNames, names...)
+}
 
 // AutoTableGenerators scans Postgres public schema and creates GoAdmin generators
 // for all tables that are NOT already present in existing map.
@@ -138,8 +145,21 @@ func AutoTableGenerators(ctx context.Context, databaseURL string, existing map[s
 }
 
 func getAutoTableNames() []string {
-	out := make([]string, len(autoTableNames))
-	copy(out, autoTableNames)
+	seen := make(map[string]bool, len(autoTableNames)+len(extraTableNames))
+	var out []string
+	for _, n := range extraTableNames {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	for _, n := range autoTableNames {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 

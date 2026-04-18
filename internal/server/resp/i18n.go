@@ -177,6 +177,13 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Sunucu hatası",
 		"zh": "服务器内部错误",
 	},
+	"push_not_enabled": {
+		"en": "Push notifications are disabled or Firebase is not configured",
+		"ru": "Push-уведомления отключены или Firebase не настроен",
+		"uz": "Push-bildirishnomalar o'chirilgan yoki Firebase sozlanmagan",
+		"tr": "Push bildirimleri devre dışı veya Firebase yapılandırılmamış",
+		"zh": "推送通知已禁用或Firebase未配置",
+	},
 	"connection_limit_reached": {
 		"en": "Connection limit reached (max 10). Please remove an existing connection first.",
 		"ru": "Лимит связей достигнут (макс. 10). Сначала удалите существующую связь.",
@@ -988,6 +995,20 @@ var apiMessages = map[string]map[string]string{
 		"uz": "Taklif topilmadi yoki kutilmoqda emas",
 		"tr": "Teklif bulunamadı veya beklemede değil",
 		"zh": "未找到报价或已处理",
+	},
+	"offer_not_waiting_driver_confirm": {
+		"en": "Offer is not waiting for driver confirmation",
+		"ru": "Оффер не в статусе ожидания подтверждения водителя",
+		"uz": "Taklif haydovchi tasdigini kutmayapti",
+		"tr": "Teklif sürücü onayı beklemiyor",
+		"zh": "报价不处于等待司机确认状态",
+	},
+	"trip_create_failed": {
+		"en": "Could not create trip for this offer",
+		"ru": "Не удалось создать рейс по этому офферу",
+		"uz": "Bu taklif bo'yicha reys yaratilmadi",
+		"tr": "Bu teklif için sefer oluşturulamadı",
+		"zh": "无法为此报价创建行程",
 	},
 	"failed_to_create_offer": {
 		"en": "Failed to create offer",

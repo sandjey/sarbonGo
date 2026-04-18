@@ -133,30 +133,45 @@ func (h *SSEStreamsHandler) DispatcherUnifiedNotificationsSSE(c *gin.Context) {
 		tripCh, unTrip := h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
 		drvCh, unDrv := h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
 
-		out := make(chan []byte, 128)
+		out := make(chan []byte, 512)
 		done := make(chan struct{})
 
-		forward := func(src <-chan []byte) {
+		go func() {
+			defer close(out)
 			for {
 				select {
 				case <-done:
 					return
-				case msg, ok := <-src:
+				case msg, ok := <-notifCh:
 					if !ok {
 						return
 					}
 					select {
+					case <-done:
+						return
 					case out <- msg:
-					default:
-						// slow consumer: drop event to avoid blocking producers
+					}
+				case msg, ok := <-tripCh:
+					if !ok {
+						return
+					}
+					select {
+					case <-done:
+						return
+					case out <- msg:
+					}
+				case msg, ok := <-drvCh:
+					if !ok {
+						return
+					}
+					select {
+					case <-done:
+						return
+					case out <- msg:
 					}
 				}
 			}
-		}
-
-		go forward(notifCh)
-		go forward(tripCh)
-		go forward(drvCh)
+		}()
 
 		return out, func() {
 			close(done)

@@ -2143,6 +2143,10 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			return
 		}
 
+		pubOffer, _ := h.repo.GetOfferByID(c.Request.Context(), offerID)
+		if pubOffer == nil {
+			pubOffer = offer
+		}
 		if h.stream != nil {
 			p := gin.H{
 				"kind":       "cargo_offer",
@@ -2151,8 +2155,9 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 				"cargo_id":   offer.CargoID.String(),
 				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 			}
+			ensureSSEID(p)
 			h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, p)
-			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *negID, p)
+			publishCargoOfferToDispatchers(h.stream, cargoObj, pubOffer, p)
 		}
 		resp.OKLang(c, "waiting_driver_confirmation", gin.H{
 			"status":   "waiting_driver_confirm",
@@ -2188,6 +2193,10 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 				return
 			}
 
+			pubOffer, _ := h.repo.GetOfferByID(c.Request.Context(), offerID)
+			if pubOffer == nil {
+				pubOffer = offer
+			}
 			if h.stream != nil {
 				p := gin.H{
 					"kind":       "cargo_offer",
@@ -2196,10 +2205,9 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 					"cargo_id":   offer.CargoID.String(),
 					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 				}
+				ensureSSEID(p)
 				h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, p)
-				if disp := tripNotifyDispatcherID(cargoObj); disp != nil {
-					h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, p)
-				}
+				publishCargoOfferToDispatchers(h.stream, cargoObj, pubOffer, p)
 			}
 			resp.OKLang(c, "waiting_driver_confirmation", gin.H{
 				"status":   "waiting_driver_confirm",
@@ -2290,39 +2298,35 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 				"agreed_currency": agreedCurrency,
 			})
 			if h.stream != nil {
-				recipientKind := tripnotif.RecipientDispatcher
-				recipientID := userID
-				if role == "dispatcher" {
-					recipientKind = tripnotif.RecipientDriver
-					recipientID = carrierID
-				}
-				h.stream.PublishNotification(recipientKind, recipientID, gin.H{
+				p := gin.H{
 					"kind":       "cargo_offer",
 					"event":      "cargo_offer_accepted",
 					"offer_id":   offerID.String(),
 					"cargo_id":   cargoID.String(),
 					"driver_id":  carrierID.String(),
 					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-				})
+				}
+				ensureSSEID(p)
+				h.stream.PublishNotification(tripnotif.RecipientDriver, carrierID, p)
+				cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
+				publishCargoOfferToDispatchers(h.stream, cg, offer, p)
 			}
 			return
 		}
 	}
 	if h.stream != nil {
-		recipientKind := tripnotif.RecipientDispatcher
-		recipientID := userID
-		if role == "dispatcher" {
-			recipientKind = tripnotif.RecipientDriver
-			recipientID = carrierID
-		}
-		h.stream.PublishNotification(recipientKind, recipientID, gin.H{
+		p := gin.H{
 			"kind":       "cargo_offer",
 			"event":      "cargo_offer_accepted",
 			"offer_id":   offerID.String(),
 			"cargo_id":   cargoID.String(),
 			"driver_id":  carrierID.String(),
 			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-		})
+		}
+		ensureSSEID(p)
+		h.stream.PublishNotification(tripnotif.RecipientDriver, carrierID, p)
+		cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
+		publishCargoOfferToDispatchers(h.stream, cg, offer, p)
 	}
 	resp.OKLang(c, "ok", gin.H{
 		"cargo_id":        cargoID.String(),
@@ -2341,7 +2345,16 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
-	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
+	rawDriver, ok := c.Get(mw.CtxDriverID)
+	if !ok {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	driverID, ok := rawDriver.(uuid.UUID)
+	if !ok || driverID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
 
 	offer, err := h.repo.GetOfferByID(c.Request.Context(), offerID)
 	if err != nil || offer == nil {
@@ -2349,7 +2362,12 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 		return
 	}
 	if offer.Status != cargo.OfferStatusWaitingDriverConfirm {
-		resp.ErrorLang(c, http.StatusBadRequest, "offer_not_waiting_driver_confirm")
+		resp.ErrorWithDataLang(c, http.StatusBadRequest, "offer_not_waiting_driver_confirm", gin.H{
+			"reason":        "wrong_offer_status",
+			"offer_id":      offerID.String(),
+			"current_status": strings.TrimSpace(offer.Status),
+			"expected_status": cargo.OfferStatusWaitingDriverConfirm,
+		})
 		return
 	}
 	if offer.CarrierID != driverID {
@@ -2361,23 +2379,33 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 	tx, err := h.repo.BeginTx(c.Request.Context())
 	if err != nil {
 		h.logger.Error("driver confirm offer begin tx", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		resp.ErrorWithDataLang(c, http.StatusInternalServerError, "internal_error", mergeGinH(gin.H{"reason": "begin_tx_failed"}, pgDebugFields(err)))
 		return
 	}
 	defer tx.Rollback(c.Request.Context())
 
 	cargoID, carrierID, err := h.repo.AcceptOfferTx(c.Request.Context(), tx, offerID)
 	if err != nil {
-		h.logger.Error("driver confirm offer accept tx", zap.Error(err))
+		h.logger.Error("driver confirm offer accept tx", zap.Error(err),
+			zap.String("offer_id", offerID.String()),
+			zap.String("driver_id", driverID.String()),
+		)
+		oid := offerID.String()
 		switch {
 		case errors.Is(err, cargo.ErrOfferNotFoundOrNotPending):
-			resp.ErrorWithDataLang(c, http.StatusNotFound, "offer_not_found_or_not_pending", gin.H{"reason": "offer_not_pending", "offer_id": offerID.String()})
+			resp.ErrorWithDataLang(c, http.StatusNotFound, "offer_not_found_or_not_pending", gin.H{"reason": "offer_not_pending", "offer_id": oid})
 		case errors.Is(err, cargo.ErrCargoNotSearching):
-			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_not_searching", gin.H{"reason": "cargo_not_searching", "offer_id": offerID.String()})
+			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_not_searching", gin.H{"reason": "cargo_not_searching", "offer_id": oid, "cargo_id": offer.CargoID.String()})
 		case errors.Is(err, cargo.ErrCargoSlotsFull):
-			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{"reason": "cargo_slots_full", "offer_id": offerID.String()})
+			resp.ErrorWithDataLang(c, http.StatusConflict, "cargo_slots_full", gin.H{"reason": "cargo_slots_full", "offer_id": oid, "cargo_id": offer.CargoID.String()})
+		case errors.Is(err, cargo.ErrDriverBusy):
+			resp.ErrorWithDataLang(c, http.StatusConflict, "driver_busy_with_another_cargo", gin.H{"reason": "driver_busy", "offer_id": oid, "driver_id": driverID.String()})
+		case isDBConflict(err):
+			resp.ErrorWithDataLang(c, http.StatusConflict, "driver_busy_with_another_cargo", mergeGinH(gin.H{"reason": "driver_cargo_link_conflict", "offer_id": oid}, pgDebugFields(err)))
+		case isTransactionAborted(err):
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", mergeGinH(gin.H{"reason": "transaction_aborted", "offer_id": oid}, pgDebugFields(err)))
 		default:
-			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", gin.H{"reason": "accept_failed", "offer_id": offerID.String()})
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "failed_to_accept", mergeGinH(gin.H{"reason": "accept_failed", "offer_id": oid}, pgDebugFields(err)))
 		}
 		return
 	}
@@ -2388,14 +2416,39 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 	if h.tripsRepo != nil {
 		tripID, tripErr := h.tripsRepo.CreateTx(c.Request.Context(), tx, cargoID, offerID, carrierID, agreedPrice, agreedCurrency)
 		if tripErr != nil {
-			h.logger.Error("driver confirm offer trip create", zap.Error(tripErr))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_accept")
+			h.logger.Error("driver confirm offer trip create", zap.Error(tripErr),
+				zap.String("offer_id", offerID.String()),
+				zap.String("cargo_id", cargoID.String()),
+			)
+			if errors.Is(tripErr, trips.ErrAgreedPriceOutOfRange) {
+				resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
+					"reason":        "agreed_price_out_of_range",
+					"offer_id":      offerID.String(),
+					"cargo_id":      cargoID.String(),
+					"agreed_price":  agreedPrice,
+					"agreed_currency": agreedCurrency,
+				})
+				return
+			}
+			if isDBConflict(tripErr) {
+				resp.ErrorWithDataLang(c, http.StatusConflict, "trip_create_failed", mergeGinH(gin.H{
+					"reason":   "trip_duplicate_or_conflict",
+					"offer_id": offerID.String(),
+					"cargo_id": cargoID.String(),
+				}, pgDebugFields(tripErr)))
+				return
+			}
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "trip_create_failed", mergeGinH(gin.H{
+				"reason":   "trip_insert_failed",
+				"offer_id": offerID.String(),
+				"cargo_id": cargoID.String(),
+			}, pgDebugFields(tripErr)))
 			return
 		}
 
 		if err := tx.Commit(c.Request.Context()); err != nil {
 			h.logger.Error("driver confirm offer commit", zap.Error(err))
-			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "internal_error", mergeGinH(gin.H{"reason": "commit_failed", "offer_id": offerID.String()}, pgDebugFields(err)))
 			return
 		}
 
@@ -2404,8 +2457,12 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 				cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
 				PublishTripStatusForCargoParticipants(h.stream, tr, cg, offer)
 			}
-			// Notify Cargo Manager and Driver Manager (same SSE channel for dispatchers)
+			// Notify Cargo Manager + Driver Manager (+ CM on company cargo via proposed_by_id)
 			if cargoObj, _ := h.repo.GetByID(c.Request.Context(), cargoID, false); cargoObj != nil {
+				updOffer, _ := h.repo.GetOfferByID(c.Request.Context(), offerID)
+				if updOffer == nil {
+					updOffer = offer
+				}
 				acc := gin.H{
 					"kind":       "cargo_offer",
 					"event":      "cargo_offer_accepted",
@@ -2414,14 +2471,9 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 					"driver_id":  carrierID.String(),
 					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 				}
-				var cmID *uuid.UUID
-				if disp := tripNotifyDispatcherID(cargoObj); disp != nil {
-					cmID = disp
-					h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, acc)
-				}
-				if dm := offerDriverManagerDispatcherID(offer); dm != nil && (cmID == nil || *dm != *cmID) {
-					h.stream.PublishNotification(tripnotif.RecipientDispatcher, *dm, acc)
-				}
+				ensureSSEID(acc)
+				h.stream.PublishNotification(tripnotif.RecipientDriver, carrierID, acc)
+				publishCargoOfferToDispatchers(h.stream, cargoObj, updOffer, acc)
 			}
 		}
 
@@ -2479,15 +2531,49 @@ func (h *CargoHandler) publishCargoOfferEndedNotifs(c *gin.Context, offer *cargo
 		"driver_id":  offer.CarrierID.String(),
 		"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}
+	ensureSSEID(payload)
 	h.stream.PublishNotification(tripnotif.RecipientDriver, offer.CarrierID, payload)
-	if disp := tripNotifyDispatcherID(cargoObj); disp != nil && *disp != uuid.Nil {
-		h.stream.PublishNotification(tripnotif.RecipientDispatcher, *disp, payload)
+	publishCargoOfferToDispatchers(h.stream, cargoObj, offer, payload)
+}
+
+func mergeGinH(a, b gin.H) gin.H {
+	if a == nil {
+		a = gin.H{}
 	}
-	if dm := offerDriverManagerDispatcherID(offer); dm != nil {
-		if disp := tripNotifyDispatcherID(cargoObj); disp == nil || *dm != *disp {
-			h.stream.PublishNotification(tripnotif.RecipientDispatcher, *dm, payload)
+	for k, v := range b {
+		if v == nil {
+			continue
 		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
+			continue
+		}
+		a[k] = v
 	}
+	return a
+}
+
+// pgDebugFields adds PostgreSQL error fields (and non-PG err.Error) for API diagnostics.
+func pgDebugFields(err error) gin.H {
+	if err == nil {
+		return gin.H{}
+	}
+	out := gin.H{}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		out["pg_code"] = pgErr.Code
+		if strings.TrimSpace(pgErr.ConstraintName) != "" {
+			out["pg_constraint"] = pgErr.ConstraintName
+		}
+		if strings.TrimSpace(pgErr.Detail) != "" {
+			out["pg_detail"] = pgErr.Detail
+		}
+		if strings.TrimSpace(pgErr.Message) != "" {
+			out["pg_message"] = pgErr.Message
+		}
+		return out
+	}
+	out["error"] = err.Error()
+	return out
 }
 
 func isDBConflict(err error) bool {

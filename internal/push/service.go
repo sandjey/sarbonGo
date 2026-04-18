@@ -3,6 +3,7 @@ package push
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	firebase "firebase.google.com/go/v4"
@@ -18,10 +19,11 @@ import (
 )
 
 type Service struct {
-	logger *zap.Logger
-	fcm    *messaging.Client
-	drv    *drivers.Repo
-	disp   *dispatchers.Repo
+	logger    *zap.Logger
+	fcm       *messaging.Client
+	drv       *drivers.Repo
+	disp      *dispatchers.Repo
+	projectID string
 }
 
 func New(ctx context.Context, cfg config.Config, logger *zap.Logger, drv *drivers.Repo, disp *dispatchers.Repo) (*Service, error) {
@@ -44,6 +46,7 @@ func New(ctx context.Context, cfg config.Config, logger *zap.Logger, drv *driver
 		return nil, err
 	}
 	s.fcm = client
+	s.projectID = projectID
 	logger.Info("firebase push enabled", zap.String("project_id", projectID))
 	return s, nil
 }
@@ -53,12 +56,21 @@ func (s *Service) Enabled() bool {
 }
 
 func (s *Service) sendToToken(ctx context.Context, token, title, body string, data map[string]string) {
+	if _, err := s.sendToTokenErr(ctx, token, title, body, data); err != nil && s.logger != nil {
+		s.logger.Warn("push send failed", zap.Error(err))
+	}
+}
+
+// sendToTokenErr sends one FCM message. Returns FCM message ID on success (for logs / admin diagnostics).
+// Android: high priority only — do not force notification channel_id here: if the app never created
+// "sarbon_default", Android 8+ may drop the notification even when FCM returns success.
+func (s *Service) sendToTokenErr(ctx context.Context, token, title, body string, data map[string]string) (fcmMessageID string, err error) {
 	if s == nil || s.fcm == nil {
-		return
+		return "", nil
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return
+		return "", nil
 	}
 	msg := &messaging.Message{
 		Token: token,
@@ -67,10 +79,41 @@ func (s *Service) sendToToken(ctx context.Context, token, title, body string, da
 			Body:  body,
 		},
 		Data: data,
+		Android: &messaging.AndroidConfig{
+			Priority: "high",
+		},
+		APNS: &messaging.APNSConfig{
+			Payload: &messaging.APNSPayload{
+				Aps: &messaging.Aps{
+					Sound: "default",
+					Badge: badgeOne(),
+				},
+			},
+		},
 	}
-	if _, err := s.fcm.Send(ctx, msg); err != nil && s.logger != nil {
-		s.logger.Warn("push send failed", zap.Error(err))
+	return s.fcm.Send(ctx, msg)
+}
+
+// SendTestToToken sends a test notification directly to the given FCM token.
+// Returns FCM message ID on success (use in Firebase Console / support).
+func (s *Service) SendTestToToken(ctx context.Context, token, title, body string, extra map[string]string) (fcmMessageID string, err error) {
+	if !s.Enabled() {
+		return "", fmt.Errorf("push notifications are disabled or firebase is not configured")
 	}
+	data := map[string]string{"source": "test"}
+	for k, v := range extra {
+		data[k] = v
+	}
+	return s.sendToTokenErr(ctx, token, title, body, data)
+}
+
+// ProjectID returns the Firebase project_id if configured (empty string if disabled).
+func (s *Service) ProjectID() string {
+	if s == nil || s.fcm == nil {
+		return ""
+	}
+	// projectID is stored in the firebase.App; we expose it via config during construction.
+	return s.projectID
 }
 
 func (s *Service) SendByStreamRecipient(ctx context.Context, streamKind, recipientKind string, recipientID uuid.UUID, payload []byte) {
@@ -151,3 +194,5 @@ func (s *Service) SendByChatUser(ctx context.Context, userID uuid.UUID, payload 
 		}
 	}
 }
+
+func badgeOne() *int { v := 1; return &v }

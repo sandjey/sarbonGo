@@ -239,18 +239,26 @@ func (r *Repo) ListMessages(ctx context.Context, conversationID, userID uuid.UUI
 	var err error
 	if cursor == nil || *cursor == uuid.Nil {
 		rows, err = r.pg.Query(ctx, `
-SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at
+SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at,
+  (m.sender_id <> $2 AND m.created_at <= COALESCE(mr.last_read_at, 'epoch'::timestamptz)) AS read_by_me,
+  (m.sender_id = $2 AND m.created_at <= COALESCE(pr.last_read_at, 'epoch'::timestamptz)) AS read_by_peer
 FROM chat_messages m
 JOIN chat_conversations c ON c.id = m.conversation_id AND (c.user_a_id = $2 OR c.user_b_id = $2)
+LEFT JOIN chat_conversation_reads mr ON mr.conversation_id = c.id AND mr.user_id = $2
+LEFT JOIN chat_conversation_reads pr ON pr.conversation_id = c.id AND pr.user_id = (CASE WHEN c.user_a_id = $2 THEN c.user_b_id ELSE c.user_a_id END)
 WHERE m.conversation_id = $1 AND m.deleted_at IS NULL
 ORDER BY m.created_at DESC
 LIMIT $3
 `, conversationID, userID, limit)
 	} else {
 		rows, err = r.pg.Query(ctx, `
-SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at
+SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at,
+  (m.sender_id <> $2 AND m.created_at <= COALESCE(mr.last_read_at, 'epoch'::timestamptz)) AS read_by_me,
+  (m.sender_id = $2 AND m.created_at <= COALESCE(pr.last_read_at, 'epoch'::timestamptz)) AS read_by_peer
 FROM chat_messages m
 JOIN chat_conversations c ON c.id = m.conversation_id AND (c.user_a_id = $2 OR c.user_b_id = $2)
+LEFT JOIN chat_conversation_reads mr ON mr.conversation_id = c.id AND mr.user_id = $2
+LEFT JOIN chat_conversation_reads pr ON pr.conversation_id = c.id AND pr.user_id = (CASE WHEN c.user_a_id = $2 THEN c.user_b_id ELSE c.user_a_id END)
 WHERE m.conversation_id = $1 AND m.deleted_at IS NULL
 AND m.created_at < (SELECT created_at FROM chat_messages WHERE id = $4)
 ORDER BY m.created_at DESC
@@ -265,7 +273,7 @@ LIMIT $3
 	for rows.Next() {
 		var m Message
 		var payloadBytes []byte
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt, &m.ReadByMe, &m.ReadByPeer); err != nil {
 			return nil, err
 		}
 		if len(payloadBytes) > 0 {

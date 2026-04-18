@@ -353,6 +353,39 @@ tags:
     description: |
       **Модерация грузов.** Фрилансер создаёт груз → PENDING_MODERATION. Админ: GET /v1/admin/cargo/moderation — список; POST .../accept — принять (→ SEARCHING_ALL или SEARCHING_COMPANY); POST .../reject — отклонить (reason обязателен, → CANCELLED, причина сохраняется). Ответы на 5 языках.
       **Dev режим:** если на сервере env `CARGO_MODERATION_ENABLED=false`, то `POST /api/cargo` создаёт груз сразу в SEARCHING_ALL, и этот раздел модерации в разработке не требуется.
+  - name: "Admin / Firebase Push"
+    description: |
+      **Firebase Cloud Messaging (FCM) — диагностика и тестовая отправка (только для админа)**
+
+      Все методы требуют JWT с ролью `admin` (X-User-Token после /v1/admin/auth/login/password).
+
+      **GET /v1/admin/push/status** — `enabled`, `project_id` и **`data.config`**: что реально прочитано из env, найден ли файл ключа по пути.
+
+      **POST /v1/admin/push/send** — отправить тестовый push на конкретный FCM-токен устройства. Используйте для проверки:
+      1. Что Firebase работает (credentials файл валиден, project_id верный).
+      2. Что мобильное приложение получает уведомления с конкретного устройства.
+      3. Что FCM-токен актуален (если токен протух — вернётся ошибка Firebase).
+
+      **Какие уведомления отправляются через Firebase автоматически:**
+
+      | Событие | Получатель | `event_kind` / тип | Описание |
+      |---------|-----------|---------------------|----------|
+      | Рейс перешёл в статус IN_TRANSIT | Водитель + Диспетчер | `IN_TRANSIT` | Водитель выехал |
+      | Рейс перешёл в статус DELIVERED | Водитель + Диспетчер | `DELIVERED` | Груз доставлен, водитель ждёт подтверждения |
+      | Рейс перешёл в статус COMPLETED | Водитель + Диспетчер | `COMPLETED` | Рейс завершён |
+      | Рейс отменён | Водитель + Диспетчер | `CANCELLED` | Рейс отменён |
+      | Водитель запросил закрытие рейса | Диспетчер (Cargo Manager) | `COMPLETION_PENDING_MANAGER` | Ожидает подтверждения менеджером |
+      | Новое сообщение в чате | Водитель или Диспетчер | тип `message` | `body = "New message"` |
+      | Входящий звонок | Водитель или Диспетчер | тип `call.*` | `body = тип звонка` |
+      | Оффер груза отправлен Driver Manager | Driver Manager | `cargo_offer` | Входящий оффер от Cargo Manager |
+      | Приглашение в компанию/связь | Водитель или Диспетчер | `driver_invitation` / `connection_offer` | Входящее приглашение |
+      | Изменение данных водителя | Диспетчер (Driver Manager) | `driver_update` | Водитель обновил профиль/статус |
+
+      **Технические детали:**
+      - Уведомления включены только если в `.env` выставлены `PUSH_NOTIFICATIONS_ENABLED=true`, `FIREBASE_PROJECT_ID` и `FIREBASE_CREDENTIALS_FILE`.
+      - Один токен на устройство: последний зарегистрированный через `POST /v1/chat/push-token` (или при регистрации `PATCH /v1/driver/registration/geo-push`).
+      - Android: `priority=high`, `channelId=sarbon_default`. iOS (APNS): `sound=default`, `badge=1`.
+      - FCM data-payload всегда содержит: `stream_kind`, `recipient_kind`, `recipient_id`, `event_kind` (если есть).
   - name: Reference
     description: |
       **Руководство: Справочники (общие)**
@@ -488,6 +521,12 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         deleted_at: { type: string, format: date-time, nullable: true }
+        read_by_me:
+          type: boolean
+          description: "Для GET истории входящее сообщение помечено прочитанным вами (курсор chat_conversation_reads)"
+        read_by_peer:
+          type: boolean
+          description: "Для GET истории ваше сообщение прочитано собеседником"
       required: [id, conversation_id, sender_id, type, created_at, updated_at]
     ChatMediaPayload:
       type: object
@@ -4299,6 +4338,9 @@ paths:
         - `kind=cargo_offer` — создание/принятие/отклонение/отмена оффера;
         - `kind=driver_update` — изменения данных привязанных водителей.
 
+        Для `kind=cargo_offer` сервер добавляет **`sse_id`** (UUID строка) — уникальный id события для дедупа на клиенте.
+        События **cargo_offer** доставляются и **Cargo Manager** (автор груза DISPATCHER и/или автор DISPATCHER-оффера), и **Driver Manager** (`negotiation_dispatcher_id`), в т.ч. при принятии оффера **водителем** (раньше уведомление уходило в неверный канал).
+
         **JWT:** заголовок **X-User-Token** или query **`token`** для EventSource. Базовые заголовки обязательны.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
@@ -5756,16 +5798,26 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "200": { description: "trip_id, status: accepted, trip_flow (via_driver_manager)" }
-        "400": { description: offer_not_waiting_driver_confirm }
+        "400":
+          description: |
+            offer_not_waiting_driver_confirm — в `data`: current_status, expected_status (WAITING_DRIVER_CONFIRM);
+            invalid_payload_detail — agreed_price_out_of_range (при создании рейса).
+        "401": { description: user_not_identified }
         "403": { description: not_your_offer }
-        "404": { description: offer_not_found }
-        "500": { description: internal_error / failed_to_accept }
+        "404": { description: offer_not_found / offer_not_found_or_not_pending }
+        "409":
+          description: |
+            cargo_not_searching, cargo_slots_full, driver_busy_with_another_cargo, driver_cargo_link_conflict;
+            trip_create_failed (дубликат/конфликт INSERT в trips) — в `data` при ошибках БД: pg_code, pg_constraint, pg_message (диагностика).
+        "500":
+          description: |
+            internal_error, failed_to_accept, trip_create_failed — в `data`: reason, offer_id, при сбое БД pg_* поля.
 
   /v1/driver/offers/{id}/confirm-driver-manager-flow:
     post:
       tags: ["Drivers / Offers", "Drivers / Cargo offers", "Drivers / Completion & ratings flow", "Drivers / Offer minimal"]
       summary: "Alias: подтвердить flow от Driver Manager"
-      description: "Эквивалент `POST /v1/driver/offers/{id}/confirm`."
+      description: "Эквивалент `POST /v1/driver/offers/{id}/confirm` (те же коды ответов и поле `data` при ошибках)."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
         - name: id
@@ -5773,11 +5825,13 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        "200": { description: "trip_id, status: accepted, trip_flow (via_driver_manager)" }
-        "400": { description: offer_not_waiting_driver_confirm }
+        "200": { description: "trip_id, status: accepted, trip_flow" }
+        "400": { description: "Same response codes as POST /v1/driver/offers/{id}/confirm (see that operation)." }
+        "401": { description: user_not_identified }
         "403": { description: not_your_offer }
-        "404": { description: offer_not_found }
-        "500": { description: internal_error / failed_to_accept }
+        "404": { description: offer_not_found / offer_not_found_or_not_pending }
+        "409": { description: "Same as POST /v1/driver/offers/{id}/confirm." }
+        "500": { description: "Same as POST /v1/driver/offers/{id}/confirm." }
 
   /v1/driver/offers/{id}:
     get:
@@ -7046,6 +7100,121 @@ paths:
         "200": { description: "data.status = CANCELLED" }
         "400": { description: reason required, or cargo not pending moderation }
 
+  /v1/admin/push/status:
+    get:
+      tags: ["Admin / Firebase Push"]
+      summary: "Статус Firebase (включён / выключен)"
+      description: |
+        Возвращает `enabled`, `project_id` и объект **`data.config`** (без секретов): флаги из env после загрузки,
+        найден ли файл ключа по пути, абсолютный путь к ключу. Если раньше `enabled=false` при правильном `.env` в папке проекта —
+        проверьте, что не подхватывался чужой `.env` из родительской директории (исправлено: сначала грузится `./.env` в cwd).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "success" }
+                  code: { type: integer, example: 200 }
+                  description: { type: string, example: "OK" }
+                  data:
+                    type: object
+                    properties:
+                      enabled: { type: boolean, example: true, description: "true — FCM клиент поднят; false — см. data.config." }
+                      project_id: { type: string, example: "sarbon-firebase-project", description: "project_id при активном FCM; иначе пусто." }
+                      config:
+                        type: object
+                        description: Диагностика env (не содержит private key).
+                        properties:
+                          push_notifications_enabled: { type: boolean }
+                          firebase_project_id_configured: { type: boolean }
+                          firebase_project_id: { type: string }
+                          firebase_credentials_file_raw: { type: string, description: "Значение FIREBASE_CREDENTIALS_FILE из env" }
+                          firebase_credentials_path_resolved: { type: string, description: "Абсолютный путь после join с cwd (для относительных путей)" }
+                          firebase_credentials_file_found: { type: boolean, description: "Файл по resolved path существует" }
+                          push_service_initialized: { type: boolean, description: "false — push.New вернул ошибку при старте, см. логи" }
+        "401": { description: unauthorized (не админ) }
+
+  /v1/admin/push/send:
+    post:
+      tags: ["Admin / Firebase Push"]
+      summary: "Отправить тестовый push на FCM-токен"
+      description: |
+        Отправляет тестовое push-уведомление на конкретный FCM device token.
+
+        **Как получить токен для теста:**
+        - Мобильное приложение вызывает `POST /v1/chat/push-token` с токеном Firebase после логина.
+        - Или при регистрации водитель передаёт `push_token` в `PATCH /v1/driver/registration/geo-push`.
+        - В базе данных: `drivers.push_token` / `freelance_dispatchers.push_token`.
+
+        **Возможные ошибки:**
+        - `502` — Firebase вернул ошибку (протухший токен, неверный token, неправильный project_id и т.д.). Тело содержит текст ошибки Firebase.
+        - `503` — Firebase отключён на сервере (PUSH_NOTIFICATIONS_ENABLED=false или credentials не заданы).
+      security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [push_token]
+              properties:
+                push_token:
+                  type: string
+                  example: "dxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  description: "FCM registration token устройства (полученный мобильным приложением от Firebase SDK)"
+                title:
+                  type: string
+                  example: "Sarbon Test"
+                  description: "Заголовок уведомления. По умолчанию 'Sarbon Test'."
+                body:
+                  type: string
+                  example: "Test push notification from admin"
+                  description: "Текст уведомления. По умолчанию 'Test push notification from admin'."
+                data:
+                  type: object
+                  additionalProperties: { type: string }
+                  example: { "custom_key": "custom_value" }
+                  description: "Дополнительные data-поля (key-value, все строки). Будут добавлены к FCM data payload."
+      responses:
+        "200":
+          description: |
+            FCM принял сообщение (`sent: true`). Если на устройстве тишина: тот же Firebase-проект, что в приложении;
+            Android — каналы уведомлений в приложении; iOS — APNs в Firebase Console; приложение не в фокусе / отключены уведомления.
+            `fcm_message_id` — искать доставку в Firebase Console (Cloud Messaging).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "success" }
+                  code: { type: integer, example: 200 }
+                  description: { type: string, example: "OK" }
+                  data:
+                    type: object
+                    properties:
+                      sent: { type: boolean, example: true }
+                      token: { type: string, description: "Токен, на который было отправлено уведомление" }
+                      fcm_message_id: { type: string, description: "ID сообщения от FCM (диагностика)" }
+                      firebase_project: { type: string, description: "FIREBASE_PROJECT_ID сервера" }
+        "400": { description: "push_token не передан или слишком короткий" }
+        "401": { description: "unauthorized (не админ)" }
+        "502":
+          description: "Firebase вернул ошибку (например, токен истёк, неверный токен)"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: "error" }
+                  code: { type: integer, example: 502 }
+                  description: { type: string, example: "firebase error: registration-token-not-registered" }
+                  data: { nullable: true }
+        "503": { description: "Firebase отключён на сервере (PUSH_NOTIFICATIONS_ENABLED=false)" }
+
   /v1/chat/user-finder:
     get:
       tags: [Chat]
@@ -7132,7 +7301,7 @@ paths:
     get:
       tags: [Chat]
       summary: "История сообщений диалога"
-      description: "Пагинация: cursor = id последнего сообщения из предыдущей страницы, limit (по умолчанию 50). Query **mark_read=1** — отметить прочитанным при открытии чата."
+      description: "Пагинация: cursor = id последнего сообщения из предыдущей страницы, limit (по умолчанию 50). Query **mark_read=1** — отметить прочитанным при открытии чата; собеседнику уходит WebSocket `conversation_read`. В каждом элементе `messages[]` — поля **read_by_me** / **read_by_peer** (по курсорам прочитанного), не только для последнего сообщения."
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }, { UserIDHeader: [] }]
       parameters:
         - name: id
@@ -7183,8 +7352,11 @@ paths:
         Загружает файл, оптимизирует «как в Telegram» и создаёт сообщение:
         - **PHOTO** → JPEG (оптимизация/пережатие); при ошибке ffmpeg — копия JPEG/PNG/WebP
         - **VOICE** → если исходник **MP3** (`audio/mpeg`) — сохраняется как MP3; иначе **OGG/Opus** (моно, 48kHz, ~32kbps)
+        - **AUDIO** — синоним **VOICE** (mp3/голос с клиентов, где поле названо audio)
         - **VIDEO** → если исходник уже **MP4** — быстрый путь (копия); иначе перекодирование в MP4 (H.264/AAC) + faststart + thumbnail; при необходимости пробуется remux `ffmpeg -c copy`
         - **VIDEO_NOTE** → квадратный MP4 (под UI-кружок) + thumbnail
+
+        Поле файла в multipart: **`file`** (предпочтительно); также принимаются **`upload`**, **`media`**, **`photo`**, **`video`**, **`voice`**. Лимит тела запроса до **128 MiB** (большие видео).
 
         Файл хранится на диске сервера, в БД сохраняются метаданные. В `payload` сообщения возвращается `attachment_id` и `url` для скачивания.
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }, { UserIDHeader: [] }]
@@ -7199,11 +7371,16 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [type, file]
+              required: [type]
               properties:
-                type: { type: string, enum: [PHOTO, VOICE, VIDEO, VIDEO_NOTE] }
+                type: { type: string, enum: [PHOTO, VOICE, AUDIO, VIDEO, VIDEO_NOTE], description: "AUDIO обрабатывается как VOICE" }
                 body: { type: string, nullable: true, description: "Подпись/текст (опционально)" }
-                file: { type: string, format: binary }
+                file: { type: string, format: binary, description: "Основной файл" }
+                upload: { type: string, format: binary, description: "Альтернативное имя поля файла" }
+                media: { type: string, format: binary }
+                photo: { type: string, format: binary }
+                video: { type: string, format: binary }
+                voice: { type: string, format: binary }
             examples:
               voice:
                 summary: "VOICE (голосовое)"
@@ -7325,7 +7502,18 @@ paths:
       summary: "WebSocket чат"
       description: |
         Подключение к чату в реальном времени. Авторизация через query: **token=JWT**.
-        После подключения: отправка типа "typing" с data.conversation_id; получение событий "message" и "typing".
+        Каждое входящее JSON-сообщение от клиента продлевает TTL «онлайн» в Redis (присутствие).
+
+        **Клиент → сервер (чат):**
+        - `typing` — `{ "type":"typing", "data":{ "conversation_id":"<uuid>" } }`
+        - `typing_stop` — сброс индикатора набора у собеседника: `{ "type":"typing_stop", "data":{ "conversation_id":"<uuid>" } }`
+
+        **Сервер → клиент:**
+        - `message` — новое сообщение (`data` = ChatMessage)
+        - `typing` / `typing_stop` — индикатор набора (`data.conversation_id`, `data.user_id`)
+        - `conversation_read` — собеседник отметил диалог прочитанным: `data.conversation_id`, `data.reader_id`
+        - `message_updated` — отредактировано сообщение (`data` = ChatMessage)
+        - `message_deleted` — мягкое удаление: `data.conversation_id`, `data.message_id`
 
         **Дополнительно (Calls / WebRTC signaling):**
         Сервер принимает от клиента события `webrtc.offer`, `webrtc.answer`, `webrtc.ice`, `call.end` и пересылает peer'у, если отправитель является участником `call_id`.

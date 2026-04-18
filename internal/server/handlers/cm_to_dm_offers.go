@@ -99,14 +99,16 @@ func (h *CMToDMOffersHandler) SendToDriverManager(c *gin.Context) {
 	}
 
 	if h.stream != nil {
-		h.stream.PublishNotification(tripnotif.RecipientDispatcher, req.DriverManagerID, gin.H{
+		p := gin.H{
 			"kind":       "cargo_offer",
 			"event":      "cargo_offer_created",
 			"direction":  "incoming",
 			"request_id": reqID.String(),
 			"cargo_id":   cargoID.String(),
 			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-		})
+		}
+		ensureSSEID(p)
+		h.stream.PublishNotification(tripnotif.RecipientDispatcher, req.DriverManagerID, p)
 	}
 
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{
@@ -212,6 +214,20 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 	_ = h.cargo.AcceptCargoManagerDMOffer(c.Request.Context(), reqID, body.DriverID, offerID)
 
 	if h.stream != nil {
+		pubOffer, err := h.cargo.GetOfferByID(c.Request.Context(), offerID)
+		if err != nil || pubOffer == nil {
+			cm := reqRow.CargoManagerID
+			dm := driverManagerID
+			pubOffer = &cargo.Offer{
+				ID:                      offerID,
+				CargoID:                 reqRow.CargoID,
+				CarrierID:               body.DriverID,
+				ProposedBy:              cargo.OfferProposedByDispatcher,
+				ProposedByID:            &cm,
+				NegotiationDispatcherID: &dm,
+			}
+		}
+		cg, _ := h.cargo.GetByID(c.Request.Context(), reqRow.CargoID, false)
 		p := gin.H{
 			"kind":       "cargo_offer",
 			"event":      "cargo_offer_waiting_driver",
@@ -219,9 +235,9 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 			"cargo_id":   reqRow.CargoID.String(),
 			"created_at": time.Now().UTC().Format(time.RFC3339Nano),
 		}
+		ensureSSEID(p)
 		h.stream.PublishNotification(tripnotif.RecipientDriver, body.DriverID, p)
-		h.stream.PublishNotification(tripnotif.RecipientDispatcher, reqRow.CargoManagerID, p)
-		h.stream.PublishNotification(tripnotif.RecipientDispatcher, driverManagerID, p)
+		publishCargoOfferToDispatchers(h.stream, cg, pubOffer, p)
 	}
 
 	resp.OKLang(c, "waiting_driver_confirmation", gin.H{

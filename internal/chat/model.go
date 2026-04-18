@@ -26,6 +26,9 @@ type Message struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
+	// Read flags (filled by ListMessages from chat_conversation_reads cursors).
+	ReadByMe   bool `json:"read_by_me"`   // true if this message is from the peer and the current user has read it
+	ReadByPeer bool `json:"read_by_peer"` // true if this message is from the current user and the peer has read it
 }
 
 // PeerID returns the other participant's ID for the given user.

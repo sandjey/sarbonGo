@@ -55,14 +55,28 @@ func (c *Client) ReadPump() {
 		if err := json.Unmarshal(raw, &envelope); err != nil {
 			continue
 		}
+		// Keep Redis "online" fresh for long-lived WebSocket (presence TTL 65s).
+		c.Hub.TouchPresence(c.UserID)
 		switch envelope.Type {
 		case "typing":
 			var body struct {
 				ConversationID string `json:"conversation_id"`
 			}
 			if json.Unmarshal(envelope.Data, &body) == nil && body.ConversationID != "" {
-				convID, _ := uuid.Parse(body.ConversationID)
-				c.Hub.BroadcastTyping(convID, c.UserID)
+				convID, err := uuid.Parse(body.ConversationID)
+				if err == nil && convID != uuid.Nil {
+					c.Hub.BroadcastTyping(convID, c.UserID)
+				}
+			}
+		case "typing_stop":
+			var body struct {
+				ConversationID string `json:"conversation_id"`
+			}
+			if json.Unmarshal(envelope.Data, &body) == nil && body.ConversationID != "" {
+				convID, err := uuid.Parse(body.ConversationID)
+				if err == nil && convID != uuid.Nil {
+					c.Hub.BroadcastTypingStop(convID, c.UserID)
+				}
 			}
 		case "message":
 			// Persistence via REST; WS only receives broadcasts.
@@ -233,6 +247,9 @@ func (h *Hub) BroadcastToConversation(userAID, userBID uuid.UUID, payload []byte
 
 // BroadcastTyping notifies the other participant in the conversation (uses OnTypingPeer to resolve peer).
 func (h *Hub) BroadcastTyping(conversationID, fromUserID uuid.UUID) {
+	if h.presence != nil {
+		_ = h.presence.SetTyping(context.Background(), conversationID, fromUserID)
+	}
 	h.mu.RLock()
 	f := h.onTyping
 	h.mu.RUnlock()
@@ -252,6 +269,77 @@ func (h *Hub) BroadcastTyping(conversationID, fromUserID uuid.UUID) {
 	}
 	raw, _ := json.Marshal(out)
 	h.SendToUser(peerID, raw)
+}
+
+// TouchPresence refreshes Redis online TTL while the WebSocket stays connected.
+func (h *Hub) TouchPresence(userID uuid.UUID) {
+	if h.presence == nil || userID == uuid.Nil {
+		return
+	}
+	_ = h.presence.Heartbeat(context.Background(), userID)
+}
+
+// BroadcastTypingStop clears typing in Redis and notifies the peer immediately.
+func (h *Hub) BroadcastTypingStop(conversationID, fromUserID uuid.UUID) {
+	if h.presence != nil {
+		_ = h.presence.ClearTyping(context.Background(), conversationID, fromUserID)
+	}
+	h.mu.RLock()
+	f := h.onTyping
+	h.mu.RUnlock()
+	if f == nil {
+		return
+	}
+	peerID, ok := f(conversationID, fromUserID)
+	if !ok {
+		return
+	}
+	out := map[string]interface{}{
+		"type": "typing_stop",
+		"data": map[string]string{
+			"conversation_id": conversationID.String(),
+			"user_id":         fromUserID.String(),
+		},
+	}
+	raw, _ := json.Marshal(out)
+	h.SendToUser(peerID, raw)
+}
+
+// SendConversationReadEvent notifies the peer that reader_id advanced the read cursor (REST mark read / open chat).
+func (h *Hub) SendConversationReadEvent(peerID uuid.UUID, conversationID, readerID uuid.UUID) {
+	if peerID == uuid.Nil {
+		return
+	}
+	out := map[string]interface{}{
+		"type": "conversation_read",
+		"data": map[string]string{
+			"conversation_id": conversationID.String(),
+			"reader_id":         readerID.String(),
+		},
+	}
+	raw, _ := json.Marshal(out)
+	h.SendToUser(peerID, raw)
+}
+
+// BroadcastMessageUpdated notifies both participants (multi-device / edit sync).
+func (h *Hub) BroadcastMessageUpdated(userAID, userBID uuid.UUID, msg *Message) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "message_updated",
+		"data": msg,
+	})
+	h.BroadcastToConversation(userAID, userBID, payload)
+}
+
+// BroadcastMessageDeleted notifies both participants after a soft delete.
+func (h *Hub) BroadcastMessageDeleted(userAID, userBID uuid.UUID, conversationID, messageID uuid.UUID) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "message_deleted",
+		"data": map[string]string{
+			"conversation_id": conversationID.String(),
+			"message_id":      messageID.String(),
+		},
+	})
+	h.BroadcastToConversation(userAID, userBID, payload)
 }
 
 // ForwardCallSignal routes signaling payload (webrtc.* / call.*) to the other party if allowed.

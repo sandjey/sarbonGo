@@ -238,7 +238,12 @@ func Mount(r *gin.Engine, databaseURL string) error {
 
 	eng := engine.Default()
 	// Auto-register ALL public tables with CRUD.
-	generators := map[string]table.Generator{}
+	// Custom generators are pre-registered so AutoTableGenerators skips those tables.
+	customTables := []string{"admins"}
+	RegisterCustomTableNames(customTables...)
+	generators := map[string]table.Generator{
+		"admins": adminsTableGenerator(),
+	}
 	auto, err := AutoTableGenerators(context.Background(), databaseURL, generators)
 	if err != nil {
 		return err

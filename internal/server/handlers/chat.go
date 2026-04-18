@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"os/exec"
@@ -49,7 +50,6 @@ func NewChatHandler(logger *zap.Logger, repo *chat.Repo, presence *chat.Presence
 		if err != nil || conv == nil {
 			return uuid.Nil, false
 		}
-		_ = presence.SetTyping(ctx, conversationID, fromUserID)
 		return conv.PeerID(fromUserID), true
 	})
 	return h
@@ -277,6 +277,9 @@ func (h *ChatHandler) MarkConversationRead(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_mark_read")
 		return
 	}
+	if conv, err := h.repo.GetConversation(c.Request.Context(), convID, userID); err == nil && conv != nil {
+		h.hub.SendConversationReadEvent(conv.PeerID(userID), convID, userID)
+	}
 	resp.OKLang(c, "ok", gin.H{"read": true})
 }
 
@@ -391,6 +394,10 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 	if mark == "1" || strings.EqualFold(mark, "true") {
 		if err := h.repo.MarkConversationRead(c.Request.Context(), convID, userID); err != nil && !errors.Is(err, chat.ErrNotFound) {
 			h.logger.Error("chat mark read on list", zap.Error(err))
+		} else if err == nil {
+			if conv, e := h.repo.GetConversation(c.Request.Context(), convID, userID); e == nil && conv != nil {
+				h.hub.SendConversationReadEvent(conv.PeerID(userID), convID, userID)
+			}
 		}
 	}
 	resp.OKLang(c, "ok", gin.H{"messages": list})
@@ -466,7 +473,15 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		return
 	}
 
+	if err := c.Request.ParseMultipartForm(128 << 20); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+
 	msgType := strings.ToUpper(strings.TrimSpace(c.PostForm("type")))
+	if msgType == "AUDIO" {
+		msgType = "VOICE"
+	}
 	switch msgType {
 	case "PHOTO", "VOICE", "VIDEO", "VIDEO_NOTE":
 	default:
@@ -483,12 +498,8 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		caption = &v
 	}
 
-	fh, err := c.FormFile("file")
-	if err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "chat_media_file_required")
-		return
-	}
-	if fh.Size <= 0 {
+	fh, ok := chatPickMultipartFile(c)
+	if !ok {
 		resp.ErrorLang(c, http.StatusBadRequest, "chat_media_file_required")
 		return
 	}
@@ -516,12 +527,16 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	defer func() { _ = os.Remove(inPath) }()
 	if _, err := io.Copy(dst, src); err != nil {
 		_ = dst.Close()
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	_ = dst.Close()
+	if err := dst.Close(); err != nil {
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 
 	contentType := fh.Header.Get("Content-Type")
 	var outExt string
@@ -650,12 +665,26 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
 		return
 	}
+	storeRel := finalRelPath
+	sizeBytes := stat.Size()
 	if inserted {
-		// Move optimized file into hash-based path.
-		_ = os.Rename(outPath, finalPath)
+		if err := os.Rename(outPath, finalPath); err != nil {
+			h.logger.Error("chat media rename", zap.Error(err))
+			_ = os.Remove(outPath)
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
 	} else {
-		// Duplicate: remove newly created file to save disk.
 		_ = os.Remove(outPath)
+		if mf, e := h.repo.GetMediaFileByID(c.Request.Context(), mediaID); e == nil && mf != nil {
+			if mf.Path != "" {
+				storeRel = mf.Path
+			}
+			sizeBytes = mf.SizeBytes
+			if mf.Mime != "" {
+				mime = mf.Mime
+			}
+		}
 	}
 
 	var thumbMediaID *uuid.UUID
@@ -665,14 +694,14 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		rel := thumbPath
 		thumbRel = &rel
 	}
-	rel := finalRelPath
+	rel := storeRel
 	attID, err := h.repo.CreateAttachment(c.Request.Context(), chat.Attachment{
 		MessageID:      nil,
 		ConversationID: convID,
 		UploaderID:     userID,
 		Kind:           msgType,
 		Mime:           mime,
-		SizeBytes:      stat.Size(),
+		SizeBytes:      sizeBytes,
 		Path:           rel,
 		ThumbPath:      thumbRel,
 		Width:          width,
@@ -691,7 +720,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		AttachmentID: attID.String(),
 		URL:          "/v1/chat/files/" + attID.String(),
 		Mime:         mime,
-		SizeBytes:    stat.Size(),
+		SizeBytes:    sizeBytes,
 		DurationMs:   durationMs,
 		Width:        width,
 		Height:       height,
@@ -741,6 +770,7 @@ func (h *ChatHandler) GetFile(c *gin.Context) {
 	if c.Query("thumb") == "1" && a.ThumbPath != nil && *a.ThumbPath != "" {
 		path = *a.ThumbPath
 	}
+	path = filepath.FromSlash(path)
 	if _, err := os.Stat(path); err != nil {
 		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
 		return
@@ -770,6 +800,16 @@ func (h *ChatHandler) GetFile(c *gin.Context) {
 
 	// Fallback: serve from Go (slower than Nginx for large video).
 	c.File(path)
+}
+
+func chatPickMultipartFile(c *gin.Context) (*multipart.FileHeader, bool) {
+	for _, k := range []string{"file", "upload", "media", "photo", "video", "voice"} {
+		fh, err := c.FormFile(k)
+		if err == nil && fh != nil && fh.Size > 0 {
+			return fh, true
+		}
+	}
+	return nil, false
 }
 
 func chatCopyFile(src, dst string) error {
@@ -923,6 +963,9 @@ func (h *ChatHandler) EditMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "message_not_found")
 		return
 	}
+	if conv, err := h.repo.GetConversation(c.Request.Context(), msg.ConversationID, userID); err == nil && conv != nil {
+		h.hub.BroadcastMessageUpdated(conv.UserAID, conv.UserBID, msg)
+	}
 	resp.OKLang(c, "ok", msg)
 }
 
@@ -940,6 +983,16 @@ func (h *ChatHandler) DeleteMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_message_id")
 		return
 	}
+	pre, err := h.repo.GetMessageByID(c.Request.Context(), msgID, userID)
+	if err != nil {
+		resp.ErrorLang(c, http.StatusNotFound, "message_not_found")
+		return
+	}
+	conv, err := h.repo.GetConversation(c.Request.Context(), pre.ConversationID, userID)
+	if err != nil || conv == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "message_not_found")
+		return
+	}
 	if err := h.repo.DeleteMessage(c.Request.Context(), msgID, userID); err != nil {
 		if err == chat.ErrNotFound {
 			resp.ErrorLang(c, http.StatusNotFound, "message_not_found")
@@ -949,6 +1002,7 @@ func (h *ChatHandler) DeleteMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_delete_message")
 		return
 	}
+	h.hub.BroadcastMessageDeleted(conv.UserAID, conv.UserBID, pre.ConversationID, pre.ID)
 	resp.OKLang(c, "ok", gin.H{"deleted": true})
 }
 
