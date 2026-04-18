@@ -1599,7 +1599,9 @@ func (h *CargoHandler) respondSingleOfferWithCargo(c *gin.Context, offer *cargo.
 	}
 	if h.tripsRepo != nil {
 		if t, _ := h.tripsRepo.GetByOfferID(c.Request.Context(), offer.ID); t != nil {
-			out["trip"] = toTripResp(t)
+			tripOut := toTripResp(t)
+			enrichTripRespManagerIDs(c.Request.Context(), h.repo, t, tripOut)
+			out["trip"] = tripOut
 		} else {
 			out["trip"] = nil
 		}

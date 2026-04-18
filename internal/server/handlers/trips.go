@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"sort"
@@ -84,7 +85,9 @@ func (h *TripsHandler) Get(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
 		return
 	}
-	resp.OKLang(c, "ok", toTripResp(t))
+	out := toTripResp(t)
+	enrichTripRespManagerIDs(c.Request.Context(), h.cargoRepo, t, out)
+	resp.OKLang(c, "ok", out)
 }
 
 // List for GET /api/trips: ?cargo_id= returns single trip for that cargo.
@@ -135,6 +138,48 @@ func tripCargoMini(cg *cargo.Cargo) gin.H {
 	}
 }
 
+// enrichTripRespManagerIDs adds cargo_manager_id and/or driver_manager_id (freelance_dispatchers.id) for trip payloads.
+func enrichTripRespManagerIDs(ctx context.Context, cargoRepo *cargo.Repo, t *trips.Trip, res gin.H) {
+	if cargoRepo == nil || t == nil || res == nil {
+		return
+	}
+	offer, err := cargoRepo.GetOfferByID(ctx, t.OfferID)
+	if err != nil || offer == nil {
+		return
+	}
+	if offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID != uuid.Nil {
+		res["driver_manager_id"] = offer.NegotiationDispatcherID.String()
+	} else if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDriverManager) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
+		res["driver_manager_id"] = offer.ProposedByID.String()
+	}
+	cg, _ := cargoRepo.GetByID(ctx, t.CargoID, false)
+	var cmFromCargo string
+	if cg != nil && cg.CreatedByType != nil && strings.EqualFold(strings.TrimSpace(*cg.CreatedByType), "dispatcher") && cg.CreatedByID != nil && *cg.CreatedByID != uuid.Nil {
+		cmFromCargo = cg.CreatedByID.String()
+	}
+	if _, hasDM := res["driver_manager_id"]; !hasDM {
+		if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDispatcher) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
+			res["cargo_manager_id"] = offer.ProposedByID.String()
+		} else if cmFromCargo != "" {
+			res["cargo_manager_id"] = cmFromCargo
+		}
+		return
+	}
+	// Driver-manager chain: still expose cargo manager who must confirm COMPLETED when applicable.
+	if cmFromCargo != "" {
+		if dmStr, ok := res["driver_manager_id"].(string); !ok || dmStr != cmFromCargo {
+			res["cargo_manager_id"] = cmFromCargo
+		}
+	}
+	if _, hasCM := res["cargo_manager_id"]; !hasCM {
+		if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDispatcher) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
+			if dmStr, ok := res["driver_manager_id"].(string); !ok || offer.ProposedByID.String() != dmStr {
+				res["cargo_manager_id"] = offer.ProposedByID.String()
+			}
+		}
+	}
+}
+
 // GetMyCurrentTrip GET /v1/driver/trips/me — один текущий исполняемый рейс (IN_PROGRESS / IN_TRANSIT / DELIVERED), иначе trip: null.
 func (h *TripsHandler) GetMyCurrentTrip(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
@@ -149,24 +194,7 @@ func (h *TripsHandler) GetMyCurrentTrip(c *gin.Context) {
 		return
 	}
 	tripOut := toTripResp(t)
-	if h.cargoRepo != nil {
-		if offer, err := h.cargoRepo.GetOfferByID(c.Request.Context(), t.OfferID); err == nil && offer != nil {
-			// If the deal went through driver manager flow, expose driver_manager_id.
-			if offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID != uuid.Nil {
-				tripOut["driver_manager_id"] = offer.NegotiationDispatcherID.String()
-			} else if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDriverManager) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
-				tripOut["driver_manager_id"] = offer.ProposedByID.String()
-			}
-			// Otherwise expose cargo_manager_id for direct cargo manager flow.
-			if _, hasDM := tripOut["driver_manager_id"]; !hasDM {
-				if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDispatcher) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
-					tripOut["cargo_manager_id"] = offer.ProposedByID.String()
-				} else if cg, cerr := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false); cerr == nil && cg != nil && cg.CreatedByType != nil && strings.EqualFold(strings.TrimSpace(*cg.CreatedByType), "dispatcher") && cg.CreatedByID != nil && *cg.CreatedByID != uuid.Nil {
-					tripOut["cargo_manager_id"] = cg.CreatedByID.String()
-				}
-			}
-		}
-	}
+	enrichTripRespManagerIDs(c.Request.Context(), h.cargoRepo, t, tripOut)
 	resp.OKLang(c, "ok", gin.H{"trip": tripOut})
 }
 
@@ -681,7 +709,9 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		return
 	}
 	h.notifyTripTransition(ctx, tBefore, tr)
-	resp.OKLang(c, "ok", toTripResp(tr))
+	out := toTripResp(tr)
+	enrichTripRespManagerIDs(ctx, h.cargoRepo, tr, out)
+	resp.OKLang(c, "ok", out)
 }
 
 // ConfirmTransitionDispatcher POST /v1/dispatchers/trips/:id/confirm-transition.
@@ -836,6 +866,7 @@ func (h *TripsHandler) runTripState(c *gin.Context, asDispatcher bool) {
 	}
 	cargoObj, _ := h.cargoRepo.GetByID(ctx, t.CargoID, false)
 	out := toTripResp(t)
+	enrichTripRespManagerIDs(ctx, h.cargoRepo, t, out)
 	if cargoObj != nil {
 		out["cargo"] = gin.H{
 			"id":     cargoObj.ID.String(),

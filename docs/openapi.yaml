@@ -1213,6 +1213,16 @@ components:
         dispatcher_confirmed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        driver_manager_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: "UUID freelance dispatcher (driver manager), если сделка шла через менеджера водителя (`negotiation_dispatcher_id` / DRIVER_MANAGER)."
+        cargo_manager_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: "UUID freelance dispatcher (cargo manager) — кто подтверждает переход в COMPLETED после DELIVERED или владелец груза по цепочке оффера."
 
     SSETripNotificationEvent:
       type: object
@@ -6069,6 +6079,7 @@ paths:
       description: |
         Переводит рейс на следующий операционный статус: `IN_PROGRESS` → `IN_TRANSIT` → `DELIVERED` (один вызов — один шаг).
         **Завершение:** с `DELIVERED` первый вызов **не** ставит `COMPLETED`: фиксируется запрос водителя, в ответе `completion_awaiting_dispatcher_confirm: true`, статус остаётся `DELIVERED`. Закрывает рейс **cargo manager** через `POST /v1/dispatchers/trips/{id}/confirm-transition`.
+        В `data` возвращаются **`cargo_manager_id`** и при необходимости **`driver_manager_id`** (UUID freelance dispatcher), чтобы клиент знал, кто должен вызвать `confirm-transition`.
         Диспетчер может вызывать тот же переход для промежуточных шагов (см. Cargo Manager / Trips).
       security: [{ DeviceTypeHeader: [] }, { LanguageHeader: [] }, { ClientTokenHeader: [] }, { UserTokenHeader: [] }]
       parameters:
