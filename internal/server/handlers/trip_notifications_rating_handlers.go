@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -30,6 +32,10 @@ func tripNotifMessageKey(eventKind string) string {
 	default:
 		return "ok"
 	}
+}
+
+func isClientDisconnect(err error) bool {
+	return err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
 func tripNotificationRowToGin(c *gin.Context, n tripnotif.Row) gin.H {
@@ -75,11 +81,24 @@ func (h *TripsHandler) listTripNotifications(c *gin.Context, recipientKind strin
 	}
 	list, err := h.notif.List(c.Request.Context(), recipientKind, recipientID, unreadOnly, limit)
 	if err != nil {
+		if isClientDisconnect(err) {
+			// Browser cancelled the request (new fetch, navigation, React Strict Mode double-mount, etc.).
+			c.Abort()
+			return
+		}
 		h.logger.Error("trip notifications list", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	unread, _ := h.notif.CountUnread(c.Request.Context(), recipientKind, recipientID)
+	unread, uerr := h.notif.CountUnread(c.Request.Context(), recipientKind, recipientID)
+	if uerr != nil {
+		if isClientDisconnect(uerr) {
+			c.Abort()
+			return
+		}
+		h.logger.Warn("trip notifications unread count", zap.Error(uerr))
+		unread = 0
+	}
 	items := make([]gin.H, 0, len(list))
 	for i := range list {
 		items = append(items, tripNotificationRowToGin(c, list[i]))

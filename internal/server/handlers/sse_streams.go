@@ -126,58 +126,71 @@ func (h *SSEStreamsHandler) DispatcherDriverUpdatesSSE(c *gin.Context) {
 // DispatcherUnifiedNotificationsSSE GET /v1/dispatchers/sse/notifications
 // One stream for dispatchers (both Cargo Manager and Driver Manager):
 // merges notifications, trip status and driver updates.
+//
+// Mux is done in this goroutine (no extra "out" channel): a goroutine blocked on send to an
+// intermediate channel while the client is slow on writeData would deadlock the whole stream.
 func (h *SSEStreamsHandler) DispatcherUnifiedNotificationsSSE(c *gin.Context) {
 	id := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	h.runSSE(c, func() (<-chan []byte, func()) {
-		notifCh, unNotif := h.hub.SubscribeNotifications(tripnotif.RecipientDispatcher, id)
-		tripCh, unTrip := h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
-		drvCh, unDrv := h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
+	if h.hub == nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.Status(http.StatusInternalServerError)
+		return
+	}
+	c.Header("Content-Type", "text/event-stream; charset=utf-8")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
 
-		out := make(chan []byte, 512)
-		done := make(chan struct{})
+	notifCh, unNotif := h.hub.SubscribeNotifications(tripnotif.RecipientDispatcher, id)
+	tripCh, unTrip := h.hub.SubscribeTripStatus(tripnotif.RecipientDispatcher, id)
+	drvCh, unDrv := h.hub.SubscribeDriverUpdates(tripnotif.RecipientDispatcher, id)
+	defer unNotif()
+	defer unTrip()
+	defer unDrv()
 
-		go func() {
-			defer close(out)
-			for {
-				select {
-				case <-done:
-					return
-				case msg, ok := <-notifCh:
-					if !ok {
-						return
-					}
-					select {
-					case <-done:
-						return
-					case out <- msg:
-					}
-				case msg, ok := <-tripCh:
-					if !ok {
-						return
-					}
-					select {
-					case <-done:
-						return
-					case out <- msg:
-					}
-				case msg, ok := <-drvCh:
-					if !ok {
-						return
-					}
-					select {
-					case <-done:
-						return
-					case out <- msg:
-					}
-				}
+	if _, err := io.WriteString(c.Writer, ": sse connected\n\n"); err != nil {
+		return
+	}
+	flusher.Flush()
+
+	tick := time.NewTicker(25 * time.Second)
+	defer tick.Stop()
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-tick.C:
+			if _, err := io.WriteString(c.Writer, ": ping\n\n"); err != nil {
+				return
 			}
-		}()
-
-		return out, func() {
-			close(done)
-			unNotif()
-			unTrip()
-			unDrv()
+			flusher.Flush()
+		case msg, ok := <-notifCh:
+			if !ok {
+				return
+			}
+			if err := h.writeData(c, flusher, msg); err != nil {
+				return
+			}
+		case msg, ok := <-tripCh:
+			if !ok {
+				return
+			}
+			if err := h.writeData(c, flusher, msg); err != nil {
+				return
+			}
+		case msg, ok := <-drvCh:
+			if !ok {
+				return
+			}
+			if err := h.writeData(c, flusher, msg); err != nil {
+				return
+			}
 		}
-	})
+	}
 }
