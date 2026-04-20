@@ -41,6 +41,8 @@ tags:
 - name: Company / Users & auth
 - name: Company
 - name: Legacy / Deprecated
+- name: Cargo Manager / Analytics
+- name: Driver Manager / Analytics
 components:
   securitySchemes:
     DeviceTypeHeader:
@@ -2133,6 +2135,292 @@ components:
           maximum: 5
           multipleOf: 0.5
           description: Оценка по шкале 1.0–5.0 с шагом 0.5 (например 3.5, 5).
+    AnalyticsFilters:
+      type: object
+      properties:
+        date_from:
+          type: string
+          format: date
+        date_to:
+          type: string
+          format: date
+        group_by:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+        timezone:
+          type: string
+          example: Asia/Tashkent
+        truck_type:
+          type: array
+          items:
+            type: string
+        status:
+          type: array
+          items:
+            type: string
+        from_city_code:
+          type: string
+          nullable: true
+        to_city_code:
+          type: string
+          nullable: true
+        driver_id:
+          type: string
+          format: uuid
+          nullable: true
+        cargo_id:
+          type: string
+          format: uuid
+          nullable: true
+    CMAnalyticsKPI:
+      type: object
+      properties:
+        cargos_total:
+          type: integer
+        cargos_active:
+          type: integer
+        cargos_completed:
+          type: integer
+        cargos_cancelled:
+          type: integer
+        offers_incoming_total:
+          type: integer
+        offers_outgoing_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        offers_rejected:
+          type: integer
+        offers_canceled:
+          type: integer
+        offer_accept_rate_pct:
+          type: number
+        trips_total:
+          type: integer
+        trips_in_progress:
+          type: integer
+        trips_in_transit:
+          type: integer
+        trips_delivered:
+          type: integer
+        trips_completed:
+          type: integer
+        trips_cancelled:
+          type: integer
+        trip_completion_rate:
+          type: number
+        revenue_completed:
+          type: number
+        cargo_total:
+          type: integer
+        contracts_total:
+          type: integer
+          description: Accepted deals/contracts in period
+        contracts_successful:
+          type: integer
+          description: Completed deals (by trips completed)
+        contracts_cancelled:
+          type: integer
+          description: Cancelled deals (by trips cancelled)
+        contracts_in_execution:
+          type: integer
+          description: Deals currently in execution (IN_PROGRESS/IN_TRANSIT/DELIVERED)
+        trips_in_execution:
+          type: integer
+    DMAnalyticsKPI:
+      type: object
+      properties:
+        drivers_total:
+          type: integer
+        drivers_available:
+          type: integer
+        drivers_busy:
+          type: integer
+        driver_utilization_pct:
+          type: number
+        offers_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        offers_rejected:
+          type: integer
+        offers_canceled:
+          type: integer
+        offers_waiting_driver_confirm:
+          type: integer
+        offer_accept_rate_pct:
+          type: number
+        trips_total:
+          type: integer
+        trips_in_progress:
+          type: integer
+        trips_in_transit:
+          type: integer
+        trips_delivered:
+          type: integer
+        trips_completed:
+          type: integer
+        trips_cancelled:
+          type: integer
+        trip_completion_rate_pct:
+          type: number
+        completed_value:
+          type: number
+        cargo_total:
+          type: integer
+        cargos_total:
+          type: integer
+        cargos_completed_by_my_drivers:
+          type: integer
+        contracts_total:
+          type: integer
+          description: Accepted deals/contracts in period
+        contracts_successful:
+          type: integer
+          description: Completed deals (by trips completed)
+        contracts_cancelled:
+          type: integer
+          description: Cancelled deals (by trips cancelled)
+        contracts_in_execution:
+          type: integer
+          description: Deals currently in execution (IN_PROGRESS/IN_TRANSIT/DELIVERED)
+        trips_in_execution:
+          type: integer
+    CMAnalyticsTimelineItem:
+      type: object
+      properties:
+        period_start:
+          type: string
+          format: date-time
+        cargo_created:
+          type: integer
+        offers_incoming:
+          type: integer
+        offers_outgoing:
+          type: integer
+        trips_started:
+          type: integer
+        trips_completed:
+          type: integer
+    DMAnalyticsTimelineItem:
+      type: object
+      properties:
+        period_start:
+          type: string
+          format: date-time
+        offers_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        trips_total:
+          type: integer
+        trips_completed:
+          type: integer
+    CMAnalyticsTopRouteItem:
+      type: object
+      properties:
+        from_city_code:
+          type: string
+        to_city_code:
+          type: string
+        trips_count:
+          type: integer
+        total_price:
+          type: number
+    CMAnalyticsTopDriverItem:
+      type: object
+      properties:
+        driver_id:
+          type: string
+          format: uuid
+        trips_count:
+          type: integer
+        trips_completed:
+          type: integer
+        avg_agreed_price:
+          type: number
+    DMAnalyticsTopDriverItem:
+      type: object
+      properties:
+        driver_id:
+          type: string
+          format: uuid
+        driver_name:
+          type: string
+        work_status:
+          type: string
+        trips_total:
+          type: integer
+        trips_completed:
+          type: integer
+    CMAnalyticsDashboardData:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/AnalyticsFilters'
+        kpi:
+          $ref: '#/components/schemas/CMAnalyticsKPI'
+        timeline:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/CMAnalyticsTimelineItem'
+        top:
+          type: object
+          properties:
+            routes:
+              type: array
+              items:
+                $ref: '#/components/schemas/CMAnalyticsTopRouteItem'
+            drivers:
+              type: array
+              items:
+                $ref: '#/components/schemas/CMAnalyticsTopDriverItem'
+        funnel:
+          $ref: '#/components/schemas/AnalyticsFunnel'
+    DMAnalyticsDashboardData:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/AnalyticsFilters'
+        kpi:
+          $ref: '#/components/schemas/DMAnalyticsKPI'
+        timeline:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/DMAnalyticsTimelineItem'
+        top:
+          type: object
+          properties:
+            drivers:
+              type: array
+              items:
+                $ref: '#/components/schemas/DMAnalyticsTopDriverItem'
+        funnel:
+          $ref: '#/components/schemas/AnalyticsFunnel'
+    AnalyticsFunnel:
+      type: object
+      properties:
+        offers_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        trips_in_execution:
+          type: integer
+        trips_completed:
+          type: integer
+        trips_cancelled:
+          type: integer
+        conversion_offer_to_completed_pct:
+          type: number
 paths:
   /health:
     get:
@@ -2481,10 +2769,12 @@ paths:
       tags:
       - Cargo Manager / Cargo
       summary: Загрузить фото к существующему грузу
-      description: |
-        `multipart/form-data`, поле **`photo`** — файл JPEG/PNG/WebP, макс. **10 MB**. Дозагрузка после `POST /api/cargo` (лимит количества фото на стороне сервера).
+      description: '`multipart/form-data`, поле **`photo`** — файл JPEG/PNG/WebP, макс. **10 MB**. Дозагрузка после `POST /api/cargo` (лимит количества фото на стороне сервера).
+
 
         Ответ: `data.id`, `data.url` вида `/api/cargo/{cargo_id}/photos/{photo_id}`.
+
+        '
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -2547,8 +2837,9 @@ paths:
       tags:
       - Cargo Manager / Cargo
       summary: Получить бинарное изображение фото груза
-      description: |
-        Ответ — тело файла. Поддерживаются **ETag** и **304 Not Modified** (`If-None-Match`).
+      description: 'Ответ — тело файла. Поддерживаются **ETag** и **304 Not Modified** (`If-None-Match`).
+
+        '
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -5953,12 +6244,16 @@ paths:
       - Cargo Manager / Trips
       - Driver Manager / Trips
       summary: Назначить водителя на рейс (диспетчер)
-      description: |
-        Тело: **`driver_id`** (UUID водителя). Рейс должен быть в состоянии, допускающем назначение (см. сервер: `pending_driver` / ожидание водителя).
+      description: 'Тело: **`driver_id`** (UUID водителя). Рейс должен быть в состоянии, допускающем назначение (см. сервер: `pending_driver` / ожидание водителя).
 
-        Для груза, созданного **фриланс-диспетчером** (`created_by_type=DISPATCHER`), назначение через эту ручку **запрещено** — ответ **400** `freelance_cargo_assign_via_offer_or_recommendation` (используйте оффер / рекомендацию).
+
+        Для груза, созданного **фриланс-диспетчером** (`created_by_type=DISPATCHER`), назначение через эту ручку **запрещено** — ответ **400** `freelance_cargo_assign_via_offer_or_recommendation` (используйте
+        оффер / рекомендацию).
+
 
         **PATCH** и **POST** — одинаковое поведение (для совместимости с клиентами).
+
+        '
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -6213,6 +6508,37 @@ paths:
                 type: string
         '401':
           description: unauthorized
+  /v1/dispatchers/sse/cargo-offers:
+    get:
+      tags:
+      - Cargo Manager / Offers
+      - Driver Manager / Offers
+      summary: 'SSE: события офферов груза (диспетчер)'
+      description: 'Поток только `kind=cargo_offer` для диспетчера (Cargo Manager / Driver Manager) в рамках видимого scope.
+
+        **JWT:** как у `/v1/dispatchers/sse/trip-notifications`.
+
+        '
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: text/event-stream; `data:` — события `cargo_offer`
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
   /v1/dispatchers/sse/trip-status:
     get:
       tags:
@@ -6241,6 +6567,37 @@ paths:
       responses:
         '200':
           description: 'text/event-stream; `data:` — #/components/schemas/SSETripStatusEvent'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/dispatchers/sse/driver-updates:
+    get:
+      tags:
+      - Cargo Manager / Driver managers
+      - Driver Manager / Drivers & connections
+      summary: 'SSE: обновления водителей (диспетчер)'
+      description: 'Поток изменений по водителям, связанным с диспетчером (профиль, статус, параметры ТС и другие события обновления).
+
+        **JWT:** как у `/v1/dispatchers/sse/trip-notifications`.
+
+        '
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: text/event-stream
           content:
             text/event-stream:
               schema:
@@ -7997,8 +8354,9 @@ paths:
       - Cargo Manager / Likes
       - Driver Manager / Likes
       summary: Список избранных грузов (алиас favorite-cargo)
-      description: |
-        **Алиас** `GET /v1/dispatchers/cargo-likes` — то же поведение и ответ (фронт может использовать этот путь).
+      description: '**Алиас** `GET /v1/dispatchers/cargo-likes` — то же поведение и ответ (фронт может использовать этот путь).
+
+        '
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -8022,8 +8380,9 @@ paths:
       - Cargo Manager / Likes
       - Driver Manager / Likes
       summary: Добавить груз в избранное (алиас favorite-cargo)
-      description: |
-        **Алиас** `POST /v1/dispatchers/cargo-likes` — тело `{ "cargo_id": "uuid" }`.
+      description: '**Алиас** `POST /v1/dispatchers/cargo-likes` — тело `{ "cargo_id": "uuid" }`.
+
+        '
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -8058,8 +8417,9 @@ paths:
       - Cargo Manager / Likes
       - Driver Manager / Likes
       summary: Убрать груз из избранного (алиас favorite-cargo)
-      description: |
-        **Алиас** `DELETE /v1/dispatchers/cargo-likes/{cargoId}`.
+      description: '**Алиас** `DELETE /v1/dispatchers/cargo-likes/{cargoId}`.
+
+        '
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -12465,3 +12825,397 @@ paths:
           description: status, company_id, company_name, role, requires_registration
         '401':
           description: invitation not found or expired
+  /v1/dispatchers/analytics/cargo-manager/dashboard:
+    get:
+      tags:
+      - Cargo Manager / Analytics
+      summary: Cargo Manager analytics dashboard
+      description: 'Full business analytics for CARGO_MANAGER role: KPI, period timeline, top routes, and top drivers.'
+      security: &id001
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: Start date (YYYY-MM-DD)
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: End date (YYYY-MM-DD)
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV statuses, for example SEARCHING_ALL,COMPLETED
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV truck types, for example TENT,REFRIGERATOR
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/CMAnalyticsDashboardData'
+        '400':
+          description: invalid_payload_detail (date/timezone/group_by/filter)
+        '403':
+          description: forbidden (role is not CARGO_MANAGER)
+        '500':
+          description: internal_error
+  /v1/dispatchers/analytics/cargo-manager/export.xlsx:
+    get:
+      tags:
+      - Cargo Manager / Analytics
+      summary: Export Cargo Manager analytics to Excel
+      description: Exports the same analytics as the dashboard endpoint into XLSX (Summary, Timeline, Top_* sheets). Supports section-based export via sections and contract filtering via contract_scope.
+      security: *id001
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: Start date (YYYY-MM-DD)
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: End date (YYYY-MM-DD)
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV statuses, for example SEARCHING_ALL,COMPLETED
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV truck types, for example TENT,REFRIGERATOR
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: sections
+        in: query
+        required: false
+        schema:
+          type: string
+          example: summary,kpi,funnel,timeline,top,contracts
+        description: 'CSV export sections. Available: summary,kpi,funnel,timeline,top,contracts'
+      - name: contract_scope
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - all
+          - successful
+          - cancelled
+          - in_execution
+          default: all
+        description: Contracts filter for Contracts sheet
+      responses:
+        '200':
+          description: XLSX file
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (role is not CARGO_MANAGER)
+        '500':
+          description: internal_error
+  /v1/dispatchers/analytics/driver-manager/dashboard:
+    get:
+      tags:
+      - Driver Manager / Analytics
+      summary: Driver Manager analytics dashboard
+      description: 'Full business analytics for DRIVER_MANAGER role: KPI for drivers/offers/trips, timeline, and top drivers.'
+      security: *id001
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: Start date (YYYY-MM-DD)
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: End date (YYYY-MM-DD)
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV statuses, for example SEARCHING_ALL,COMPLETED
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV truck types, for example TENT,REFRIGERATOR
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '#/components/schemas/DMAnalyticsDashboardData'
+        '400':
+          description: invalid_payload_detail (date/timezone/group_by/filter)
+        '403':
+          description: forbidden (role is not DRIVER_MANAGER)
+        '500':
+          description: internal_error
+  /v1/dispatchers/analytics/driver-manager/export.xlsx:
+    get:
+      tags:
+      - Driver Manager / Analytics
+      summary: Export Driver Manager analytics to Excel
+      description: Exports the same analytics as the dashboard endpoint into XLSX (Summary, Timeline, Top_* sheets). Supports section-based export via sections and contract filtering via contract_scope.
+      security: *id001
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: Start date (YYYY-MM-DD)
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+        description: End date (YYYY-MM-DD)
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV statuses, for example SEARCHING_ALL,COMPLETED
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+        description: CSV truck types, for example TENT,REFRIGERATOR
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: sections
+        in: query
+        required: false
+        schema:
+          type: string
+          example: summary,kpi,funnel,timeline,top,contracts
+        description: 'CSV export sections. Available: summary,kpi,funnel,timeline,top,contracts'
+      - name: contract_scope
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - all
+          - successful
+          - cancelled
+          - in_execution
+          default: all
+        description: Contracts filter for Contracts sheet
+      responses:
+        '200':
+          description: XLSX file
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (role is not DRIVER_MANAGER)
+        '500':
+          description: internal_error

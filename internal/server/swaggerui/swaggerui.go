@@ -639,6 +639,7 @@ const swaggerHTML = `<!doctype html>
           'Dispatchers / Profile',
           'Dispatchers / Notifications & ratings',
           'Cargo Manager / Cargo',
+          'Cargo Manager / Analytics',
           'Cargo Manager / Offers',
           'Cargo Manager / Trips',
           'Cargo Manager / Likes',
@@ -646,6 +647,7 @@ const swaggerHTML = `<!doctype html>
           'Driver Manager / Drivers & connections',
           'Driver Manager / Offers',
           'Driver Manager / Trips',
+          'Driver Manager / Analytics',
           'Driver Manager / Cargo',
           'Driver Manager / Likes',
           'Admin / Auth',
@@ -1036,4 +1038,3 @@ function clearLog() { $('log').innerHTML = ''; }
 </script>
 </body>
 </html>`
-
