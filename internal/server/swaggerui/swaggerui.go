@@ -102,9 +102,6 @@ const swaggerHTML = `<!doctype html>
         --btn-hover: #f9fafb;
         --btn-active-bg: #111827;
         --btn-active-fg: #ffffff;
-        --hint-bg: #f0f9ff;
-        --hint-border: #bae6fd;
-        --hint-fg: #0c4a6e;
       }
       html[data-theme="dark"] {
         --bg: #0b1220;
@@ -119,39 +116,119 @@ const swaggerHTML = `<!doctype html>
         --btn-hover: rgba(255,255,255,.10);
         --btn-active-bg: #e5e7eb;
         --btn-active-fg: #0b1220;
-        --hint-bg: rgba(59,130,246,.12);
-        --hint-border: rgba(59,130,246,.22);
-        --hint-fg: #bfdbfe;
       }
 
       html, body { background: var(--bg); color: var(--fg); }
 
-      /* Top menu */
-      body { padding-top: 58px; }
+      /* Top menu — sticky bar + aligned catalog chips */
+      body {
+        padding-top: 84px;
+        transition: padding-top 0.2s ease;
+      }
+      html.sarbon-scrolled body {
+        padding-top: 52px;
+      }
       .sarbon-topmenu {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        min-height: 58px;
-        height: auto;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-wrap: wrap;
-        gap: 10px;
-        padding: 8px 14px;
-        background: var(--menu-bg);
-        backdrop-filter: blur(10px);
-        border-bottom: 1px solid var(--menu-border);
         z-index: 9999;
+        background: var(--menu-bg);
+        backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--menu-border);
+        box-sizing: border-box;
+        transition: box-shadow 0.2s ease, padding 0.2s ease;
       }
-      .sarbon-topmenu .brand {
+      html.sarbon-scrolled .sarbon-topmenu {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      }
+      html[data-theme="dark"].sarbon-scrolled .sarbon-topmenu {
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.45);
+      }
+      .sarbon-topmenu-inner {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 8px 12px 6px;
+        box-sizing: border-box;
+      }
+      html.sarbon-scrolled .sarbon-topmenu-inner {
+        padding-top: 5px;
+        padding-bottom: 5px;
+      }
+      .sarbon-topmenu-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-rows: auto auto;
+        gap: 8px 10px;
+        align-items: center;
+      }
+      .sarbon-brand {
+        grid-column: 1;
+        grid-row: 1;
         font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
         font-weight: 700;
-        letter-spacing: .2px;
-        margin-right: 8px;
+        letter-spacing: 0.02em;
+        font-size: 15px;
         color: var(--fg);
+        white-space: nowrap;
+      }
+      .sarbon-topmenu-aside {
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .sarbon-topmenu-chips {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        align-items: stretch;
+      }
+      @media (min-width: 960px) {
+        .sarbon-topmenu-row {
+          grid-template-columns: auto 1fr auto;
+          grid-template-rows: auto;
+        }
+        .sarbon-brand {
+          grid-column: 1;
+          grid-row: 1;
+        }
+        .sarbon-topmenu-chips {
+          grid-column: 2;
+          grid-row: 1;
+          justify-content: center;
+        }
+        .sarbon-topmenu-aside {
+          grid-column: 3;
+          grid-row: 1;
+        }
+      }
+      .sarbon-topmenu-extras {
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 8px;
+        justify-content: center;
+        align-items: center;
+        padding: 6px 4px 2px;
+        margin: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+      }
+      .sarbon-topmenu-extras::-webkit-scrollbar {
+        height: 4px;
+      }
+      .sarbon-topmenu-extras::-webkit-scrollbar-thumb {
+        background: var(--muted);
+        border-radius: 4px;
+        opacity: 0.5;
       }
       .sarbon-topmenu .btn {
         appearance: none;
@@ -159,18 +236,28 @@ const swaggerHTML = `<!doctype html>
         background: var(--btn-bg);
         color: var(--btn-fg);
         border-radius: 999px;
-        padding: 10px 14px;
-        font-size: 14px;
-        line-height: 1;
+        padding: 9px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.2;
         cursor: pointer;
-        transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+        flex: 0 0 auto;
+        text-align: center;
+        transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
       }
-      .sarbon-topmenu .btn:hover { background: var(--btn-hover); }
+      .sarbon-topmenu-extras .btn {
+        font-size: 12px;
+        padding: 7px 12px;
+        font-weight: 600;
+      }
+      .sarbon-topmenu .btn:hover {
+        background: var(--btn-hover);
+      }
       .sarbon-topmenu .btn.active {
         background: var(--btn-active-bg);
         color: var(--btn-active-fg);
         border-color: var(--btn-active-bg);
-        box-shadow: 0 6px 18px rgba(0,0,0,.18);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
       }
 
       /* Theme toggle (distinct) */
@@ -231,16 +318,24 @@ const swaggerHTML = `<!doctype html>
 
       /* Keep content width comfortable */
       .swagger-ui .wrapper { max-width: 1240px; }
+      .swagger-ui .information-container { padding-top: 4px; }
+      .swagger-ui .info .title { font-size: 1.35rem; }
 
-      .sarbon-docs-hint {
-        padding: 10px 14px;
-        margin: 0 0 12px 0;
-        background: var(--hint-bg);
-        border: 1px solid var(--hint-border);
-        border-radius: 8px;
-        font-size: 13px;
-        color: var(--hint-fg);
+      html.sarbon-scrolled .sarbon-topmenu-extras {
+        max-height: 0 !important;
+        opacity: 0;
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        border-width: 0 !important;
+        overflow: hidden;
+        pointer-events: none;
       }
+      .sarbon-topmenu-extras {
+        transition: max-height 0.22s ease, opacity 0.18s ease, padding 0.18s ease, margin 0.18s ease, border-width 0.18s ease;
+      }
+      .sarbon-topmenu-extras { max-height: 160px; opacity: 1; }
 
       /* Swagger UI dark overrides (readable + consistent) */
       html[data-theme="dark"] .swagger-ui,
@@ -351,30 +446,36 @@ const swaggerHTML = `<!doctype html>
     </style>
   </head>
   <body>
-    <div class="sarbon-docs-hint" id="sarbon-docs-hint">
-      Заголовки задаются в кнопке <b>Authorize</b>: X-Device-Type (web / ios / android), X-Language (ru / uz / en / tr / zh), X-Client-Token. Один раз выбранные значения действуют для <b>всех разделов</b> (Drivers, Cargo Manager, Driver Manager, Admin, Chat, Company). Можно выбрать любой язык и любой тип устройства.
-      Группа <b>Driver Manager</b> помечена как отдельный блок API в верхнем меню.
-    </div>
-    <div class="sarbon-topmenu" role="navigation" aria-label="API groups">
-      <div class="brand">Sarbon API</div>
-      <button class="btn" data-group="drivers">Drivers Mobile</button>
-      <button class="btn" data-group="cargo">Cargo Manager</button>
-      <button class="btn" data-group="dispatchers">Driver Manager API</button>
-      <button class="btn" data-group="company">Company</button>
-      <button class="btn" data-group="admin">Admin</button>
-      <button class="btn" data-group="chat">Chat</button>
-      <button class="btn" data-group="reference">Reference</button>
-      <a class="btn" href="/docs/flow" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0d9488;color:#fff;border-color:#0d9488">&#128396; Белая доска</a>
-      <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">&#9889; WS Test</a>
-      <a class="btn" href="/calls-test" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#7c3aed;color:#fff;border-color:#7c3aed">&#128222; Calls Test Lab</a>
-      <a class="btn" href="/calls-webrtc" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#1d4ed8;color:#fff;border-color:#1d4ed8">&#127908; WebRTC Call</a>
-      <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">&#128187; Terminal</a>
-      <button class="sarbon-theme-toggle" id="sarbon-theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">
-        <span class="icons" aria-hidden="true"><span class="sun">☀</span><span class="moon">🌙</span></span>
-        <span class="label" id="sarbon-theme-label">Light</span>
-        <span class="switch" aria-hidden="true"><span class="knob"></span></span>
-      </button>
-    </div>
+    <nav class="sarbon-topmenu" role="navigation" aria-label="API groups">
+      <div class="sarbon-topmenu-inner">
+        <div class="sarbon-topmenu-row">
+          <div class="sarbon-brand">Sarbon API</div>
+          <div class="sarbon-topmenu-chips">
+            <button type="button" class="btn" data-group="drivers">Drivers Mobile</button>
+            <button type="button" class="btn" data-group="cargo">Cargo Manager</button>
+            <button type="button" class="btn" data-group="dispatchers">Driver Manager</button>
+            <button type="button" class="btn" data-group="company">Company</button>
+            <button type="button" class="btn" data-group="admin">Admin</button>
+            <button type="button" class="btn" data-group="chat">Chat</button>
+            <button type="button" class="btn" data-group="reference">Reference</button>
+          </div>
+          <div class="sarbon-topmenu-aside">
+            <button class="sarbon-theme-toggle" id="sarbon-theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">
+              <span class="icons" aria-hidden="true"><span class="sun">☀</span><span class="moon">🌙</span></span>
+              <span class="label" id="sarbon-theme-label">Light</span>
+              <span class="switch" aria-hidden="true"><span class="knob"></span></span>
+            </button>
+          </div>
+        </div>
+        <div class="sarbon-topmenu-extras" aria-label="Дополнительные страницы">
+          <a class="btn" href="/docs/flow" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#0d9488;color:#fff;border-color:#0d9488">Белая доска</a>
+          <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">WS Test</a>
+          <a class="btn" href="/calls-test" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#7c3aed;color:#fff;border-color:#7c3aed">Calls Lab</a>
+          <a class="btn" href="/calls-webrtc" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#1d4ed8;color:#fff;border-color:#1d4ed8">WebRTC</a>
+          <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">Terminal</a>
+        </div>
+      </div>
+    </nav>
     <div id="swagger-ui"></div>
     <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
     <script>
@@ -509,12 +610,10 @@ const swaggerHTML = `<!doctype html>
         }
 
         // Скрыты на вкладке Drivers Mobile (пошагово возвращаем в isTagInGroup + applyGroupFilter).
+        // Упрощённый вид «Drivers Mobile»: без офферов и блока связей/приглашений.
         const DRIVERS_MOBILE_HIDDEN_TAGS = new Set([
-          'Drivers / Driver invitations',
-          'Drivers / My dispatchers',
-          'Drivers / Invite dispatcher',
           'Drivers / Offers',
-          'Drivers / Offer decision flow',
+          'Drivers / Relations',
         ]);
         // Do not hide POST /v1/driver/dispatchers/.../rating (cargo manager rating) with a blanket dispatchers prefix.
         function hideDriverMobilePath(pathText) {
@@ -527,64 +626,38 @@ const swaggerHTML = `<!doctype html>
         }
 
         const TAG_ORDER = [
-          'Drivers / Auth',
-          'Drivers / Registration',
-          'Drivers / KYC',
-          'Drivers / Profile',
-          'Drivers / Offer minimal',
-          'Drivers / Cargo view',
-          'Drivers / Cargo likes',
-          'Drivers / Dispatcher likes',
+          'Drivers / Auth & registration',
+          'Drivers / Profile & KYC',
+          'Drivers / Cargo',
           'Drivers / Offers',
           'Drivers / Trips',
-          'Notifications / Driver mobile',
-          'Notifications and ratings / Driver',
-          'SSE / Driver mobile (FCM-aligned)',
-          'SSE / Driver — Trip notifications',
-          'SSE / Driver — Trip status',
-          'SSE / Driver — Cargo offers',
-          'SSE / Driver — Connections',
-          'Cargo Manager',
-          'Cargo Manager / Auth',
-          'Cargo Manager / Registration',
-          'Cargo Manager / Profile',
-          'Cargo Manager / Cargo CRUD',
-          'Cargo Manager / View Cargo',
+          'Drivers / Likes',
+          'Drivers / Relations',
+          'Drivers / Notifications',
+          'Drivers / SSE',
+          'Dispatchers / Auth & registration',
+          'Dispatchers / Profile',
+          'Dispatchers / Catalog',
+          'Dispatchers / Notifications & ratings',
+          'Dispatchers / SSE',
+          'Cargo Manager / Cargo',
           'Cargo Manager / Offers',
-          'Cargo Manager / Offers to Driver Manager',
           'Cargo Manager / Trips',
-          'Notifications and ratings / Cargo manager',
-          'SSE / Cargo manager — Trip notifications',
-          'SSE / Cargo manager — Trip status',
-          'Cargo Manager / Cargo likes',
-          'Cargo Manager / Driver likes',
+          'Cargo Manager / Likes',
           'Cargo Manager / Driver managers',
-          'Driver Manager / Auth',
-          'Driver Manager / Registration',
-          'Driver Manager / Profile',
-          'Driver Manager / Cargo likes',
-          'Driver Manager / Driver likes',
-          'Driver Manager / Connect offers',
-          'Driver Manager / Drivers catalog',
-          'Driver Manager / My drivers',
-          'SSE / Driver Manager — Trip notifications',
-          'SSE / Driver Manager — Trip status',
+          'Driver Manager / Drivers & connections',
           'Driver Manager / Offers',
           'Driver Manager / Trips',
-          'Driver Manager / Completion & ratings flow',
+          'Driver Manager / Likes',
           'Admin / Auth',
           'Admin / Companies',
-          'Company / Dispatcher (приглашённый)',
-          'Chat',
-          'Calls (Voice)',
-          'Calls (Voice) / Test Lab',
-          'Company',
+          'Admin / Tools',
           'Reference',
-          'Reference / Drivers',
-          'Reference / Cargo',
-          'Reference / Company',
-          'Reference / Admin',
-          'Reference / Dispatchers',
+          'Chat',
+          'Chat / Voice',
+          'Company / Users & auth',
+          'Company',
+          'Legacy / Deprecated',
         ];
         function tagIndex(t) {
           const n = tagName(t);
@@ -612,38 +685,17 @@ const swaggerHTML = `<!doctype html>
           var t = (typeof tag === 'string' ? tag : '').trim();
           var tLower = t.toLowerCase();
           if (group === 'drivers') {
-            if (t === 'Notifications / Driver mobile') return true;
-            if (t.startsWith('Notifications and ratings / Driver')) return true;
-            if (t.startsWith('SSE / Driver')) return true;
             if (!t.startsWith('Drivers /')) return false;
             return !DRIVERS_MOBILE_HIDDEN_TAGS.has(t);
           }
           if (group === 'dispatchers') {
-            const allowedDispatcherTags = new Set([
-              'Driver Manager / Auth',
-              'Driver Manager / Registration',
-              'Driver Manager / Profile',
-              'Driver Manager / Cargo likes',
-              'Driver Manager / Driver likes',
-              'Driver Manager / Connect offers',
-              'Driver Manager / Drivers catalog',
-              'Driver Manager / My drivers',
-              'SSE / Driver Manager — Trip notifications',
-              'SSE / Driver Manager — Trip status',
-              'Driver Manager / Offers',
-              'Driver Manager / Trips',
-              'Driver Manager / Completion & ratings flow',
-            ]);
-            return allowedDispatcherTags.has(t);
+            return t.startsWith('Driver Manager /') || t.startsWith('Dispatchers /');
           }
           if (group === 'admin') return t.startsWith('Admin /');
           if (group === 'cargo') {
-            if (t.startsWith('Notifications and ratings / Cargo manager')) return true;
-            if (t.startsWith('SSE / Cargo manager')) return true;
-            if (t.startsWith('SSE / Driver Manager')) return true;
-            return t === 'Cargo Manager' || t.startsWith('Cargo Manager /');
+            return t.startsWith('Cargo Manager /') || t.startsWith('Dispatchers /');
           }
-          if (group === 'chat') return t.startsWith('Chat') || t.startsWith('Calls');
+          if (group === 'chat') return t.startsWith('Chat');
           if (group === 'company') return t.startsWith('Company') || tLower === 'company' || tLower.startsWith('company ');
           if (group === 'reference') return t.startsWith('Reference');
           return true;
@@ -766,6 +818,20 @@ const swaggerHTML = `<!doctype html>
 
         // Initial filter apply (after first paint)
         setTimeout(() => setGroup(initialGroup), 0);
+
+        (function bindScrollCompactHeader() {
+          let last = false;
+          function tick() {
+            const y = window.scrollY || document.documentElement.scrollTop || 0;
+            const next = y > 48;
+            if (next !== last) {
+              last = next;
+              document.documentElement.classList.toggle('sarbon-scrolled', next);
+            }
+          }
+          window.addEventListener('scroll', tick, { passive: true });
+          tick();
+        })();
       };
     </script>
   </body>
