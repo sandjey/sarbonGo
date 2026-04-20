@@ -22,8 +22,6 @@ tags:
 - name: Dispatchers / Auth & registration
 - name: Dispatchers / Profile
 - name: Dispatchers / Notifications & ratings
-- name: Dispatchers / SSE
-- name: Dispatchers / Catalog
 - name: Cargo Manager / Cargo
 - name: Cargo Manager / Offers
 - name: Cargo Manager / Trips
@@ -32,6 +30,7 @@ tags:
 - name: Driver Manager / Drivers & connections
 - name: Driver Manager / Offers
 - name: Driver Manager / Trips
+- name: Driver Manager / Cargo
 - name: Driver Manager / Likes
 - name: Admin / Auth
 - name: Admin / Companies
@@ -2477,6 +2476,146 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Envelope'
+  /api/cargo/{id}/photos:
+    post:
+      tags:
+      - Cargo Manager / Cargo
+      summary: Загрузить фото к существующему грузу
+      description: |
+        `multipart/form-data`, поле **`photo`** — файл JPEG/PNG/WebP, макс. **10 MB**. Дозагрузка после `POST /api/cargo` (лимит количества фото на стороне сервера).
+
+        Ответ: `data.id`, `data.url` вида `/api/cargo/{cargo_id}/photos/{photo_id}`.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - photo
+              properties:
+                photo:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: photo_uploaded — data.id, data.url
+        '400':
+          description: photo_file_required | file_too_large | allowed_image_types
+        '404':
+          description: cargo_not_found
+        '500':
+          description: internal_error
+    get:
+      tags:
+      - Cargo Manager / Cargo
+      summary: Список фото груза (метаданные)
+      description: Возвращает `data.items[]` — `id`, `mime`, `size_bytes`, `created_at`, `url`.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ok — data.items
+        '404':
+          description: cargo_not_found
+        '500':
+          description: failed_to_list
+  /api/cargo/{id}/photos/{photoId}:
+    get:
+      tags:
+      - Cargo Manager / Cargo
+      summary: Получить бинарное изображение фото груза
+      description: |
+        Ответ — тело файла. Поддерживаются **ETag** и **304 Not Modified** (`If-None-Match`).
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: photoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: image/jpeg | image/png | image/webp
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: Not Modified
+        '404':
+          description: photo_not_found
+    delete:
+      tags:
+      - Cargo Manager / Cargo
+      summary: Удалить фото груза
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: photoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: photo_deleted
+        '404':
+          description: photo_not_found
+        '500':
+          description: internal_error
   /api/cargo/{id}/status:
     patch:
       tags:
@@ -5808,6 +5947,88 @@ paths:
           description: not your cargo | trip_cargo_manager_completed_only (only CARGO_MANAGER can confirm COMPLETED; cargo manager cannot confirm intermediate steps)
         '404':
           description: trip not found
+  /v1/dispatchers/trips/{id}/assign-driver:
+    patch:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: Назначить водителя на рейс (диспетчер)
+      description: |
+        Тело: **`driver_id`** (UUID водителя). Рейс должен быть в состоянии, допускающем назначение (см. сервер: `pending_driver` / ожидание водителя).
+
+        Для груза, созданного **фриланс-диспетчером** (`created_by_type=DISPATCHER`), назначение через эту ручку **запрещено** — ответ **400** `freelance_cargo_assign_via_offer_or_recommendation` (используйте оффер / рекомендацию).
+
+        **PATCH** и **POST** — одинаковое поведение (для совместимости с клиентами).
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: UUID рейса (trip_id)
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - driver_id
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: ok — data.status, data.driver_id
+        '400':
+          description: invalid_payload_detail | freelance_cargo_assign_via_offer_or_recommendation
+        '404':
+          description: trip_not_found_or_not_pending_driver
+    post:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: Назначить водителя на рейс (диспетчер), POST-алиас
+      description: См. **PATCH** того же пути — тело и ответы совпадают.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: UUID рейса (trip_id)
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - driver_id
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: ok — data.status, data.driver_id
+        '400':
+          description: invalid_payload_detail | freelance_cargo_assign_via_offer_or_recommendation
+        '404':
+          description: trip_not_found_or_not_pending_driver
   /v1/dispatchers/trips/{id}/cancel:
     post:
       tags:
@@ -5958,7 +6179,8 @@ paths:
   /v1/dispatchers/sse/trip-notifications:
     get:
       tags:
-      - Dispatchers / SSE
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
       summary: 'SSE: только уведомления по рейсу (trip_notification)'
       description: 'Поток **`kind=trip_notification`** (события рейса и ожидание завершения). Другие виды событий (офферы, связи) в этот поток **не** подмешиваются; для них на сервере есть отдельные SSE-пути,
         не описанные в этой сокращённой спецификации.
@@ -5994,7 +6216,8 @@ paths:
   /v1/dispatchers/sse/trip-status:
     get:
       tags:
-      - Dispatchers / SSE
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
       summary: 'SSE: изменения статуса рейса (диспетчер)'
       description: 'Поток `trip_status` для рейсов из видимого scope диспетчера:
 
@@ -6027,7 +6250,8 @@ paths:
   /v1/dispatchers/drivers/{driverId}/rating:
     post:
       tags:
-      - Dispatchers / Notifications & ratings
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
       summary: Оценить водителя по завершённому рейсу (профиль, 1–5 шаг 0.5)
       description: 'Путь: **водитель** (`driver_id`), которого оцениваете. Тело: **`trip_id`** завершённого рейса и **`stars`**.
 
@@ -6065,7 +6289,8 @@ paths:
   /v1/dispatchers/dispatchers/{dispatcherId}/rating:
     post:
       tags:
-      - Dispatchers / Notifications & ratings
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
       summary: Оценить второго диспетчера по завершённому рейсу (cargo manager ↔ driver manager)
       description: 'Позволяет закрыть связку оценок между ролями:
 
@@ -6936,7 +7161,8 @@ paths:
   /v1/dispatchers/cargo/export.xlsx:
     get:
       tags:
-      - Legacy / Deprecated
+      - Cargo Manager / Cargo
+      - Driver Manager / Cargo
       summary: Экспорт моих грузов в Excel (.xlsx)
       description: '**Назначение:** скачать все грузы, созданные текущим диспетчером (`created_by_type=DISPATCHER`, `created_by_id` = JWT), в одном файле Microsoft Excel.
 
@@ -7746,6 +7972,94 @@ paths:
       - Cargo Manager / Likes
       - Driver Manager / Likes
       summary: Убрать груз из избранного (Cargo likes)
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: cargoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: favorite_deleted
+        '404':
+          description: favorite_not_found
+        '500':
+          description: failed_to_delete_favorite
+  /v1/dispatchers/favorite-cargo:
+    get:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: Список избранных грузов (алиас favorite-cargo)
+      description: |
+        **Алиас** `GET /v1/dispatchers/cargo-likes` — то же поведение и ответ (фронт может использовать этот путь).
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: см. GET /v1/dispatchers/cargo-likes
+        '500':
+          description: failed_to_list_favorites
+    post:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: Добавить груз в избранное (алиас favorite-cargo)
+      description: |
+        **Алиас** `POST /v1/dispatchers/cargo-likes` — тело `{ "cargo_id": "uuid" }`.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - cargo_id
+              properties:
+                cargo_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: favorite_added
+        '200':
+          description: favorite_already_exists
+        '400':
+          description: invalid_payload_detail
+        '404':
+          description: cargo_not_found
+        '500':
+          description: failed_to_create_favorite
+  /v1/dispatchers/favorite-cargo/{cargoId}:
+    delete:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: Убрать груз из избранного (алиас favorite-cargo)
+      description: |
+        **Алиас** `DELETE /v1/dispatchers/cargo-likes/{cargoId}`.
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -9975,7 +10289,8 @@ paths:
   /v1/dispatchers/dispatchers/catalog:
     get:
       tags:
-      - Dispatchers / Catalog
+      - Cargo Manager / Driver managers
+      - Driver Manager / Drivers & connections
       summary: Каталог всех фриланс-диспетчеров (диспетчер)
       description: '**Диспетчер (Cargo Manager или Driver Manager):** алиас для `GET /v1/driver/dispatchers/catalog`.
 

@@ -472,6 +472,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispAuthed.GET("/trips", tripsH.ListForCargoManager)
 	dispAuthed.GET("/trips/history", tripsH.ListHistoryForCargoManager)
 	dispAuthed.GET("/trips/:id", tripsH.GetForCargoManager)
+	dispAuthed.PATCH("/trips/:id/assign-driver", tripsH.AssignDriver)
+	dispAuthed.POST("/trips/:id/assign-driver", tripsH.AssignDriver)
 	dispAuthed.POST("/trips/:id/confirm-transition", tripsH.ConfirmTransitionDispatcher)
 	dispAuthed.POST("/trips/:id/cancel", tripsH.CancelTripDispatcher)
 	dispAuthed.GET("/trips/:id/state", tripsH.TripStateDispatcher)
