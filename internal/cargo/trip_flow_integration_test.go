@@ -282,8 +282,10 @@ func TestArchiveCompletedCargoTx_MultiTripKeepsCargoSearching(t *testing.T) {
 	if cargoRow == nil {
 		t.Fatal("cargo missing")
 	}
-	if cargoRow.Status != StatusSearchingAll {
-		t.Errorf("cargo should stay SEARCHING_ALL, got %s", cargoRow.Status)
+	// Both slots are filled with ACCEPTED offers → cargo was moved to PROCESSING by
+	// refreshCargoProcessingStatusTx; completion of only one trip must not promote it to COMPLETED.
+	if cargoRow.Status != StatusProcessing {
+		t.Errorf("cargo should be PROCESSING after all offers accepted and mid-flight, got %s", cargoRow.Status)
 	}
 	var nTrips int
 	_ = pool.QueryRow(ctx, `SELECT COUNT(*) FROM trips WHERE cargo_id = $1`, cargoID).Scan(&nTrips)
@@ -384,6 +386,77 @@ func TestOnTripCancelledTx_NoRestoreBeforeInTransit(t *testing.T) {
 	}
 	if cAfter.VehiclesLeft != 3 {
 		t.Errorf("want vehicles_left still 3, got %d", cAfter.VehiclesLeft)
+	}
+}
+
+// TestAcceptOffer_PromotesCargoToProcessingAndRollsBack — при заполнении всех
+// слотов cargo уходит в PROCESSING; при отмене одного рейса после IN_TRANSIT
+// оффер возвращается в PENDING и cargo откатывается обратно в SEARCHING_ALL.
+func TestAcceptOffer_PromotesCargoToProcessingAndRollsBack(t *testing.T) {
+	pool := testIntegrationPool(t)
+	defer pool.Close()
+	ctx := context.Background()
+	repo := NewRepo(pool)
+
+	cargoID := itestCreateCargo(t, repo, 2)
+	defer itestDeleteCargo(t, pool, cargoID)
+
+	d1, d2 := itestInsertDriver(t, pool), itestInsertDriver(t, pool)
+	o1, err := repo.CreateOffer(ctx, cargoID, d1, 100, "USD", "", OfferProposedByDriver, nil)
+	if err != nil {
+		t.Fatalf("CreateOffer1: %v", err)
+	}
+	o2, err := repo.CreateOffer(ctx, cargoID, d2, 100, "USD", "", OfferProposedByDriver, nil)
+	if err != nil {
+		t.Fatalf("CreateOffer2: %v", err)
+	}
+
+	// First accept: 1/2 slots → cargo must stay SEARCHING_ALL.
+	if _, _, err := repo.AcceptOffer(ctx, o1); err != nil {
+		t.Fatalf("AcceptOffer1: %v", err)
+	}
+	cMid, _ := repo.GetByID(ctx, cargoID, false)
+	if cMid == nil || cMid.Status != StatusSearchingAll {
+		t.Fatalf("after 1/2 accepted want SEARCHING_ALL, got %+v", cMid)
+	}
+
+	// Second accept: 2/2 slots → cargo must move to PROCESSING.
+	if _, _, err := repo.AcceptOffer(ctx, o2); err != nil {
+		t.Fatalf("AcceptOffer2: %v", err)
+	}
+	cFull, _ := repo.GetByID(ctx, cargoID, false)
+	if cFull == nil || cFull.Status != StatusProcessing {
+		t.Fatalf("after 2/2 accepted want PROCESSING, got %+v", cFull)
+	}
+
+	// Cancel one trip from IN_TRANSIT → offer reverts to PENDING, accepted_count=1 → cargo rolls back.
+	trip1 := uuid.New()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO trips (id, cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency)
+		 VALUES ($1, $2, $3, $4, 'IN_TRANSIT', 100, 'USD')`,
+		trip1, cargoID, o1, d1); err != nil {
+		t.Fatalf("insert trip: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM trips WHERE id = $1`, trip1); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("delete trip: %v", err)
+	}
+	if err := repo.OnTripCancelledTx(ctx, tx, cargoID, o1, "IN_TRANSIT"); err != nil {
+		_ = tx.Rollback(ctx)
+		t.Fatalf("OnTripCancelledTx: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	cBack, _ := repo.GetByID(ctx, cargoID, false)
+	if cBack == nil || cBack.Status != StatusSearchingAll {
+		t.Fatalf("after slot freed want SEARCHING_ALL (rollback from PROCESSING), got %+v", cBack)
 	}
 }
 

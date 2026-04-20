@@ -261,7 +261,7 @@ scoped_trips AS (
 )
 SELECT
   (SELECT COUNT(*) FROM scoped_cargo) AS cargos_total,
-  (SELECT COUNT(*) FROM scoped_cargo WHERE status IN ('SEARCHING_ALL', 'SEARCHING_COMPANY')) AS cargos_active,
+  (SELECT COUNT(*) FROM scoped_cargo WHERE status IN ('SEARCHING_ALL', 'SEARCHING_COMPANY', 'PROCESSING')) AS cargos_active,
   (SELECT COUNT(*) FROM scoped_cargo WHERE status = 'COMPLETED') AS cargos_completed,
   (SELECT COUNT(*) FROM scoped_cargo WHERE status = 'CANCELLED') AS cargos_cancelled,
   (SELECT COUNT(*) FROM scoped_offers WHERE COALESCE(proposed_by, 'DRIVER') IN ('DRIVER','DRIVER_MANAGER')) AS offers_incoming_total,

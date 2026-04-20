@@ -80,7 +80,22 @@ ALTER TABLE cargo
   ADD COLUMN IF NOT EXISTS photo_urls TEXT[] NULL,
   ADD COLUMN IF NOT EXISTS way_points JSONB NULL,
   ADD COLUMN IF NOT EXISTS unloading_types TEXT[] NULL,
-  ADD COLUMN IF NOT EXISTS is_two_drivers_required BOOLEAN NOT NULL DEFAULT false;
+  ADD COLUMN IF NOT EXISTS is_two_drivers_required BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS prev_status TEXT NULL;
+`)
+	if err != nil {
+		return err
+	}
+
+	_, err = pg.Exec(ctx, `
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'cargo_prev_status_check') THEN
+    ALTER TABLE cargo DROP CONSTRAINT cargo_prev_status_check;
+  END IF;
+  ALTER TABLE cargo ADD CONSTRAINT cargo_prev_status_check
+    CHECK (prev_status IS NULL OR prev_status IN ('SEARCHING_ALL','SEARCHING_COMPANY'));
+END$$;
 `)
 	if err != nil {
 		return err

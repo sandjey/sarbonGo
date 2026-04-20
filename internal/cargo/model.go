@@ -22,8 +22,11 @@ const (
 	StatusPendingModeration CargoStatus = "PENDING_MODERATION"
 	StatusSearchingAll      CargoStatus = "SEARCHING_ALL"     // visible to all drivers
 	StatusSearchingCompany  CargoStatus = "SEARCHING_COMPANY" // visible only to company drivers
-	StatusCompleted         CargoStatus = "COMPLETED"
-	StatusCancelled         CargoStatus = "CANCELLED"
+	// StatusProcessing: all offer slots are filled (accepted_count == vehicles_amount).
+	// Cargo is no longer visible in driver search; rolls back to prev_status if a slot frees up.
+	StatusProcessing CargoStatus = "PROCESSING"
+	StatusCompleted  CargoStatus = "COMPLETED"
+	StatusCancelled  CargoStatus = "CANCELLED"
 )
 
 // IsSearching returns true if status is one of the "searching" variants (cargo visible for offers).

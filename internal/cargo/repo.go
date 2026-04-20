@@ -915,8 +915,12 @@ func (r *Repo) SetStatus(ctx context.Context, id uuid.UUID, newStatus string) er
 		StatusPendingModeration: {StatusSearchingAll, StatusSearchingCompany, StatusCancelled},
 		StatusSearchingAll:      {StatusCancelled},
 		StatusSearchingCompany:  {StatusCancelled},
-		StatusCompleted:         nil,
-		StatusCancelled:         nil,
+		// PROCESSING is reached only via refreshCargoProcessingStatusTx (all offers ACCEPTED).
+		// Admin can only hard-cancel it; transitions back to SEARCHING_* happen automatically
+		// when a trip cancellation frees a slot.
+		StatusProcessing: {StatusCancelled},
+		StatusCompleted:  nil,
+		StatusCancelled:  nil,
 	}
 	cur, err := r.GetByID(ctx, id, false)
 	if err != nil || cur == nil {
@@ -2086,6 +2090,12 @@ FROM offers WHERE id = $1 AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')`, 
 		return uuid.Nil, uuid.Nil, err
 	}
 
+	// If this ACCEPTED fills all slots (accepted_count == vehicles_amount),
+	// move cargo from SEARCHING_* to PROCESSING so it disappears from driver search.
+	if err := r.refreshCargoProcessingStatusTx(ctx, tx, cargoID); err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+
 	return cargoID, carrierID, nil
 }
 
@@ -2250,8 +2260,78 @@ func (r *Repo) MarkDriverCompleted(ctx context.Context, cargoID, driverID uuid.U
 	return err
 }
 
+// refreshCargoProcessingStatusTx synchronises cargo.status with the current
+// number of ACCEPTED offers for the cargo:
+//   - SEARCHING_ALL / SEARCHING_COMPANY → PROCESSING when accepted_count == vehicles_amount
+//     (all slots are filled; cargo is no longer visible in driver search). The previous
+//     searching variant is saved in cargo.prev_status so we can roll back.
+//   - PROCESSING → prev_status (SEARCHING_*) when a slot frees up
+//     (e.g. offer reverted to PENDING via OnTripCancelledTx or a driver is marked cancelled).
+//     prev_status is cleared on rollback.
+//
+// Called from AcceptOfferTx, OnTripCancelledTx and MarkDriverCancelledTx inside
+// the same transaction so visibility and search listings stay consistent.
+func (r *Repo) refreshCargoProcessingStatusTx(ctx context.Context, tx pgx.Tx, cargoID uuid.UUID) error {
+	var status CargoStatus
+	var vehiclesAmount int
+	var prevStatus *string
+	err := tx.QueryRow(ctx, `
+SELECT status, COALESCE(vehicles_amount, 0), prev_status
+FROM cargo
+WHERE id = $1 AND deleted_at IS NULL
+FOR UPDATE`, cargoID).Scan(&status, &vehiclesAmount, &prevStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+
+	// Only SEARCHING_* and PROCESSING are involved in this transition.
+	if !(IsSearching(status) || status == StatusProcessing) {
+		return nil
+	}
+	if vehiclesAmount <= 0 {
+		return nil
+	}
+
+	var accepted int
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM offers WHERE cargo_id = $1 AND status = 'ACCEPTED'`,
+		cargoID).Scan(&accepted); err != nil {
+		return err
+	}
+
+	switch {
+	case IsSearching(status) && accepted >= vehiclesAmount:
+		_, err = tx.Exec(ctx,
+			`UPDATE cargo
+			 SET prev_status = status::text, status = $1, updated_at = now()
+			 WHERE id = $2 AND deleted_at IS NULL`,
+			StatusProcessing, cargoID)
+		return err
+	case status == StatusProcessing && accepted < vehiclesAmount:
+		revert := StatusSearchingAll
+		if prevStatus != nil {
+			switch CargoStatus(strings.ToUpper(strings.TrimSpace(*prevStatus))) {
+			case StatusSearchingCompany:
+				revert = StatusSearchingCompany
+			case StatusSearchingAll:
+				revert = StatusSearchingAll
+			}
+		}
+		_, err = tx.Exec(ctx,
+			`UPDATE cargo
+			 SET status = $1, prev_status = NULL, updated_at = now()
+			 WHERE id = $2 AND deleted_at IS NULL`,
+			revert, cargoID)
+		return err
+	}
+	return nil
+}
+
 // OnTripEnteredInTransitTx decrements vehicles_left when a trip reaches IN_TRANSIT (execution started).
-// Cargo stays SEARCHING_* until all trips are COMPLETED (then set in ArchiveCompletedCargoTx).
+// Cargo stays SEARCHING_* / PROCESSING until all trips are COMPLETED (then set in ArchiveCompletedCargoTx).
 func (r *Repo) OnTripEnteredInTransitTx(ctx context.Context, tx pgx.Tx, cargoID uuid.UUID) error {
 	_, err := tx.Exec(ctx, `
 		UPDATE cargo
@@ -2332,7 +2412,12 @@ func (r *Repo) OnTripCancelledTx(ctx context.Context, tx pgx.Tx, cargoID, offerI
 	if err != nil {
 		return err
 	}
-	return r.MarkDriverCancelledTx(ctx, tx, cargoID, carrierID, tripStatusConsumesVehiclesLeft(tripStatus))
+	if err := r.MarkDriverCancelledTx(ctx, tx, cargoID, carrierID, tripStatusConsumesVehiclesLeft(tripStatus)); err != nil {
+		return err
+	}
+	// Offer went back to PENDING → accepted_count dropped. If cargo was PROCESSING,
+	// roll back to the previous searching variant so drivers can fill the slot again.
+	return r.refreshCargoProcessingStatusTx(ctx, tx, cargoID)
 }
 
 // ArchiveCompletedCargoTx marks the trip as COMPLETED, updates cargo_drivers; when every trip for the cargo is COMPLETED, sets cargo to COMPLETED (row retained).
@@ -2363,7 +2448,10 @@ func (r *Repo) ArchiveCompletedCargoTx(ctx context.Context, tx pgx.Tx, cargoID, 
 	}
 	if total > 0 && total == completed {
 		_, err = tx.Exec(ctx,
-			`UPDATE cargo SET status = $1, updated_at = now() WHERE id = $2 AND deleted_at IS NULL AND status IN ('SEARCHING_ALL','SEARCHING_COMPANY')`,
+			`UPDATE cargo
+			 SET status = $1, prev_status = NULL, updated_at = now()
+			 WHERE id = $2 AND deleted_at IS NULL
+			   AND status IN ('SEARCHING_ALL','SEARCHING_COMPANY','PROCESSING')`,
 			StatusCompleted, cargoID)
 	}
 	return err
