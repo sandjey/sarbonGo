@@ -140,6 +140,106 @@ func (s *Service) SendTestToToken(ctx context.Context, token, title, body string
 	return s.sendToTokenErr(ctx, token, title, body, data)
 }
 
+// RecipientTokenInfo summarises whether a driver/dispatcher has a usable FCM token in DB.
+type RecipientTokenInfo struct {
+	Kind        string
+	ID          uuid.UUID
+	TokenFound  bool
+	TokenLen    int
+	TokenPrefix string
+	Source      string
+}
+
+// InspectRecipient returns token availability for a given (kind, id) without sending anything.
+// Used by admin diagnostic endpoint to explain why system flow cannot push.
+func (s *Service) InspectRecipient(ctx context.Context, recipientKind string, recipientID uuid.UUID) RecipientTokenInfo {
+	info := RecipientTokenInfo{Kind: recipientKind, ID: recipientID}
+	tk, source := s.resolveRecipientToken(ctx, recipientKind, recipientID)
+	info.Source = source
+	tk = strings.TrimSpace(tk)
+	if tk == "" {
+		return info
+	}
+	info.TokenFound = true
+	info.TokenLen = len(tk)
+	if len(tk) >= 16 {
+		info.TokenPrefix = tk[:16]
+	} else {
+		info.TokenPrefix = tk
+	}
+	return info
+}
+
+// RecipientSendResult describes what SendByRecipient attempted and what happened.
+type RecipientSendResult struct {
+	TokenFound   bool
+	TokenPrefix  string
+	Source       string
+	FCMMessageID string
+}
+
+// SendByRecipient sends a notification via the SAME code path used by the internal event flow
+// (userstream → onPublish → SendByStreamRecipient). Use it from admin tools to reproduce the real
+// system scenario for a given driver/dispatcher ID — not for bypass tests with a raw token.
+func (s *Service) SendByRecipient(ctx context.Context, recipientKind string, recipientID uuid.UUID, title, body string, data map[string]string) (RecipientSendResult, error) {
+	if !s.Enabled() {
+		return RecipientSendResult{}, fmt.Errorf("push notifications are disabled or firebase is not configured")
+	}
+	if recipientID == uuid.Nil {
+		return RecipientSendResult{}, fmt.Errorf("recipient_id is empty")
+	}
+	tk, source := s.resolveRecipientToken(ctx, recipientKind, recipientID)
+	tk = strings.TrimSpace(tk)
+	if tk == "" {
+		return RecipientSendResult{Source: source}, fmt.Errorf("push token not found for %s %s (source=%s)", recipientKind, recipientID, source)
+	}
+	out := RecipientSendResult{TokenFound: true, Source: source}
+	if len(tk) >= 16 {
+		out.TokenPrefix = tk[:16]
+	} else {
+		out.TokenPrefix = tk
+	}
+	if data == nil {
+		data = map[string]string{}
+	}
+	data["source"] = "admin.send_by_recipient"
+	data["recipient_kind"] = recipientKind
+	data["recipient_id"] = recipientID.String()
+
+	msgID, err := s.sendToTokenErr(ctx, tk, title, body, data)
+	if err != nil {
+		return out, err
+	}
+	out.FCMMessageID = msgID
+	return out, nil
+}
+
+// SaveRecipientToken upserts FCM token for the given driver/dispatcher. Used by admin tools so
+// that a single successful test also populates DB and enables system flow (SendByStreamRecipient).
+func (s *Service) SaveRecipientToken(ctx context.Context, recipientKind string, recipientID uuid.UUID, token string) error {
+	if recipientID == uuid.Nil {
+		return fmt.Errorf("recipient_id is empty")
+	}
+	token = strings.TrimSpace(token)
+	if len(token) < 10 {
+		return fmt.Errorf("token is too short")
+	}
+	switch recipientKind {
+	case tripnotif.RecipientDriver:
+		if s.drv == nil {
+			return fmt.Errorf("drivers repo not configured")
+		}
+		return s.drv.UpdatePushToken(ctx, recipientID, token)
+	case tripnotif.RecipientDispatcher:
+		if s.disp == nil {
+			return fmt.Errorf("dispatchers repo not configured")
+		}
+		return s.disp.UpdatePushToken(ctx, recipientID, token)
+	default:
+		return fmt.Errorf("unknown recipient_kind: %s", recipientKind)
+	}
+}
+
 // ProjectID returns the Firebase project_id if configured (empty string if disabled).
 func (s *Service) ProjectID() string {
 	if s == nil || s.fcm == nil {
@@ -182,6 +282,8 @@ func (s *Service) SendByStreamRecipient(ctx context.Context, streamKind, recipie
 				zap.String("recipient_kind", recipientKind),
 				zap.String("recipient_id", recipientID.String()),
 				zap.String("token_source", source),
+				zap.String("payload_kind", firstNonEmpty(data["kind"], data["event_kind"], data["event"])),
+				zap.String("hint", "mobile app did not register FCM token via POST /v1/chat/push-token (driver/dispatcher) — or saved under a different user id"),
 			)
 		}
 		return
@@ -257,8 +359,21 @@ func (s *Service) SendByChatUser(ctx context.Context, userID uuid.UUID, payload 
 		}
 	}
 	if s.logger != nil {
-		s.logger.Warn("push skipped (chat): token not found", zap.String("user_id", userID.String()))
+		s.logger.Warn("push skipped (chat): token not found",
+			zap.String("user_id", userID.String()),
+			zap.String("type", data["type"]),
+			zap.String("hint", "mobile app did not register FCM token via POST /v1/chat/push-token for this user"),
+		)
 	}
 }
 
 func badgeOne() *int { v := 1; return &v }
+
+func firstNonEmpty(vs ...string) string {
+	for _, v := range vs {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}

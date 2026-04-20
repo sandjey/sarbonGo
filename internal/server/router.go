@@ -356,6 +356,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	adminAuthed.POST("/cargo/:id/moderation/reject", adminCargoModH.Reject)
 	adminAuthed.GET("/push/status", pushAdminH.Status)
 	adminAuthed.POST("/push/send", pushAdminH.SendTest)
+	adminAuthed.GET("/push/recipient-status", pushAdminH.RecipientStatus)
+	adminAuthed.POST("/push/send-by-recipient", pushAdminH.SendByRecipient)
 
 	driverAuthed := v1.Group("/driver")
 	driverAuthed.Use(mw.RequireDriver(jwtm, refreshStore))

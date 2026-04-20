@@ -11419,6 +11419,19 @@ paths:
                   example:
                     custom_key: custom_value
                   description: Дополнительные data-поля (key-value, все строки). Будут добавлены к FCM data payload.
+                recipient_kind:
+                  type: string
+                  enum: [driver, dispatcher]
+                  description: |
+                    Опционально. Если передано вместе с `recipient_id`, переданный `push_token`
+                    будет сохранён в БД (`drivers.push_token` / `freelance_dispatchers.push_token`),
+                    и системные события (cargo_offer, connection_offer, chat, call, …) сразу
+                    начнут доставлять push этому пользователю — проблема "работает только админ-тест"
+                    решается одним вызовом.
+                recipient_id:
+                  type: string
+                  format: uuid
+                  description: UUID водителя или фриланс-диспетчера — используется вместе с `recipient_kind`.
       responses:
         '200':
           description: 'FCM принял сообщение (`sent: true`). Если на устройстве тишина: тот же Firebase-проект, что в приложении;
@@ -11457,6 +11470,12 @@ paths:
                       firebase_project:
                         type: string
                         description: FIREBASE_PROJECT_ID сервера
+                      token_saved:
+                        type: boolean
+                        description: true — токен успешно записан в БД для (recipient_kind, recipient_id).
+                      token_save_error:
+                        type: string
+                        description: Текст ошибки сохранения токена в БД (если сохранение запрошено, но не удалось).
         '400':
           description: push_token не передан или слишком короткий
         '401':
@@ -11481,6 +11500,146 @@ paths:
                     nullable: true
         '503':
           description: Firebase отключён на сервере (PUSH_NOTIFICATIONS_ENABLED=false)
+  /v1/admin/push/recipient-status:
+    get:
+      tags:
+      - Admin / Tools
+      summary: Диагностика — есть ли FCM-токен у водителя/диспетчера в БД
+      description: |
+        Быстрая проверка, почему системные push (cargo_offer, connection_offer, chat, call, ...)
+        не доходят до конкретного пользователя. Возвращает `token_found`, `token_length` и
+        короткий префикс токена, а также `source` — откуда он взят (`drivers.push_token`,
+        `freelance_dispatchers.push_token` или fallback). Если `token_found=false`, мобильное
+        приложение **не вызвало** `POST /v1/chat/push-token` после логина.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - in: query
+        name: kind
+        required: true
+        schema:
+          type: string
+          enum: [driver, dispatcher]
+      - in: query
+        name: id
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: success }
+                  code: { type: integer, example: 200 }
+                  description: { type: string, example: OK }
+                  data:
+                    type: object
+                    properties:
+                      kind: { type: string, enum: [driver, dispatcher] }
+                      id: { type: string, format: uuid }
+                      token_found: { type: boolean }
+                      token_length: { type: integer }
+                      token_prefix:
+                        type: string
+                        description: Первые 16 символов токена (безопасно логировать).
+                      source:
+                        type: string
+                        enum:
+                        - drivers.push_token
+                        - freelance_dispatchers.push_token
+                        - drivers.push_token(fallback)
+                        - freelance_dispatchers.push_token(fallback)
+                        - token_not_found
+                        - recipient_id_nil
+        '400':
+          description: invalid kind/id
+        '401':
+          description: unauthorized (не админ)
+        '503':
+          description: Firebase отключён на сервере
+  /v1/admin/push/send-by-recipient:
+    post:
+      tags:
+      - Admin / Tools
+      summary: Отправить push через системный путь (по user id)
+      description: |
+        Отправляет push **по тому же коду**, которым пользуется бэкенд при реальных событиях
+        (`cargo_offer`, `connection_offer`, chat, call, ...). Резолвит токен по `(kind, id)` из
+        `drivers.push_token` / `freelance_dispatchers.push_token`. Если вернулось
+        `token_found=false`, мобильное приложение не зарегистрировало свой FCM-токен —
+        системный поток просто не может дозвониться до этого пользователя.
+
+        Это ответ на классический кейс "через admin /push/send работает, а система не шлёт":
+        admin/send бьёт напрямую токеном, а система всегда идёт через resolve по id.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, id]
+              properties:
+                kind:
+                  type: string
+                  enum: [driver, dispatcher]
+                id:
+                  type: string
+                  format: uuid
+                title:
+                  type: string
+                  example: Sarbon
+                body:
+                  type: string
+                  example: System push (admin trigger)
+                data:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: success }
+                  code: { type: integer, example: 200 }
+                  description: { type: string, example: OK }
+                  data:
+                    type: object
+                    properties:
+                      sent: { type: boolean, example: true }
+                      kind: { type: string, enum: [driver, dispatcher] }
+                      id: { type: string, format: uuid }
+                      token_found: { type: boolean }
+                      token_prefix: { type: string }
+                      source: { type: string }
+                      fcm_message_id: { type: string }
+                      firebase_project: { type: string }
+        '400':
+          description: invalid payload / invalid id / invalid kind
+        '401':
+          description: unauthorized (не админ)
+        '502':
+          description: |
+            Firebase вернул ошибку **или** токен не найден в БД. В `data.token_found=false` →
+            мобильное приложение не вызывало `POST /v1/chat/push-token`.
+        '503':
+          description: Firebase отключён на сервере
   /v1/chat/user-finder:
     get:
       tags:
