@@ -73,7 +73,14 @@ components:
   schemas:
     NotificationItem:
       type: object
-      description: Одна запись из ленты уведомлений (`GET /v1/driver/notifications` или, для диспетчера по рейсам, элементы `GET /v1/dispatchers/trip-notifications`).
+      description: |
+        Одна запись из ленты уведомлений (`GET /v1/driver/notifications` и `GET /v1/dispatchers/notifications`).
+        Лента объединяет все категории: рейсы (`trip_notification`), грузовые офферы (`cargo_offer`),
+        приглашения/связи (`connection_offer`), сообщения чата (`message`), звонки (`call`) и
+        обновления профиля водителя (`driver_profile_edit`). Поле `trip_id` заполняется только для
+        `trip_notification`; для остальных типов оно равно `null`. Поле `payload` содержит исходный
+        JSON-конверт, который был отправлен в SSE/WebSocket/Firebase, что позволяет клиенту показать
+        богатое уведомление (id оффера, данные собеседника и т. д.).
       properties:
         id:
           type: string
@@ -82,16 +89,15 @@ components:
         trip_id:
           type: string
           format: uuid
-          description: UUID рейса, которого касается событие.
+          nullable: true
+          description: UUID рейса (только для `type=trip_notification`). Для остальных типов — `null`.
         event_kind:
           type: string
-          enum:
-          - IN_TRANSIT
-          - DELIVERED
-          - COMPLETED
-          - CANCELLED
-          - COMPLETION_PENDING_MANAGER
-          description: Тип события. `COMPLETION_PENDING_MANAGER` — только для диспетчера.
+          description: |
+            Исходный kind события. Для рейсов: `IN_TRANSIT`, `DELIVERED`, `COMPLETED`, `CANCELLED`,
+            `COMPLETION_PENDING_MANAGER`. Для остальных типов — имя события из payload
+            (`cargo_offer_created`, `connection_offer_created`, `message.new`, `call.invite`,
+            `driver.profile.patch`, ...).
         type:
           type: string
           enum:
@@ -113,7 +119,17 @@ components:
           nullable: true
         message:
           type: string
-          description: Читаемый текст по заголовку `X-Language` (ru/uz/en/tr/zh).
+          description: Читаемый текст по заголовку `X-Language` (ru/uz/en/tr/zh). Для рейсов — локализованное сообщение, для остальных типов — человеко-читаемый `event_kind`.
+        payload:
+          nullable: true
+          description: |
+            Исходный JSON-конверт события (тот же, что был отправлен в SSE/WS/Firebase). Содержит
+            поля вроде `kind`, `event`, `offer_id`, `cargo_id`, `token`, `driver_id`, `updated_at` и т. п.
+          oneOf:
+          - type: object
+            additionalProperties: true
+          - type: array
+            items: {}
         read:
           type: boolean
           description: true если уведомление уже прочитано.
@@ -126,7 +142,6 @@ components:
           format: date-time
       required:
       - id
-      - trip_id
       - event_kind
       - type
       - step

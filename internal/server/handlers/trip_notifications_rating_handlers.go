@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -42,17 +43,17 @@ func notificationType(eventKind string) string {
 	ek := strings.ToLower(strings.TrimSpace(eventKind))
 	switch {
 	case strings.HasPrefix(ek, "connection_offer"):
-		return "connection_offer"
+		return tripnotif.TypeConnectionOffer
 	case strings.HasPrefix(ek, "cargo_offer"):
-		return "cargo_offer"
+		return tripnotif.TypeCargoOffer
 	case strings.HasPrefix(ek, "call."):
-		return "call"
+		return tripnotif.TypeCall
 	case strings.HasPrefix(ek, "message"):
-		return "message"
-	case strings.HasPrefix(ek, "driver.profile."):
-		return "driver_profile_edit"
+		return tripnotif.TypeMessage
+	case strings.HasPrefix(ek, "driver.profile."), strings.HasPrefix(ek, "driver_update"), strings.HasPrefix(ek, "dispatcher.driver."):
+		return tripnotif.TypeDriverProfileEdit
 	default:
-		return "trip_notification"
+		return tripnotif.TypeTripNotification
 	}
 }
 
@@ -61,11 +62,40 @@ func tripNotificationRowToGin(c *gin.Context, n tripnotif.Row) gin.H {
 	if n.ToStatus != nil && strings.TrimSpace(*n.ToStatus) != "" {
 		step = strings.TrimSpace(*n.ToStatus)
 	}
+
+	typ := notificationType(n.EventKind)
+	if n.EventType != nil && strings.TrimSpace(*n.EventType) != "" {
+		typ = strings.TrimSpace(*n.EventType)
+	}
+
+	var tripID any
+	if n.TripID != nil && *n.TripID != uuid.Nil {
+		tripID = n.TripID.String()
+	}
+
+	var payload any
+	if len(n.Payload) > 0 {
+		var decoded any
+		if err := json.Unmarshal(n.Payload, &decoded); err == nil {
+			payload = decoded
+		}
+	}
+
+	messageKey := tripNotifMessageKey(n.EventKind)
+	message := resp.Msg(messageKey, resp.Lang(c))
+	if typ != tripnotif.TypeTripNotification {
+		// Non-trip notifications do not have a i18n key; surface the event kind as a human-friendly fallback.
+		message = strings.TrimSpace(n.EventKind)
+		if message == "" {
+			message = typ
+		}
+	}
+
 	return gin.H{
 		"id":         n.ID.String(),
-		"trip_id":    n.TripID.String(),
+		"trip_id":    tripID,
 		"event_kind": n.EventKind,
-		"type":       notificationType(n.EventKind),
+		"type":       typ,
 		"step":       step,
 		"from_status": func() any {
 			if n.FromStatus == nil {
@@ -79,7 +109,8 @@ func tripNotificationRowToGin(c *gin.Context, n tripnotif.Row) gin.H {
 			}
 			return *n.ToStatus
 		}(),
-		"message":    resp.Msg(tripNotifMessageKey(n.EventKind), resp.Lang(c)),
+		"message":    message,
+		"payload":    payload,
 		"read":       n.ReadAt != nil,
 		"read_at":    n.ReadAt,
 		"created_at": n.CreatedAt,

@@ -199,6 +199,8 @@ func runMigrationsUp(log *zap.Logger, dbURL string) error {
 		return fmt.Errorf("DATABASE_URL is empty")
 	}
 
+	log.Info("database migrations: starting (embedded SQL)")
+
 	db, err := sql.Open("pgx", dbURL)
 	if err != nil {
 		return fmt.Errorf("sql open for migrate: %w", err)
@@ -225,10 +227,20 @@ func runMigrationsUp(log *zap.Logger, dbURL string) error {
 	}
 	defer func() { _, _ = m.Close() }()
 
+	preVersion, preDirty, _ := m.Version()
+	log.Info("database migrations: current version",
+		zap.Uint("version", preVersion),
+		zap.Bool("dirty", preDirty),
+	)
+
 	upErr := m.Up()
 	if upErr != nil && upErr != migrate.ErrNoChange {
 		if strings.Contains(upErr.Error(), "Dirty database") {
 			prevVersion := parseDirtyVersion(upErr.Error())
+			log.Warn("database migrations: dirty state detected, forcing previous version and retrying",
+				zap.Int("force_to", prevVersion),
+				zap.Error(upErr),
+			)
 			if forceErr := m.Force(prevVersion); forceErr != nil {
 				return fmt.Errorf("force version after dirty failed: %w", forceErr)
 			}
@@ -236,15 +248,18 @@ func runMigrationsUp(log *zap.Logger, dbURL string) error {
 			if retryErr != nil && retryErr != migrate.ErrNoChange {
 				return retryErr
 			}
-			log.Info("migrations applied after dirty recovery")
+			postVersion, _, _ := m.Version()
+			log.Info("database migrations: applied after dirty recovery", zap.Uint("version", postVersion))
 			return nil
 		}
 		return upErr
 	}
+
+	postVersion, _, _ := m.Version()
 	if upErr == migrate.ErrNoChange {
-		log.Info("database migrations: no change")
+		log.Info("database migrations: no change", zap.Uint("version", postVersion))
 	} else {
-		log.Info("database migrations applied")
+		log.Info("database migrations: applied", zap.Uint("from", preVersion), zap.Uint("to", postVersion))
 	}
 	return nil
 }

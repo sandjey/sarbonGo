@@ -2,6 +2,7 @@ package tripnotif
 
 import (
 	"context"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -15,13 +16,36 @@ func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
 
+// Insert records a trip-lifecycle notification (trip_id is required).
 func (r *Repo) Insert(ctx context.Context, tripID uuid.UUID, recipientKind string, recipientID uuid.UUID, eventKind string, fromStatus, toStatus *string) (uuid.UUID, error) {
 	var id uuid.UUID
+	eventType := TypeTripNotification
 	err := r.pg.QueryRow(ctx, `
-INSERT INTO trip_user_notifications (trip_id, recipient_kind, recipient_id, event_kind, from_status, to_status)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO trip_user_notifications (trip_id, recipient_kind, recipient_id, event_kind, event_type, from_status, to_status)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id
-`, tripID, recipientKind, recipientID, eventKind, fromStatus, toStatus).Scan(&id)
+`, tripID, recipientKind, recipientID, eventKind, eventType, fromStatus, toStatus).Scan(&id)
+	return id, err
+}
+
+// InsertGeneric records a non-trip notification (cargo_offer, connection_offer, chat message, call, driver profile edit, ...).
+// payload is the raw JSON envelope delivered to SSE / WebSocket subscribers; it is stored for richer UI rendering.
+func (r *Repo) InsertGeneric(ctx context.Context, recipientKind string, recipientID uuid.UUID, eventType, eventKind string, payload []byte) (uuid.UUID, error) {
+	var id uuid.UUID
+	et := strings.TrimSpace(eventType)
+	ek := strings.TrimSpace(eventKind)
+	if ek == "" {
+		ek = et
+	}
+	var payloadArg any
+	if len(payload) > 0 {
+		payloadArg = string(payload)
+	}
+	err := r.pg.QueryRow(ctx, `
+INSERT INTO trip_user_notifications (trip_id, recipient_kind, recipient_id, event_kind, event_type, payload)
+VALUES (NULL, $1, $2, $3, $4, $5)
+RETURNING id
+`, recipientKind, recipientID, ek, et, payloadArg).Scan(&id)
 	return id, err
 }
 
@@ -33,7 +57,7 @@ func (r *Repo) List(ctx context.Context, recipientKind string, recipientID uuid.
 		limit = 100
 	}
 	q := `
-SELECT id, trip_id, recipient_kind, recipient_id, event_kind, from_status, to_status, read_at, created_at
+SELECT id, trip_id, recipient_kind, recipient_id, event_kind, event_type, payload, from_status, to_status, read_at, created_at
 FROM trip_user_notifications
 WHERE recipient_kind = $1 AND recipient_id = $2`
 	args := []any{recipientKind, recipientID}
@@ -51,7 +75,7 @@ WHERE recipient_kind = $1 AND recipient_id = $2`
 	var out []Row
 	for rows.Next() {
 		var x Row
-		if err := rows.Scan(&x.ID, &x.TripID, &x.RecipientKind, &x.RecipientID, &x.EventKind, &x.FromStatus, &x.ToStatus, &x.ReadAt, &x.CreatedAt); err != nil {
+		if err := rows.Scan(&x.ID, &x.TripID, &x.RecipientKind, &x.RecipientID, &x.EventKind, &x.EventType, &x.Payload, &x.FromStatus, &x.ToStatus, &x.ReadAt, &x.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, x)

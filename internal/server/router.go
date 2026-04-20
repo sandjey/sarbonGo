@@ -188,14 +188,26 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	pushSvc, err := push.New(context.Background(), cfg, logger, driversRepo, dispatchersRepo)
 	if err != nil {
 		logger.Error("push init failed", zap.Error(err))
-	} else if pushSvc != nil && pushSvc.Enabled() {
-		userStreamHub.SetOnPublish(func(streamKind, recipientKind string, recipientID uuid.UUID, payload []byte) {
-			pushSvc.SendByStreamRecipient(context.Background(), streamKind, recipientKind, recipientID, payload)
-		})
-		chatHub.SetOnSendToUser(func(userID uuid.UUID, payload []byte) {
-			pushSvc.SendByChatUser(context.Background(), userID, payload)
-		})
 	}
+
+	// Persist non-trip notifications (cargo_offer, connection_offer, driver_update, chat message, call)
+	// into trip_user_notifications so mobile clients see the full inbox via GET /v1/driver/notifications
+	// and GET /v1/dispatchers/notifications. Trip-status notifications are already persisted by
+	// trip_notify_emit.go (notifInsertExtra), so we skip them here to avoid duplicates.
+	notifPersist := handlers.NewNotificationPersister(logger, tripNotifRepo, driversRepo, dispatchersRepo)
+
+	userStreamHub.SetOnPublish(func(streamKind, recipientKind string, recipientID uuid.UUID, payload []byte) {
+		notifPersist.PersistStream(context.Background(), streamKind, recipientKind, recipientID, payload)
+		if pushSvc != nil && pushSvc.Enabled() {
+			pushSvc.SendByStreamRecipient(context.Background(), streamKind, recipientKind, recipientID, payload)
+		}
+	})
+	chatHub.SetOnSendToUser(func(userID uuid.UUID, payload []byte) {
+		notifPersist.PersistChat(context.Background(), userID, payload)
+		if pushSvc != nil && pushSvc.Enabled() {
+			pushSvc.SendByChatUser(context.Background(), userID, payload)
+		}
+	})
 
 	pushAdminH := handlers.NewPushAdminHandler(logger, pushSvc, cfg)
 
