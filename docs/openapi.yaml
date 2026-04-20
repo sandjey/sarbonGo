@@ -3677,8 +3677,16 @@ paths:
       tags:
       - Drivers / Profile & KYC
       summary: Получить профиль водителя
-      description: "**Кто вызывает:** Водитель (мобильное приложение). Обязателен X-User-Token (JWT).\n**Назначение:** Получение текущего профиля в сгруппированном виде.  \nВ ответе `data.driver` содержит\
-        \ 3 блока:\n- `profile` — основные данные водителя (id, phone, name, статусы, паспорт, координаты и т.д.)\n- `power_plate` — данные тягача\n- `trailer_plate` — данные прицепа\n"
+      description: |
+        **Кто вызывает:** Водитель (мобильное приложение). Обязателен X-User-Token (JWT).
+        **Назначение:** Получение текущего профиля в сгруппированном виде.
+        В ответе `data.driver` содержит 3 блока:
+        - `profile` — основные данные водителя (id, phone, name, статусы, паспорт, координаты и т.д.).
+          Включает поле `push_token_registered` (boolean): true — FCM push‑токен сохранён в БД
+          (`drivers.push_token`), false — мобильному приложению нужно вызвать
+          `POST /v1/chat/push-token` с текущим FCM‑токеном устройства.
+        - `power_plate` — данные тягача.
+        - `trailer_plate` — данные прицепа.
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -3799,13 +3807,18 @@ paths:
       tags:
       - Drivers / Profile & KYC
       summary: Обновить гео и время последней активности
-      description: '**Кто вызывает:** Водитель (мобильное приложение). X-User-Token обязателен.
+      description: |
+        **Кто вызывает:** Водитель (мобильное приложение). X-User-Token обязателен.
 
         **Назначение:** Обновление координат (и при необходимости last_online_at) в профиле водителя.
 
-        **Данные:** только latitude и longitude. last_online_at в API не передаётся — обновляется на сервере автоматически (в т.ч. при каждом запросе водителя).
+        **Данные:** только latitude и longitude. last_online_at в API не передаётся — обновляется
+        на сервере автоматически (в т.ч. при каждом запросе водителя).
 
-        '
+        **Дополнительно в ответе:** `push_token_registered` (boolean) — показывает, зарегистрирован
+        ли FCM push‑токен этого водителя на бэкенде (`drivers.push_token`). Мобильному клиенту
+        удобно опираться на этот флаг: если `false` — нужно вызвать `POST /v1/chat/push-token`
+        с текущим FCM‑токеном устройства; если `true` — можно ничего не делать.
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -3835,7 +3848,24 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Envelope'
+                allOf:
+                - $ref: '#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        event:
+                          type: string
+                          example: heartbeat
+                        push_token_registered:
+                          type: boolean
+                          description: |
+                            true — FCM push‑токен водителя сохранён в БД (`drivers.push_token` не пуст).
+                            false — мобильное приложение должно вызвать `POST /v1/chat/push-token` с текущим FCM‑токеном.
+                        driver:
+                          type: object
+                          description: Профиль водителя (плоский объект из БД).
   /v1/driver/profile/photo:
     post:
       tags:

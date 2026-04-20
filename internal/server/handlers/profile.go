@@ -51,6 +51,16 @@ func (h *ProfileHandler) Get(c *gin.Context) {
 	resp.OKLang(c, "ok", gin.H{"driver": groupedDriverProfile(d)})
 }
 
+// driverPushTokenRegistered returns true if the driver has a non-empty FCM token stored in DB.
+// Mobile clients use this flag (surfaced in GET /v1/driver/profile and PUT /v1/driver/profile/heartbeat)
+// to decide whether to call POST /v1/chat/push-token: if false — send token, if true — skip.
+func driverPushTokenRegistered(d *drivers.Driver) bool {
+	if d == nil || d.PushToken == nil {
+		return false
+	}
+	return strings.TrimSpace(*d.PushToken) != ""
+}
+
 func groupedDriverProfile(d *drivers.Driver) gin.H {
 	if d == nil {
 		return gin.H{}
@@ -69,7 +79,7 @@ func groupedDriverProfile(d *drivers.Driver) gin.H {
 			"account_status":         d.AccountStatus,
 			"kyc_status":             d.KYCStatus,
 			"driver_owner":           d.DriverOwner,
-			"has_trips":             d.HasTrips,
+			"has_trips":              d.HasTrips,
 			"freelancer_id":          d.FreelancerID,
 			"company_id":             d.CompanyID,
 			"driver_passport_series": d.DriverPassportSeries,
@@ -79,6 +89,7 @@ func groupedDriverProfile(d *drivers.Driver) gin.H {
 			"latitude":               d.Latitude,
 			"longitude":              d.Longitude,
 			"last_online_at":         d.LastOnlineAt,
+			"push_token_registered":  driverPushTokenRegistered(d),
 			"created_at":             d.CreatedAt,
 			"updated_at":             d.UpdatedAt,
 		},
@@ -236,7 +247,11 @@ func (h *ProfileHandler) Heartbeat(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	resp.OKLang(c, "heartbeat", gin.H{"event": "heartbeat", "driver": d})
+	resp.OKLang(c, "heartbeat", gin.H{
+		"event":                 "heartbeat",
+		"driver":                d,
+		"push_token_registered": driverPushTokenRegistered(d),
+	})
 }
 
 type phoneChangeRequestReq struct {
