@@ -38,6 +38,24 @@ func isClientDisconnect(err error) bool {
 	return err != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
+func notificationType(eventKind string) string {
+	ek := strings.ToLower(strings.TrimSpace(eventKind))
+	switch {
+	case strings.HasPrefix(ek, "connection_offer"):
+		return "connection_offer"
+	case strings.HasPrefix(ek, "cargo_offer"):
+		return "cargo_offer"
+	case strings.HasPrefix(ek, "call."):
+		return "call"
+	case strings.HasPrefix(ek, "message"):
+		return "message"
+	case strings.HasPrefix(ek, "driver.profile."):
+		return "driver_profile_edit"
+	default:
+		return "trip_notification"
+	}
+}
+
 func tripNotificationRowToGin(c *gin.Context, n tripnotif.Row) gin.H {
 	step := n.EventKind
 	if n.ToStatus != nil && strings.TrimSpace(*n.ToStatus) != "" {
@@ -47,6 +65,7 @@ func tripNotificationRowToGin(c *gin.Context, n tripnotif.Row) gin.H {
 		"id":         n.ID.String(),
 		"trip_id":    n.TripID.String(),
 		"event_kind": n.EventKind,
+		"type":       notificationType(n.EventKind),
 		"step":       step,
 		"from_status": func() any {
 			if n.FromStatus == nil {
@@ -307,9 +326,9 @@ func (h *TripsHandler) PostDriverRateDispatcher(c *gin.Context) {
 		return
 	}
 	resp.OKLang(c, "ok", gin.H{
-		"trip_id":               tripID.String(),
-		"stars":                 body.Stars,
-		"ratee_dispatcher_id":   rateeDispID.String(),
+		"trip_id":             tripID.String(),
+		"stars":               body.Stars,
+		"ratee_dispatcher_id": rateeDispID.String(),
 	})
 }
 
@@ -377,9 +396,9 @@ func (h *TripsHandler) PostDispatcherRateDriver(c *gin.Context) {
 		return
 	}
 	resp.OKLang(c, "ok", gin.H{
-		"trip_id":            tripID.String(),
-		"stars":              body.Stars,
-		"ratee_driver_id":    rateeDriverID.String(),
+		"trip_id":         tripID.String(),
+		"stars":           body.Stars,
+		"ratee_driver_id": rateeDriverID.String(),
 	})
 }
 

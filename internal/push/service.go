@@ -70,7 +70,7 @@ func (s *Service) sendToTokenErr(ctx context.Context, token, title, body string,
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		return "", nil
+		return "", fmt.Errorf("push token is empty")
 	}
 	msg := &messaging.Message{
 		Token: token,
@@ -92,6 +92,39 @@ func (s *Service) sendToTokenErr(ctx context.Context, token, title, body string,
 		},
 	}
 	return s.fcm.Send(ctx, msg)
+}
+
+func (s *Service) resolveRecipientToken(ctx context.Context, recipientKind string, recipientID uuid.UUID) (string, string) {
+	if recipientID == uuid.Nil {
+		return "", "recipient_id_nil"
+	}
+	switch recipientKind {
+	case tripnotif.RecipientDriver:
+		if s.drv != nil {
+			if tk, err := s.drv.GetPushToken(ctx, recipientID); err == nil && strings.TrimSpace(tk) != "" {
+				return tk, "drivers.push_token"
+			}
+		}
+		// Fallback: if role mapping is inconsistent in some environments.
+		if s.disp != nil {
+			if tk, err := s.disp.GetPushToken(ctx, recipientID); err == nil && strings.TrimSpace(tk) != "" {
+				return tk, "freelance_dispatchers.push_token(fallback)"
+			}
+		}
+	case tripnotif.RecipientDispatcher:
+		if s.disp != nil {
+			if tk, err := s.disp.GetPushToken(ctx, recipientID); err == nil && strings.TrimSpace(tk) != "" {
+				return tk, "freelance_dispatchers.push_token"
+			}
+		}
+		// Fallback: if role mapping is inconsistent in some environments.
+		if s.drv != nil {
+			if tk, err := s.drv.GetPushToken(ctx, recipientID); err == nil && strings.TrimSpace(tk) != "" {
+				return tk, "drivers.push_token(fallback)"
+			}
+		}
+	}
+	return "", "token_not_found"
 }
 
 // SendTestToToken sends a test notification directly to the given FCM token.
@@ -141,19 +174,36 @@ func (s *Service) SendByStreamRecipient(ctx context.Context, streamKind, recipie
 			data["kind"] = v
 		}
 	}
-	switch recipientKind {
-	case tripnotif.RecipientDriver:
-		if s.drv == nil {
-			return
+	tk, source := s.resolveRecipientToken(ctx, recipientKind, recipientID)
+	if strings.TrimSpace(tk) == "" {
+		if s.logger != nil {
+			s.logger.Warn("push skipped: token not found",
+				zap.String("stream_kind", streamKind),
+				zap.String("recipient_kind", recipientKind),
+				zap.String("recipient_id", recipientID.String()),
+				zap.String("token_source", source),
+			)
 		}
-		tk, _ := s.drv.GetPushToken(ctx, recipientID)
-		s.sendToToken(ctx, tk, title, body, data)
-	case tripnotif.RecipientDispatcher:
-		if s.disp == nil {
-			return
+		return
+	}
+	if msgID, err := s.sendToTokenErr(ctx, tk, title, body, data); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("push send failed (stream)",
+				zap.Error(err),
+				zap.String("stream_kind", streamKind),
+				zap.String("recipient_kind", recipientKind),
+				zap.String("recipient_id", recipientID.String()),
+				zap.String("token_source", source),
+			)
 		}
-		tk, _ := s.disp.GetPushToken(ctx, recipientID)
-		s.sendToToken(ctx, tk, title, body, data)
+	} else if s.logger != nil {
+		s.logger.Info("push sent (stream)",
+			zap.String("stream_kind", streamKind),
+			zap.String("recipient_kind", recipientKind),
+			zap.String("recipient_id", recipientID.String()),
+			zap.String("token_source", source),
+			zap.String("fcm_message_id", msgID),
+		)
 	}
 }
 
@@ -184,14 +234,30 @@ func (s *Service) SendByChatUser(ctx context.Context, userID uuid.UUID, payload 
 	// Try driver first, then dispatcher.
 	if s.drv != nil {
 		if tk, _ := s.drv.GetPushToken(ctx, userID); strings.TrimSpace(tk) != "" {
-			s.sendToToken(ctx, tk, title, body, data)
+			if msgID, err := s.sendToTokenErr(ctx, tk, title, body, data); err != nil {
+				if s.logger != nil {
+					s.logger.Warn("push send failed (chat driver)", zap.Error(err), zap.String("user_id", userID.String()))
+				}
+			} else if s.logger != nil {
+				s.logger.Info("push sent (chat driver)", zap.String("user_id", userID.String()), zap.String("fcm_message_id", msgID))
+			}
 			return
 		}
 	}
 	if s.disp != nil {
 		if tk, _ := s.disp.GetPushToken(ctx, userID); strings.TrimSpace(tk) != "" {
-			s.sendToToken(ctx, tk, title, body, data)
+			if msgID, err := s.sendToTokenErr(ctx, tk, title, body, data); err != nil {
+				if s.logger != nil {
+					s.logger.Warn("push send failed (chat dispatcher)", zap.Error(err), zap.String("user_id", userID.String()))
+				}
+			} else if s.logger != nil {
+				s.logger.Info("push sent (chat dispatcher)", zap.String("user_id", userID.String()), zap.String("fcm_message_id", msgID))
+			}
+			return
 		}
+	}
+	if s.logger != nil {
+		s.logger.Warn("push skipped (chat): token not found", zap.String("user_id", userID.String()))
 	}
 }
 

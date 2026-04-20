@@ -92,6 +92,16 @@ components:
           - CANCELLED
           - COMPLETION_PENDING_MANAGER
           description: Тип события. `COMPLETION_PENDING_MANAGER` — только для диспетчера.
+        type:
+          type: string
+          enum:
+          - connection_offer
+          - cargo_offer
+          - message
+          - call
+          - driver_profile_edit
+          - trip_notification
+          description: Нормализованный тип уведомления для mobile-клиента.
         step:
           type: string
           description: Текущий шаг — обычно совпадает с `to_status` или `event_kind`.
@@ -118,6 +128,7 @@ components:
       - id
       - trip_id
       - event_kind
+      - type
       - step
       - message
       - read

@@ -38,7 +38,12 @@ func (h *PushTokensHandler) Upsert(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
 		return
 	}
-	roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
+	roleStr, ok := role.(string)
+	if !ok || strings.TrimSpace(roleStr) == "" {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	roleStr = strings.ToLower(strings.TrimSpace(roleStr))
 	var req upsertPushTokenReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
@@ -87,7 +92,12 @@ func (h *PushTokensHandler) Delete(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
 		return
 	}
-	roleStr := strings.ToLower(strings.TrimSpace(role.(string)))
+	roleStr, ok := role.(string)
+	if !ok || strings.TrimSpace(roleStr) == "" {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	roleStr = strings.ToLower(strings.TrimSpace(roleStr))
 	switch roleStr {
 	case "driver":
 		if h.drv == nil {
