@@ -368,6 +368,7 @@ func (h *DriverInvitationsHandler) ListConnectionOffers(c *gin.Context) {
 func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 	driverID := c.MustGet(mw.CtxDriverID).(uuid.UUID)
 	direction := strings.ToLower(strings.TrimSpace(c.DefaultQuery("direction", "all")))
+	excludeAccepted := strings.EqualFold(strings.TrimSpace(c.DefaultQuery("exclude_accepted", "false")), "true") || c.Query("exclude_accepted") == "1"
 	switch direction {
 	case "all", "incoming", "outgoing":
 	default:
@@ -394,6 +395,10 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 			return
 		}
 		for _, inv := range list {
+			status := driverinvitations.EffectiveStatus(inv)
+			if excludeAccepted && status == driverinvitations.StatusAccepted {
+				continue
+			}
 			driverManagerID := inv.InvitedBy.String()
 			if inv.InvitedByDispatcherID != nil && *inv.InvitedByDispatcherID != uuid.Nil {
 				driverManagerID = inv.InvitedByDispatcherID.String()
@@ -404,7 +409,7 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 				"driver_id":         driverID.String(),
 				"driver_phone":      drv.Phone,
 				"phone":             inv.Phone,
-				"status":            driverinvitations.EffectiveStatus(inv),
+				"status":            status,
 				"expires_at":        inv.ExpiresAt,
 				"created_at":        inv.CreatedAt,
 				"invited_by":        inv.InvitedBy.String(),
@@ -446,13 +451,17 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 			return
 		}
 		for _, inv := range list {
+			status := drivertodispatcherinvitations.EffectiveStatus(inv)
+			if excludeAccepted && status == drivertodispatcherinvitations.StatusAccepted {
+				continue
+			}
 			item := gin.H{
 				"direction":           "outgoing",
 				"token":               inv.Token,
 				"dispatcher_phone":    inv.DispatcherPhone,
 				"to_dispatcher_phone": inv.DispatcherPhone,
 				"driver_id":           inv.DriverID.String(),
-				"status":              drivertodispatcherinvitations.EffectiveStatus(inv),
+				"status":              status,
 				"expires_at":          inv.ExpiresAt,
 				"created_at":          inv.CreatedAt,
 			}

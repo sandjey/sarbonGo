@@ -159,6 +159,38 @@ func (h *DriverCargoSearchHandler) MatchingCargoForDriver(c *gin.Context) {
 	}
 
 	listItems := toCargoListItems(result.Items)
+	routePointsByCargo := map[uuid.UUID][]cargo.RoutePoint{}
+	paymentsByCargo := map[uuid.UUID]*cargo.Payment{}
+	if len(result.Items) > 0 {
+		cargoIDs := make([]uuid.UUID, 0, len(result.Items))
+		for i := range result.Items {
+			cargoIDs = append(cargoIDs, result.Items[i].ID)
+		}
+		if rpMap, errRP := h.cargo.GetRoutePointsForCargoIDs(c.Request.Context(), cargoIDs); errRP != nil {
+			h.logger.Warn("driver matching cargo route_points", zap.Error(errRP))
+		} else {
+			routePointsByCargo = rpMap
+		}
+		if payMap, errPay := h.cargo.GetPaymentsForCargoIDs(c.Request.Context(), cargoIDs); errPay != nil {
+			h.logger.Warn("driver matching cargo payments", zap.Error(errPay))
+		} else {
+			paymentsByCargo = payMap
+		}
+	}
+	for i := range listItems {
+		cid := result.Items[i].ID
+		listItems[i]["route_points"] = toRoutePointsResp(routePointsByCargo[cid])
+		pay := paymentsByCargo[cid]
+		listItems[i]["payment"] = toPaymentResp(pay)
+		if pay != nil {
+			listItems[i]["cargo_price"] = pay.TotalAmount
+			listItems[i]["cargo_price_currency"] = pay.TotalCurrency
+		} else {
+			listItems[i]["cargo_price"] = nil
+			listItems[i]["cargo_price_currency"] = nil
+		}
+	}
+
 	if h.fav != nil && len(result.Items) > 0 {
 		ids := make([]uuid.UUID, len(result.Items))
 		for i := range result.Items {

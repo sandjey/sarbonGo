@@ -9294,7 +9294,7 @@ paths:
           default: 20
       responses:
         '200':
-          description: 'data.items — массив грузов (стандартные поля: id, name, weight, volume, truck_type, status, …).
+          description: 'data.items — массив грузов (стандартные поля: id, name, weight, volume, truck_type, status, …) + `route_points`, `payment`, а также удобные поля `cargo_price` и `cargo_price_currency` (из payment.total_*).
 
             data.total — общее количество подходящих грузов.
 
@@ -10078,6 +10078,12 @@ paths:
 
         - `all` — оба направления (по умолчанию).
 
+        Параметр `exclude_accepted`:
+
+        - `false` (по умолчанию) — показывать все статусы;
+
+        - `true` — скрыть уже принятые (`status=accepted`) офферы.
+
         В элементах списка дополнительно возвращаются:
 
         - `driver_id`, `driver_phone`
@@ -10103,6 +10109,13 @@ paths:
           - incoming
           - outgoing
           default: all
+      - name: exclude_accepted
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+        description: Если true — не возвращать офферы со статусом accepted.
       responses:
         '200':
           description: data.direction, data.items[]
