@@ -26,6 +26,12 @@ type Client struct {
 	Send   chan []byte
 	Hub    *Hub
 	logger *zap.Logger
+
+	// Conversations where THIS connection is currently marked as typing.
+	// Used to auto-emit typing_stop on disconnect, so the peer doesn't see
+	// "typing..." frozen for the Redis TTL window after a dropped socket.
+	typingMu sync.Mutex
+	typingIn map[uuid.UUID]struct{}
 }
 
 // ReadPump reads messages from the connection (blocking). Call in a goroutine or after WritePump.
@@ -65,6 +71,7 @@ func (c *Client) ReadPump() {
 			if json.Unmarshal(envelope.Data, &body) == nil && body.ConversationID != "" {
 				convID, err := uuid.Parse(body.ConversationID)
 				if err == nil && convID != uuid.Nil {
+					c.trackTyping(convID, true)
 					c.Hub.BroadcastTyping(convID, c.UserID)
 				}
 			}
@@ -75,6 +82,7 @@ func (c *Client) ReadPump() {
 			if json.Unmarshal(envelope.Data, &body) == nil && body.ConversationID != "" {
 				convID, err := uuid.Parse(body.ConversationID)
 				if err == nil && convID != uuid.Nil {
+					c.trackTyping(convID, false)
 					c.Hub.BroadcastTypingStop(convID, c.UserID)
 				}
 			}
@@ -116,6 +124,36 @@ func (c *Client) WritePump() {
 	}
 }
 
+// trackTyping records/clears the conversation in the client's typing set.
+// We broadcast typing_stop for each remembered conv on disconnect so the peer's
+// UI is never stuck on "typing..." for the full Redis TTL.
+func (c *Client) trackTyping(conversationID uuid.UUID, on bool) {
+	c.typingMu.Lock()
+	defer c.typingMu.Unlock()
+	if c.typingIn == nil {
+		c.typingIn = make(map[uuid.UUID]struct{})
+	}
+	if on {
+		c.typingIn[conversationID] = struct{}{}
+	} else {
+		delete(c.typingIn, conversationID)
+	}
+}
+
+func (c *Client) takeTypingSnapshot() []uuid.UUID {
+	c.typingMu.Lock()
+	defer c.typingMu.Unlock()
+	if len(c.typingIn) == 0 {
+		return nil
+	}
+	out := make([]uuid.UUID, 0, len(c.typingIn))
+	for id := range c.typingIn {
+		out = append(out, id)
+	}
+	c.typingIn = nil
+	return out
+}
+
 // OnTypingPeer resolves peer user ID for a conversation; used to send typing to the right user.
 type OnTypingPeer func(conversationID, fromUserID uuid.UUID) (peerID uuid.UUID, ok bool)
 
@@ -131,9 +169,10 @@ type Hub struct {
 	presence        *PresenceStore
 	onTyping        OnTypingPeer
 	onCall          OnCallSignal
-	onUserConnected func(userID uuid.UUID)
-	onSendToUser    func(userID uuid.UUID, payload []byte)
-	logger          *zap.Logger
+	onUserConnected    func(userID uuid.UUID)
+	onUserDisconnected func(userID uuid.UUID)
+	onSendToUser       func(userID uuid.UUID, payload []byte)
+	logger             *zap.Logger
 }
 
 func NewHub(presence *PresenceStore, logger *zap.Logger) *Hub {
@@ -163,6 +202,14 @@ func (h *Hub) SetOnUserConnected(f func(userID uuid.UUID)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.onUserConnected = f
+}
+
+// SetOnUserDisconnected sets callback called when a user's last WS connection
+// was just removed (i.e. they actually went offline from Hub's perspective).
+func (h *Hub) SetOnUserDisconnected(f func(userID uuid.UUID)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onUserDisconnected = f
 }
 
 func (h *Hub) SetOnSendToUser(f func(userID uuid.UUID, payload []byte)) {
@@ -195,6 +242,8 @@ func (h *Hub) Register(userID uuid.UUID, conn *websocket.Conn) *Client {
 }
 
 // Unregister removes client and sets offline if no more connections for user.
+// Also flushes typing state so peers don't see "typing..." stuck on a dropped
+// socket, and fires onUserDisconnected when the user has no remaining clients.
 func (h *Hub) Unregister(c *Client) {
 	h.mu.Lock()
 	list := h.clients[c.UserID]
@@ -204,15 +253,28 @@ func (h *Hub) Unregister(c *Client) {
 			break
 		}
 	}
+	wentOffline := false
 	if len(list) == 0 {
 		delete(h.clients, c.UserID)
-		if h.presence != nil {
-			_ = h.presence.SetOffline(context.Background(), c.UserID)
-		}
+		wentOffline = true
 	} else {
 		h.clients[c.UserID] = list
 	}
+	cb := h.onUserDisconnected
 	h.mu.Unlock()
+
+	// Emit typing_stop for every conv this socket was typing in, even if the
+	// user still has other live connections — the specific socket is gone.
+	for _, convID := range c.takeTypingSnapshot() {
+		h.BroadcastTypingStop(convID, c.UserID)
+	}
+
+	if wentOffline && h.presence != nil {
+		_ = h.presence.SetOffline(context.Background(), c.UserID)
+	}
+	if wentOffline && cb != nil {
+		go cb(c.UserID)
+	}
 	close(c.Send)
 }
 
@@ -405,4 +467,46 @@ func (h *Hub) BroadcastMessage(userAID, userBID uuid.UUID, msg *Message) {
 		"data": msg,
 	})
 	h.BroadcastToConversation(userAID, userBID, payload)
+}
+
+// BroadcastMessageDelivered notifies the SENDER that one or more of their
+// messages were delivered to the recipient. Consumed by clients to flip
+// the "single-check" UI to "double-check".
+func (h *Hub) BroadcastMessageDelivered(senderID, conversationID uuid.UUID, messageIDs []uuid.UUID, deliveredAt time.Time) {
+	if senderID == uuid.Nil || len(messageIDs) == 0 {
+		return
+	}
+	ids := make([]string, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		ids = append(ids, id.String())
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "message_delivered",
+		"data": map[string]interface{}{
+			"conversation_id": conversationID.String(),
+			"message_ids":     ids,
+			"delivered_at":    deliveredAt.UTC().Format(time.RFC3339Nano),
+		},
+	})
+	h.SendToUser(senderID, payload)
+}
+
+// BroadcastPresence notifies peerID about userID's online status change.
+// lastSeenUnix is only meaningful when online=false.
+func (h *Hub) BroadcastPresence(peerID, userID uuid.UUID, online bool, lastSeenUnix int64) {
+	if peerID == uuid.Nil || userID == uuid.Nil {
+		return
+	}
+	data := map[string]interface{}{
+		"user_id": userID.String(),
+		"online":  online,
+	}
+	if !online && lastSeenUnix > 0 {
+		data["last_seen"] = lastSeenUnix
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "presence",
+		"data": data,
+	})
+	h.SendToUser(peerID, payload)
 }

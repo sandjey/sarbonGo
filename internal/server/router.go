@@ -32,6 +32,7 @@ import (
 	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/goadmin"
 	"sarbonNew/internal/infra"
+	applogger "sarbonNew/internal/logger"
 	"sarbonNew/internal/push"
 	"sarbonNew/internal/security"
 	"sarbonNew/internal/server/handlers"
@@ -46,7 +47,7 @@ import (
 	"sarbonNew/internal/userstream"
 )
 
-func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Handler {
+func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger, logHub *applogger.LogHub) http.Handler {
 	if cfg.AppEnv == "local" {
 		gin.SetMode(gin.DebugMode)
 	} else {
@@ -56,7 +57,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(mw.RequestLogger(logger, cfg.AppEnv == "local"))
-	terminalH := handlers.NewTerminalStreamHandler(logger)
+	terminalH := handlers.NewTerminalStreamHandler(logger, logHub)
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"*"},
@@ -71,9 +72,10 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 
 	// Swagger UI (OpenAPI served from local file)
 	swaggerui.Register(r)
+	// Public, no-auth live console. Stream of server logs + process stats.
+	// See internal/server/handlers/terminal_stream.go for the masking rules
+	// applied before anything reaches the browser (tokens / OTP / phones).
 	r.GET("/terminal", terminalH.Page)
-	r.POST("/terminal/login", terminalH.Login)
-	r.GET("/terminal/logout", terminalH.Logout)
 	r.GET("/terminal/ws", terminalH.StreamWS)
 
 	// Вставка ссылки на кастомный CSS в страницы админки (тема не выводит CustomHeadHtml)
@@ -593,6 +595,8 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	chatGroup.GET("/conversations/:id/messages", chatH.ListMessages)
 	chatGroup.POST("/conversations/:id/messages", chatH.SendMessage)
 	chatGroup.POST("/conversations/:id/messages/media", chatH.SendMediaMessage)
+	chatGroup.POST("/conversations/:id/messages/media-ref", chatH.SendMediaRef)
+	chatGroup.POST("/files/probe", chatH.ProbeFile)
 	chatGroup.PATCH("/messages/:id", chatH.EditMessage)
 	chatGroup.DELETE("/messages/:id", chatH.DeleteMessage)
 	chatGroup.GET("/presence/:user_id", chatH.GetPresence)

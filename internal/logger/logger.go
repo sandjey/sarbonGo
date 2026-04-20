@@ -46,3 +46,41 @@ func NewDevelopment() *zap.Logger {
 	core := zapcore.NewCore(enc, zapcore.AddSync(os.Stderr), zapcore.DebugLevel)
 	return zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
 }
+
+// NewDevelopmentWithHub is like NewDevelopment but ALSO tees every log entry
+// into the given LogHub, so the /terminal live view gets a verbatim copy of
+// what's on stderr (with sensitive data masked by the hub before broadcast).
+func NewDevelopmentWithHub(hub *LogHub) *zap.Logger {
+	if hub == nil {
+		return NewDevelopment()
+	}
+	cfg := zap.NewDevelopmentEncoderConfig()
+	cfg.EncodeLevel = colorLevelEncoder
+	enc := zapcore.NewConsoleEncoder(cfg)
+	consoleCore := zapcore.NewCore(enc, zapcore.AddSync(os.Stderr), zapcore.DebugLevel)
+	// Hub gets a plain (color-less) copy — raw ANSI escape codes render as
+	// garbage in the browser.
+	plainCfg := zap.NewDevelopmentEncoderConfig()
+	plainEnc := zapcore.NewConsoleEncoder(plainCfg)
+	hubCore := zapcore.NewCore(plainEnc, zapcore.AddSync(hub), zapcore.DebugLevel)
+	return zap.New(zapcore.NewTee(consoleCore, hubCore), zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
+}
+
+// NewProductionWithHub wraps zap's production JSON logger so every entry ALSO
+// lands in the LogHub. Stdout still gets the real JSON — the hub gets a
+// human-friendly console copy.
+func NewProductionWithHub(hub *LogHub) (*zap.Logger, error) {
+	if hub == nil {
+		l, err := zap.NewProduction()
+		return l, err
+	}
+	// stdout: JSON (same as zap.NewProduction).
+	jsonCfg := zap.NewProductionEncoderConfig()
+	jsonEnc := zapcore.NewJSONEncoder(jsonCfg)
+	stdoutCore := zapcore.NewCore(jsonEnc, zapcore.AddSync(os.Stdout), zapcore.InfoLevel)
+	// hub: plain text (easier to eyeball in /terminal).
+	plainCfg := zap.NewDevelopmentEncoderConfig()
+	plainEnc := zapcore.NewConsoleEncoder(plainCfg)
+	hubCore := zapcore.NewCore(plainEnc, zapcore.AddSync(hub), zapcore.InfoLevel)
+	return zap.New(zapcore.NewTee(stdoutCore, hubCore), zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel)), nil
+}

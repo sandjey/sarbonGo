@@ -239,7 +239,7 @@ func (r *Repo) ListMessages(ctx context.Context, conversationID, userID uuid.UUI
 	var err error
 	if cursor == nil || *cursor == uuid.Nil {
 		rows, err = r.pg.Query(ctx, `
-SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at,
+SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at, m.delivered_at,
   (m.sender_id <> $2 AND m.created_at <= COALESCE(mr.last_read_at, 'epoch'::timestamptz)) AS read_by_me,
   (m.sender_id = $2 AND m.created_at <= COALESCE(pr.last_read_at, 'epoch'::timestamptz)) AS read_by_peer
 FROM chat_messages m
@@ -252,7 +252,7 @@ LIMIT $3
 `, conversationID, userID, limit)
 	} else {
 		rows, err = r.pg.Query(ctx, `
-SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at,
+SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at, m.delivered_at,
   (m.sender_id <> $2 AND m.created_at <= COALESCE(mr.last_read_at, 'epoch'::timestamptz)) AS read_by_me,
   (m.sender_id = $2 AND m.created_at <= COALESCE(pr.last_read_at, 'epoch'::timestamptz)) AS read_by_peer
 FROM chat_messages m
@@ -273,7 +273,7 @@ LIMIT $3
 	for rows.Next() {
 		var m Message
 		var payloadBytes []byte
-		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt, &m.ReadByMe, &m.ReadByPeer); err != nil {
+		if err := rows.Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt, &m.DeliveredAt, &m.ReadByMe, &m.ReadByPeer); err != nil {
 			return nil, err
 		}
 		if len(payloadBytes) > 0 {
@@ -304,8 +304,8 @@ INSERT INTO chat_messages (conversation_id, sender_id, type, body, payload)
 SELECT $1, $2, $3, $4, $5
 FROM chat_conversations
 WHERE id = $1 AND (user_a_id = $2 OR user_b_id = $2)
-RETURNING id, conversation_id, sender_id, type, body, payload, created_at, updated_at, deleted_at
-`, conversationID, senderID, msgType, body, payloadJSON).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadJSON, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt)
+RETURNING id, conversation_id, sender_id, type, body, payload, created_at, updated_at, deleted_at, delivered_at
+`, conversationID, senderID, msgType, body, payloadJSON).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadJSON, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt, &m.DeliveredAt)
 	if err != nil {
 		return nil, err
 	}
@@ -322,8 +322,8 @@ func (r *Repo) UpdateMessage(ctx context.Context, messageID, senderID uuid.UUID,
 	err := r.pg.QueryRow(ctx, `
 UPDATE chat_messages SET body = $3, updated_at = now()
 WHERE id = $1 AND sender_id = $2 AND deleted_at IS NULL
-RETURNING id, conversation_id, sender_id, type, body, payload, created_at, updated_at, deleted_at
-`, messageID, senderID, body).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt)
+RETURNING id, conversation_id, sender_id, type, body, payload, created_at, updated_at, deleted_at, delivered_at
+`, messageID, senderID, body).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt, &m.DeliveredAt)
 	if err != nil {
 		return nil, err
 	}
@@ -353,11 +353,11 @@ func (r *Repo) GetMessageByID(ctx context.Context, messageID, userID uuid.UUID) 
 	var m Message
 	var payloadBytes []byte
 	err := r.pg.QueryRow(ctx, `
-SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at
+SELECT m.id, m.conversation_id, m.sender_id, m.type, m.body, m.payload, m.created_at, m.updated_at, m.deleted_at, m.delivered_at
 FROM chat_messages m
 JOIN chat_conversations c ON c.id = m.conversation_id
 WHERE m.id = $1 AND (c.user_a_id = $2 OR c.user_b_id = $2)
-`, messageID, userID).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt)
+`, messageID, userID).Scan(&m.ID, &m.ConversationID, &m.SenderID, &m.Type, &m.Body, &payloadBytes, &m.CreatedAt, &m.UpdatedAt, &m.DeletedAt, &m.DeliveredAt)
 	if err != nil {
 		return nil, err
 	}
@@ -365,6 +365,90 @@ WHERE m.id = $1 AND (c.user_a_id = $2 OR c.user_b_id = $2)
 		m.Payload = json.RawMessage(payloadBytes)
 	}
 	return &m, nil
+}
+
+// MarkMessageDelivered stamps delivered_at = now() if not yet set. Returns the
+// stamp. Safe to call repeatedly — no-op when already delivered.
+func (r *Repo) MarkMessageDelivered(ctx context.Context, messageID uuid.UUID) (*time.Time, error) {
+	var ts time.Time
+	err := r.pg.QueryRow(ctx, `
+UPDATE chat_messages SET delivered_at = COALESCE(delivered_at, now())
+WHERE id = $1
+RETURNING delivered_at
+`, messageID).Scan(&ts)
+	if err != nil {
+		return nil, err
+	}
+	return &ts, nil
+}
+
+// DeliveryAck groups undelivered messages the recipient just received,
+// by (conversation, sender) so we can emit a single WS event per group
+// to the original sender.
+type DeliveryAck struct {
+	ConversationID uuid.UUID
+	SenderID       uuid.UUID
+	MessageIDs     []uuid.UUID
+	DeliveredAt    time.Time
+}
+
+// MarkUndeliveredForUser stamps delivered_at = now() on every non-deleted
+// message addressed to userID (i.e. sender <> userID) across all of their
+// conversations that was still queued, and returns the batches grouped by
+// (conversation_id, sender_id) for WS fan-out back to senders.
+func (r *Repo) MarkUndeliveredForUser(ctx context.Context, userID uuid.UUID) ([]DeliveryAck, error) {
+	rows, err := r.pg.Query(ctx, `
+WITH upd AS (
+  UPDATE chat_messages m
+  SET delivered_at = now()
+  FROM chat_conversations c
+  WHERE m.conversation_id = c.id
+    AND m.deleted_at IS NULL
+    AND m.delivered_at IS NULL
+    AND m.sender_id <> $1
+    AND (c.user_a_id = $1 OR c.user_b_id = $1)
+  RETURNING m.id, m.conversation_id, m.sender_id, m.delivered_at
+)
+SELECT conversation_id, sender_id, array_agg(id ORDER BY id) AS ids, MAX(delivered_at) AS delivered_at
+FROM upd
+GROUP BY conversation_id, sender_id
+`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeliveryAck
+	for rows.Next() {
+		var a DeliveryAck
+		if err := rows.Scan(&a.ConversationID, &a.SenderID, &a.MessageIDs, &a.DeliveredAt); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ListConversationPeers returns the peer user IDs of every conversation
+// userID participates in (used to fan out presence events on connect/disconnect).
+func (r *Repo) ListConversationPeers(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := r.pg.Query(ctx, `
+SELECT CASE WHEN user_a_id = $1 THEN user_b_id ELSE user_a_id END AS peer_id
+FROM chat_conversations
+WHERE user_a_id = $1 OR user_b_id = $1
+`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 func (r *Repo) CreateAttachment(ctx context.Context, a Attachment) (uuid.UUID, error) {
@@ -425,7 +509,11 @@ func (r *Repo) GetMediaFileByID(ctx context.Context, id uuid.UUID) (*MediaFile, 
 	return &f, nil
 }
 
-// ListOrphanMediaFiles returns media files not referenced by any attachment.
+// ListOrphanMediaFiles returns media files not referenced by any attachment
+// AND not pinned by the source-hash cache (chat_source_hashes). Pinning by
+// source hash keeps the dedup cache warm even after the last message using
+// the file was deleted — otherwise "popular" forwarded files would keep
+// getting re-encoded every time a new user sends them.
 func (r *Repo) ListOrphanMediaFiles(ctx context.Context, olderThanDays int, limit int) ([]MediaFile, error) {
 	if olderThanDays <= 0 {
 		olderThanDays = 30
@@ -436,8 +524,12 @@ func (r *Repo) ListOrphanMediaFiles(ctx context.Context, olderThanDays int, limi
 	const q = `
 SELECT f.id, f.content_hash, f.kind, f.mime, f.size_bytes, f.path
 FROM media_files f
-LEFT JOIN chat_attachments a ON a.media_file_id = f.id OR a.thumb_media_file_id = f.id
-WHERE a.id IS NULL AND f.created_at < now() - ($1::int || ' days')::interval
+LEFT JOIN chat_attachments a
+  ON a.media_file_id = f.id OR a.thumb_media_file_id = f.id
+LEFT JOIN chat_source_hashes h
+  ON h.media_file_id = f.id OR h.thumb_media_file_id = f.id
+WHERE a.id IS NULL AND h.source_hash IS NULL
+  AND f.created_at < now() - ($1::int || ' days')::interval
 ORDER BY f.created_at ASC
 LIMIT $2`
 	rows, err := r.pg.Query(ctx, q, olderThanDays, limit)
@@ -503,5 +595,51 @@ LIMIT $2`
 
 func (r *Repo) DeleteAttachment(ctx context.Context, attachmentID uuid.UUID) error {
 	_, err := r.pg.Exec(ctx, `DELETE FROM chat_attachments WHERE id=$1`, attachmentID)
+	return err
+}
+
+// SourceMapping is the cached result of previously processing a given source
+// file (keyed by SHA-256 of the uploaded bytes BEFORE ffmpeg). Enables
+// instant resend / pre-upload probe without re-running the whole pipeline.
+type SourceMapping struct {
+	SourceHash       string
+	MediaFileID      uuid.UUID
+	ThumbMediaFileID *uuid.UUID
+	Kind             string
+	Mime             string
+	SizeBytes        int64
+	DurationMs       *int
+	Width            *int
+	Height           *int
+}
+
+// GetSourceMapping returns the cached mapping for the given source SHA-256, or
+// (nil, nil) if the source was never processed before.
+func (r *Repo) GetSourceMapping(ctx context.Context, sourceHash string) (*SourceMapping, error) {
+	var m SourceMapping
+	err := r.pg.QueryRow(ctx, `
+SELECT source_hash, media_file_id, thumb_media_file_id, kind, mime, size_bytes, duration_ms, width, height
+FROM chat_source_hashes
+WHERE source_hash = $1
+`, sourceHash).Scan(&m.SourceHash, &m.MediaFileID, &m.ThumbMediaFileID, &m.Kind, &m.Mime, &m.SizeBytes, &m.DurationMs, &m.Width, &m.Height)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &m, nil
+}
+
+// PutSourceMapping stores (source_hash → media_file) mapping. Idempotent: a
+// second call with the same source_hash is a no-op (the existing media_file
+// already covers this source).
+func (r *Repo) PutSourceMapping(ctx context.Context, m SourceMapping) error {
+	_, err := r.pg.Exec(ctx, `
+INSERT INTO chat_source_hashes
+  (source_hash, media_file_id, thumb_media_file_id, kind, mime, size_bytes, duration_ms, width, height)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (source_hash) DO NOTHING
+`, m.SourceHash, m.MediaFileID, m.ThumbMediaFileID, m.Kind, m.Mime, m.SizeBytes, m.DurationMs, m.Width, m.Height)
 	return err
 }

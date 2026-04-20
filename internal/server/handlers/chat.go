@@ -52,6 +52,47 @@ func NewChatHandler(logger *zap.Logger, repo *chat.Repo, presence *chat.Presence
 		}
 		return conv.PeerID(fromUserID), true
 	})
+
+	// When user opens a socket: flip presence on for their chat peers AND
+	// drain undelivered messages addressed to them (ack back to every sender).
+	hub.SetOnUserConnected(func(userID uuid.UUID) {
+		ctx := context.Background()
+		if acks, err := repo.MarkUndeliveredForUser(ctx, userID); err != nil {
+			logger.Debug("chat: mark undelivered on connect", zap.Error(err), zap.String("user_id", userID.String()))
+		} else {
+			for _, a := range acks {
+				hub.BroadcastMessageDelivered(a.SenderID, a.ConversationID, a.MessageIDs, a.DeliveredAt)
+			}
+		}
+		peers, err := repo.ListConversationPeers(ctx, userID)
+		if err != nil {
+			logger.Debug("chat: list peers on connect", zap.Error(err))
+			return
+		}
+		for _, peerID := range peers {
+			hub.BroadcastPresence(peerID, userID, true, 0)
+		}
+	})
+
+	// When user's last socket closes: push offline+last_seen to every peer.
+	hub.SetOnUserDisconnected(func(userID uuid.UUID) {
+		ctx := context.Background()
+		var lastSeen int64
+		if presence != nil {
+			if ls, err := presence.LastSeen(ctx, userID); err == nil && ls > 0 {
+				lastSeen = ls
+			}
+		}
+		peers, err := repo.ListConversationPeers(ctx, userID)
+		if err != nil {
+			logger.Debug("chat: list peers on disconnect", zap.Error(err))
+			return
+		}
+		for _, peerID := range peers {
+			hub.BroadcastPresence(peerID, userID, false, lastSeen)
+		}
+	})
+
 	return h
 }
 
@@ -80,6 +121,73 @@ func (h *ChatHandler) currentUserIDForChat(c *gin.Context) (uuid.UUID, bool) {
 		}
 	}
 	return uuid.Nil, false
+}
+
+// Chat media size caps per message type. Keep in sync with docs/openapi.yaml.
+// Limits apply to the incoming raw upload — final stored object may be smaller
+// after ffmpeg reencoding (video/voice).
+const (
+	chatMaxPhotoBytes = 15 << 20  // 15 MiB
+	chatMaxVideoBytes = 200 << 20 // 200 MiB
+	chatMaxVoiceBytes = 50 << 20  // 50 MiB
+
+	// Telegram-style duration cap: voice messages, regular video and video
+	// notes are all hard-limited to 60 seconds. Avoids multi-minute clips
+	// chewing CPU on ffmpeg and gigabytes of disk.
+	chatMaxMediaDurationMs = 60_000
+)
+
+// chatMediaLimitForType returns the byte cap for the given message type.
+func chatMediaLimitForType(msgType string) int64 {
+	switch msgType {
+	case "PHOTO":
+		return chatMaxPhotoBytes
+	case "VIDEO", "VIDEO_NOTE":
+		return chatMaxVideoBytes
+	case "VOICE":
+		return chatMaxVoiceBytes
+	default:
+		return chatMaxPhotoBytes
+	}
+}
+
+// chatMediaDurationCapMs returns the max allowed duration for a media message
+// type, or 0 if the type has no duration (photo).
+func chatMediaDurationCapMs(msgType string) int {
+	switch msgType {
+	case "VOICE", "VIDEO", "VIDEO_NOTE":
+		return chatMaxMediaDurationMs
+	}
+	return 0
+}
+
+// markDeliveredIfPeerOnline stamps delivered_at = now() on the just-created
+// message if the recipient has a live WS session, and sends message_delivered
+// back to the sender so their UI flips to "double-check". Mutates msg in place.
+func (h *ChatHandler) markDeliveredIfPeerOnline(ctx context.Context, conv *chat.Conversation, msg *chat.Message) {
+	if conv == nil || msg == nil {
+		return
+	}
+	peerID := conv.PeerID(msg.SenderID)
+	if peerID == uuid.Nil {
+		return
+	}
+	online := h.hub != nil && h.hub.IsOnline(peerID)
+	if !online && h.presence != nil {
+		ok, err := h.presence.IsOnline(ctx, peerID)
+		if err == nil && ok {
+			online = true
+		}
+	}
+	if !online {
+		return
+	}
+	ts, err := h.repo.MarkMessageDelivered(ctx, msg.ID)
+	if err != nil || ts == nil {
+		return
+	}
+	msg.DeliveredAt = ts
+	h.hub.BroadcastMessageDelivered(msg.SenderID, msg.ConversationID, []uuid.UUID{msg.ID}, *ts)
 }
 
 func chatLastMessagePreview(msgType string, body *string) string {
@@ -439,6 +547,9 @@ func (h *ChatHandler) SendMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
 		return
 	}
+	// Stamp delivered_at synchronously if recipient is online, so the response
+	// body and the broadcast already carry the "double-check" state.
+	h.markDeliveredIfPeerOnline(c.Request.Context(), conv, msg)
 	h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
 	resp.SuccessLang(c, http.StatusCreated, "ok", msg)
 }
@@ -504,6 +615,20 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		return
 	}
 
+	// Enforce per-type size caps BEFORE we spool the upload to disk / ffmpeg.
+	if limit := chatMediaLimitForType(msgType); fh.Size > limit {
+		resp.ErrorLang(c, http.StatusRequestEntityTooLarge, "chat_media_too_large")
+		return
+	}
+
+	// Soft-check the declared MIME/extension matches the message type; ffmpeg
+	// will still reject broken files, but a quick reject here gives a clean 400
+	// and avoids burning CPU on obviously wrong uploads (e.g. mp3 as VIDEO).
+	if !chatMediaTypeLooksRight(msgType, fh.Filename, fh.Header.Get("Content-Type")) {
+		resp.ErrorLang(c, http.StatusBadRequest, "chat_media_type_not_supported")
+		return
+	}
+
 	storageRoot := strings.TrimSpace(os.Getenv("CHAT_STORAGE_DIR"))
 	if storageRoot == "" {
 		storageRoot = "storage"
@@ -528,7 +653,12 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		return
 	}
 	defer func() { _ = os.Remove(inPath) }()
-	if _, err := io.Copy(dst, src); err != nil {
+	// Hash the ORIGINAL bytes (pre-ffmpeg) while we stream them to disk.
+	// This source hash is the cache key for chat_source_hashes: if the same
+	// file was processed before (possibly by someone else), we skip the whole
+	// ffmpeg pipeline and reuse the existing media_file.
+	sourceHasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(dst, sourceHasher), src); err != nil {
 		_ = dst.Close()
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
@@ -536,6 +666,18 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 	if err := dst.Close(); err != nil {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
+	}
+	sourceHash := hex.EncodeToString(sourceHasher.Sum(nil))
+
+	// Fast-path: identical bytes were processed before → reuse.
+	// Kind must match (same source reused as a different message type is not
+	// a valid cache hit, e.g. someone sending the same mp4 as VIDEO_NOTE vs
+	// VIDEO would produce different processed outputs).
+	if mapping, mErr := h.repo.GetSourceMapping(c.Request.Context(), sourceHash); mErr == nil && mapping != nil && mapping.Kind == msgType {
+		if sent := h.sendFromSourceMapping(c, conv, userID, convID, msgType, caption, mapping); sent {
+			return
+		}
+		// mapping stale (media_files row gone) → fall through to full pipeline.
 	}
 
 	contentType := fh.Header.Get("Content-Type")
@@ -632,6 +774,17 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		}
 	}
 
+	// Enforce Telegram-style duration cap. ffprobe already filled durationMs
+	// (or left it nil for unreadable files, which we treat as 0 — no cap).
+	if cap := chatMediaDurationCapMs(msgType); cap > 0 && durationMs != nil && *durationMs > cap {
+		_ = os.Remove(outPath)
+		if thumbPath != "" {
+			_ = os.Remove(thumbPath)
+		}
+		resp.ErrorLang(c, http.StatusBadRequest, "chat_media_too_long")
+		return
+	}
+
 	stat, err := os.Stat(outPath)
 	if err != nil {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
@@ -687,12 +840,47 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		}
 	}
 
+	// Thumbnail is optional (only generated for VIDEO/VIDEO_NOTE). When present
+	// we dedup it via media_files so the same video sent 10 times shares ONE
+	// preview file on disk, not ten. Legacy ThumbPath stays as a fallback if
+	// hashing/upsert fails, so the UI never loses a working preview.
 	var thumbMediaID *uuid.UUID
 	var thumbRel *string
 	if thumbPath != "" {
-		// Thumbnail is optional; we keep it per-upload (no dedup required), but store in legacy column and optionally media_files too.
-		rel := thumbPath
-		thumbRel = &rel
+		if info, e := os.Stat(thumbPath); e == nil && info.Size() > 0 {
+			if thash, e := sha256FileHex(thumbPath); e == nil {
+				thumbDir := filepath.Join(storageRoot, "chat", "media", thash[:2])
+				if err := os.MkdirAll(thumbDir, 0o755); err == nil {
+					thumbFinalPath := filepath.Join(thumbDir, thash+".jpg")
+					tid, inserted, err := h.repo.UpsertMediaFile(c.Request.Context(), chat.MediaFile{
+						ContentHash: thash,
+						Kind:        "THUMB",
+						Mime:        "image/jpeg",
+						SizeBytes:   info.Size(),
+						Path:        thumbFinalPath,
+					})
+					if err == nil {
+						if inserted {
+							if renErr := os.Rename(thumbPath, thumbFinalPath); renErr != nil {
+								h.logger.Debug("chat thumb rename", zap.Error(renErr))
+								_ = os.Remove(thumbPath)
+							}
+						} else {
+							_ = os.Remove(thumbPath)
+							if mf, e := h.repo.GetMediaFileByID(c.Request.Context(), tid); e == nil && mf != nil && mf.Path != "" {
+								thumbFinalPath = mf.Path
+							}
+						}
+						thumbMediaID = &tid
+						thumbRel = &thumbFinalPath
+					}
+				}
+			}
+		}
+		if thumbRel == nil {
+			rel := thumbPath
+			thumbRel = &rel
+		}
 	}
 	rel := storeRel
 	attID, err := h.repo.CreateAttachment(c.Request.Context(), chat.Attachment{
@@ -737,8 +925,244 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 	}
 	_ = h.repo.LinkAttachment(c.Request.Context(), attID, msg.ID)
 
+	// Cache (source_hash → processed media_file) so the next upload of the
+	// same source bytes hits the fast-path above. Best-effort — failure here
+	// never breaks the send, it just means we'll re-process next time.
+	if err := h.repo.PutSourceMapping(c.Request.Context(), chat.SourceMapping{
+		SourceHash:       sourceHash,
+		MediaFileID:      mediaID,
+		ThumbMediaFileID: thumbMediaID,
+		Kind:             msgType,
+		Mime:             mime,
+		SizeBytes:        sizeBytes,
+		DurationMs:       durationMs,
+		Width:            width,
+		Height:           height,
+	}); err != nil {
+		h.logger.Debug("chat put source mapping", zap.Error(err))
+	}
+
+	h.markDeliveredIfPeerOnline(c.Request.Context(), conv, msg)
 	h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
 	resp.SuccessLang(c, http.StatusCreated, "ok", msg)
+}
+
+// sendFromSourceMapping builds an attachment + message from an existing
+// (source_hash → media_file) cache entry, skipping upload-body handling and
+// ffmpeg entirely. Used both by the SendMediaMessage fast-path (when the
+// uploaded bytes turn out to be known) and by the /messages/media-ref
+// endpoint (client explicitly reuses an already-known source hash).
+//
+// Returns true if the message was sent (success or client-visible error
+// response written). Returns false only when the mapping looks stale (the
+// referenced media_file was deleted) so the caller can fall through to the
+// full upload path without reporting a failure yet.
+func (h *ChatHandler) sendFromSourceMapping(c *gin.Context, conv *chat.Conversation, userID, convID uuid.UUID, msgType string, caption *string, mapping *chat.SourceMapping) bool {
+	ctx := c.Request.Context()
+
+	mf, err := h.repo.GetMediaFileByID(ctx, mapping.MediaFileID)
+	if err != nil || mf == nil {
+		return false
+	}
+	mime := mf.Mime
+	if mime == "" {
+		mime = mapping.Mime
+	}
+	sizeBytes := mf.SizeBytes
+	if sizeBytes == 0 {
+		sizeBytes = mapping.SizeBytes
+	}
+
+	var thumbRel *string
+	if mapping.ThumbMediaFileID != nil {
+		if tmf, tErr := h.repo.GetMediaFileByID(ctx, *mapping.ThumbMediaFileID); tErr == nil && tmf != nil && tmf.Path != "" {
+			rel := tmf.Path
+			thumbRel = &rel
+		}
+	}
+
+	mediaID := mapping.MediaFileID
+	rel := mf.Path
+	attID, err := h.repo.CreateAttachment(ctx, chat.Attachment{
+		MessageID:        nil,
+		ConversationID:   convID,
+		UploaderID:       userID,
+		Kind:             msgType,
+		Mime:             mime,
+		SizeBytes:        sizeBytes,
+		Path:             rel,
+		ThumbPath:        thumbRel,
+		Width:            mapping.Width,
+		Height:           mapping.Height,
+		DurationMs:       mapping.DurationMs,
+		MediaFileID:      &mediaID,
+		ThumbMediaFileID: mapping.ThumbMediaFileID,
+	})
+	if err != nil {
+		h.logger.Error("chat create attachment (cached)", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
+		return true
+	}
+
+	payload := mediaMsgPayload{
+		AttachmentID: attID.String(),
+		URL:          "/v1/chat/files/" + attID.String(),
+		Mime:         mime,
+		SizeBytes:    sizeBytes,
+		DurationMs:   mapping.DurationMs,
+		Width:        mapping.Width,
+		Height:       mapping.Height,
+	}
+	if thumbRel != nil {
+		payload.ThumbURL = "/v1/chat/files/" + attID.String() + "?thumb=1"
+	}
+
+	msg, err := h.repo.CreateMessage(ctx, convID, userID, msgType, caption, payload)
+	if err != nil {
+		h.logger.Error("chat create media message (cached)", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
+		return true
+	}
+	_ = h.repo.LinkAttachment(ctx, attID, msg.ID)
+
+	h.markDeliveredIfPeerOnline(ctx, conv, msg)
+	h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
+	resp.SuccessLang(c, http.StatusCreated, "ok", msg)
+	return true
+}
+
+// ProbeFile looks up a previously processed source by its SHA-256. Lets the
+// client avoid uploading the body at all when the server already has it.
+//
+// POST /v1/chat/files/probe { "sha256": "<hex>" }
+//   200 { exists: true,  mime, size_bytes, kind, duration_ms?, width?, height?, has_thumb }
+//   200 { exists: false }
+func (h *ChatHandler) ProbeFile(c *gin.Context) {
+	if _, ok := h.getUserID(c); !ok {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	var body struct {
+		SHA256 string `json:"sha256"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	body.SHA256 = strings.ToLower(strings.TrimSpace(body.SHA256))
+	if len(body.SHA256) != 64 {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	mapping, err := h.repo.GetSourceMapping(c.Request.Context(), body.SHA256)
+	if err != nil {
+		h.logger.Error("chat probe", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if mapping == nil {
+		resp.SuccessLang(c, http.StatusOK, "ok", gin.H{"exists": false})
+		return
+	}
+	// Confirm the referenced media_file is still on disk / in DB; otherwise
+	// tell the client it doesn't exist so they upload normally.
+	mf, err := h.repo.GetMediaFileByID(c.Request.Context(), mapping.MediaFileID)
+	if err != nil || mf == nil {
+		resp.SuccessLang(c, http.StatusOK, "ok", gin.H{"exists": false})
+		return
+	}
+	out := gin.H{
+		"exists":     true,
+		"kind":       mapping.Kind,
+		"mime":       mapping.Mime,
+		"size_bytes": mapping.SizeBytes,
+		"has_thumb":  mapping.ThumbMediaFileID != nil,
+	}
+	if mapping.DurationMs != nil {
+		out["duration_ms"] = *mapping.DurationMs
+	}
+	if mapping.Width != nil {
+		out["width"] = *mapping.Width
+	}
+	if mapping.Height != nil {
+		out["height"] = *mapping.Height
+	}
+	resp.SuccessLang(c, http.StatusOK, "ok", out)
+}
+
+// SendMediaRef sends a media message by reusing a previously processed source,
+// identified by its SHA-256. No body upload, no ffmpeg. Pairs with ProbeFile:
+// the client probes first, then either uploads (if miss) or calls media-ref
+// (if hit). This is the Telegram-style "send by file_id" flow.
+//
+// POST /v1/chat/conversations/:id/messages/media-ref
+//   body: { type: "PHOTO|VOICE|VIDEO|VIDEO_NOTE", sha256, body? }
+func (h *ChatHandler) SendMediaRef(c *gin.Context) {
+	userID, ok := h.getUserID(c)
+	if !ok {
+		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
+		return
+	}
+	convID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_conversation_id")
+		return
+	}
+	conv, err := h.repo.GetConversation(c.Request.Context(), convID, userID)
+	if err != nil || conv == nil {
+		resp.ErrorLang(c, http.StatusNotFound, "conversation_not_found")
+		return
+	}
+
+	var body struct {
+		Type   string  `json:"type"`
+		SHA256 string  `json:"sha256"`
+		Body   *string `json:"body,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	msgType := strings.ToUpper(strings.TrimSpace(body.Type))
+	if msgType == "AUDIO" {
+		msgType = "VOICE"
+	}
+	switch msgType {
+	case "PHOTO", "VOICE", "VIDEO", "VIDEO_NOTE":
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	sha := strings.ToLower(strings.TrimSpace(body.SHA256))
+	if len(sha) != 64 {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	var caption *string
+	if body.Body != nil {
+		v := strings.TrimSpace(*body.Body)
+		if v != "" {
+			if len(v) > 64*1024 {
+				resp.ErrorLang(c, http.StatusBadRequest, "message_too_long")
+				return
+			}
+			caption = &v
+		}
+	}
+	mapping, err := h.repo.GetSourceMapping(c.Request.Context(), sha)
+	if err != nil {
+		h.logger.Error("chat media-ref lookup", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if mapping == nil || mapping.Kind != msgType {
+		resp.ErrorLang(c, http.StatusNotFound, "chat_media_not_cached")
+		return
+	}
+	if sent := h.sendFromSourceMapping(c, conv, userID, convID, msgType, caption, mapping); !sent {
+		// mapping stale → media_file deleted under us; tell client to upload.
+		resp.ErrorLang(c, http.StatusNotFound, "chat_media_not_cached")
+	}
 }
 
 // GetFile serves a chat attachment file (or thumbnail) if requester is participant.
@@ -759,16 +1183,26 @@ func (h *ChatHandler) GetFile(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
 		return
 	}
+	// Resolve the actual file on disk + its content ETag. Preference order:
+	//   thumb=1 → deduplicated thumb (media_files) → legacy thumb path
+	//   otherwise → deduplicated main file (media_files) → legacy attachment path
 	path := a.Path
 	etag := ""
-	if a.MediaFileID != nil {
+	wantThumb := c.Query("thumb") == "1"
+	if wantThumb {
+		if a.ThumbMediaFileID != nil {
+			if mf, err := h.repo.GetMediaFileByID(c.Request.Context(), *a.ThumbMediaFileID); err == nil && mf != nil {
+				path = mf.Path
+				etag = mf.ContentHash
+			}
+		} else if a.ThumbPath != nil && *a.ThumbPath != "" {
+			path = *a.ThumbPath
+		}
+	} else if a.MediaFileID != nil {
 		if mf, err := h.repo.GetMediaFileByID(c.Request.Context(), *a.MediaFileID); err == nil && mf != nil {
 			path = mf.Path
 			etag = mf.ContentHash
 		}
-	}
-	if c.Query("thumb") == "1" && a.ThumbPath != nil && *a.ThumbPath != "" {
-		path = *a.ThumbPath
 	}
 	path = filepath.FromSlash(path)
 	if _, err := os.Stat(path); err != nil {
@@ -827,6 +1261,30 @@ func chatCopyFile(src, dst string) error {
 	return err
 }
 
+// chatMediaTypeLooksRight is a soft pre-flight check: rejects obviously wrong
+// uploads (e.g. image declared as VIDEO). Not a security boundary — ffmpeg is.
+func chatMediaTypeLooksRight(msgType, filename, contentType string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	ct := strings.ToLower(contentType)
+	switch msgType {
+	case "PHOTO":
+		return chatMediaLikelyRasterImage(filename, contentType)
+	case "VIDEO", "VIDEO_NOTE":
+		switch ext {
+		case ".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".3gp":
+			return true
+		}
+		return strings.HasPrefix(ct, "video/")
+	case "VOICE":
+		switch ext {
+		case ".mp3", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".webm", ".amr":
+			return true
+		}
+		return strings.HasPrefix(ct, "audio/")
+	}
+	return false
+}
+
 func chatMediaLikelyMP3(filename, contentType string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	ct := strings.ToLower(contentType)
@@ -851,8 +1309,24 @@ func chatMediaLikelyRasterImage(filename, contentType string) bool {
 	}
 }
 
+// Shared flags that make ffmpeg output byte-deterministic for a given input:
+// no unix timestamps, no encoder/muxer metadata, bit-exact codec paths. This
+// matters because we dedup media by SHA-256 of the OUTPUT — without these
+// flags the same mp3/photo sent twice would produce two different hashes
+// and defeat the cache.
+var ffmpegBitExactFlags = []string{
+	"-fflags", "+bitexact",
+	"-flags:v", "+bitexact",
+	"-flags:a", "+bitexact",
+	"-map_metadata", "-1",
+	"-metadata", "encoder=",
+}
+
 func ffmpegVideoRemuxCopy(inPath, outPath string) error {
-	cmd := exec.Command("ffmpeg", "-y", "-i", inPath, "-c", "copy", "-movflags", "+faststart", outPath)
+	args := []string{"-y", "-i", inPath}
+	args = append(args, ffmpegBitExactFlags...)
+	args = append(args, "-c", "copy", "-movflags", "+faststart+empty_moov", outPath)
+	cmd := exec.Command("ffmpeg", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg remux: %w: %s", err, string(out))
@@ -861,7 +1335,19 @@ func ffmpegVideoRemuxCopy(inPath, outPath string) error {
 }
 
 func ffmpegVoiceToOggOpus(inPath, outPath string) error {
-	cmd := exec.Command("ffmpeg", "-y", "-i", inPath, "-vn", "-c:a", "libopus", "-b:a", "32k", "-vbr", "on", "-compression_level", "10", "-ac", "1", "-ar", "48000", outPath)
+	args := []string{"-y", "-i", inPath}
+	args = append(args, ffmpegBitExactFlags...)
+	args = append(args,
+		"-vn",
+		"-c:a", "libopus",
+		"-b:a", "32k",
+		"-vbr", "on",
+		"-compression_level", "10",
+		"-ac", "1",
+		"-ar", "48000",
+		outPath,
+	)
+	cmd := exec.Command("ffmpeg", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg: %w: %s", err, string(out))
@@ -869,11 +1355,27 @@ func ffmpegVoiceToOggOpus(inPath, outPath string) error {
 	return nil
 }
 
+// ffmpegVideoToMp4 re-encodes the input to H.264/AAC MP4 with broad player
+// compatibility (iOS Safari, older Android): yuv420p, main profile, level 3.1,
+// faststart for progressive playback. `square=true` produces a 480x480
+// Telegram-style "video note" (кружок).
 func ffmpegVideoToMp4(inPath, outPath string, square bool) error {
-	args := []string{"-y", "-i", inPath, "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart"}
+	args := []string{"-y", "-i", inPath}
+	args = append(args, ffmpegBitExactFlags...)
+	args = append(args,
+		"-c:v", "libx264",
+		"-preset", "veryfast",
+		"-crf", "28",
+		"-profile:v", "main",
+		"-level", "3.1",
+		"-pix_fmt", "yuv420p",
+		"-c:a", "aac",
+		"-b:a", "96k",
+		"-ac", "2",
+		"-ar", "44100",
+		"-movflags", "+faststart",
+	)
 	if square {
-		// Make a square "video note"-like output.
-		// scale to min dim, then crop center to 480x480.
 		args = append(args, "-vf", "scale='if(gt(iw,ih),-2,480)':'if(gt(iw,ih),480,-2)',crop=480:480")
 	} else {
 		args = append(args, "-vf", "scale='min(1280,iw)':-2")
@@ -887,8 +1389,19 @@ func ffmpegVideoToMp4(inPath, outPath string, square bool) error {
 	return nil
 }
 
+// ffmpegImageToJpeg: Telegram-style photo compression. Caps long side to 1920,
+// quality 4 (~85%), JPEG-ready chroma subsampling. Typical 4000x3000 photo
+// shrinks from ~3-5 MB to ~350-700 KB without visible loss on a phone screen.
 func ffmpegImageToJpeg(inPath, outPath string) error {
-	cmd := exec.Command("ffmpeg", "-y", "-i", inPath, "-q:v", "3", outPath)
+	args := []string{"-y", "-i", inPath}
+	args = append(args, ffmpegBitExactFlags...)
+	args = append(args,
+		"-vf", "scale='if(gt(iw,1920),1920,iw)':-2",
+		"-q:v", "4",
+		"-pix_fmt", "yuvj420p",
+		outPath,
+	)
+	cmd := exec.Command("ffmpeg", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("ffmpeg: %w: %s", err, string(out))
@@ -896,8 +1409,20 @@ func ffmpegImageToJpeg(inPath, outPath string) error {
 	return nil
 }
 
+// ffmpegThumbnail extracts the first frame of a video as a small JPEG preview
+// (long side 320px). Uses first frame (not t=1s) so it also works on clips
+// shorter than a second.
 func ffmpegThumbnail(inPath, outPath string) error {
-	cmd := exec.Command("ffmpeg", "-y", "-ss", "00:00:01", "-i", inPath, "-vframes", "1", "-q:v", "4", outPath)
+	args := []string{"-y", "-i", inPath}
+	args = append(args, ffmpegBitExactFlags...)
+	args = append(args,
+		"-vframes", "1",
+		"-vf", "scale='if(gt(iw,ih),320,-2)':'if(gt(iw,ih),-2,320)'",
+		"-q:v", "5",
+		"-pix_fmt", "yuvj420p",
+		outPath,
+	)
+	cmd := exec.Command("ffmpeg", args...)
 	_, _ = cmd.CombinedOutput()
 	return nil
 }

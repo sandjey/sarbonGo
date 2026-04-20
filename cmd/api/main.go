@@ -33,12 +33,17 @@ import (
 func main() {
 	config.LoadDotEnvUp(8)
 
+	// Ring buffer for the /terminal live view. Every log line written by this
+	// logger is mirrored here (with sensitive values masked) so the browser
+	// can display the same stream the server sees on stdout.
+	logHub := logger.NewLogHub(2000)
+
 	var log *zap.Logger
 	if os.Getenv("APP_ENV") == "local" {
-		log = logger.NewDevelopment()
+		log = logger.NewDevelopmentWithHub(logHub)
 	} else {
 		var err error
-		log, err = zap.NewProduction()
+		log, err = logger.NewProductionWithHub(logHub)
 		if err != nil {
 			panic(err)
 		}
@@ -83,7 +88,7 @@ func main() {
 
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.NewRouter(cfg, infraDeps, log),
+		Handler:           server.NewRouter(cfg, infraDeps, log, logHub),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -132,7 +137,11 @@ func startCallsSweeper(ctx context.Context, log *zap.Logger, deps *infra.Infra, 
 }
 
 func startChatMediaGC(ctx context.Context, log *zap.Logger, deps *infra.Infra) {
-	if strings.TrimSpace(os.Getenv("CHAT_MEDIA_GC_ENABLED")) != "1" {
+	// GC is ON by default: orphan media files and expired deleted-message
+	// attachments will accumulate forever otherwise. Explicit opt-out:
+	//   CHAT_MEDIA_GC_ENABLED=0
+	if strings.TrimSpace(os.Getenv("CHAT_MEDIA_GC_ENABLED")) == "0" {
+		log.Warn("chat media GC disabled via CHAT_MEDIA_GC_ENABLED=0")
 		return
 	}
 	days := 30

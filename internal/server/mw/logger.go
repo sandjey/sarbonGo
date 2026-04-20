@@ -3,11 +3,19 @@ package mw
 import (
 	"fmt"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
+
+// HTTPRequestsTotal is a process-wide counter of handled HTTP requests. Read
+// by the /terminal live console to show "requests since boot". We expose it
+// here (not in handlers) because middleware is where every request naturally
+// terminates, and keeping it atomic at package level avoids a circular
+// dependency handlers ↔ mw.
+var HTTPRequestsTotal atomic.Uint64
 
 // ANSI colors for HTTP log line
 const (
@@ -30,6 +38,7 @@ func RequestLogger(logger *zap.Logger, isLocal bool) gin.HandlerFunc {
 
 		latency := time.Since(start)
 		status := c.Writer.Status()
+		HTTPRequestsTotal.Add(1)
 
 		if isLocal {
 			statusColor := _green

@@ -289,6 +289,16 @@ components:
           type: string
           format: date-time
           nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Когда сообщение было доставлено клиенту получателя (его WS получил/подтвердил).
+            Telegram-style «двойная галочка»:
+              - отсутствует (`null`) → отправлено на сервер, но не доставлено → одна галочка
+              - заполнено → доставлено → две серые галочки
+              - `read_by_peer = true` → прочитано → две синие галочки
         read_by_me:
           type: boolean
           description: Для GET истории входящее сообщение помечено прочитанным вами (курсор chat_conversation_reads)
@@ -12511,25 +12521,50 @@ paths:
       tags:
       - Chat
       summary: Отправить медиа (фото/голос/видео/кружок)
-      description: 'Загружает файл, оптимизирует «как в Telegram» и создаёт сообщение:
+      description: |
+        Загружает файл, оптимизирует «как в Telegram» и создаёт сообщение:
 
         - **PHOTO** → JPEG (оптимизация/пережатие); при ошибке ffmpeg — копия JPEG/PNG/WebP
-
         - **VOICE** → если исходник **MP3** (`audio/mpeg`) — сохраняется как MP3; иначе **OGG/Opus** (моно, 48kHz, ~32kbps)
-
         - **AUDIO** — синоним **VOICE** (mp3/голос с клиентов, где поле названо audio)
-
         - **VIDEO** → если исходник уже **MP4** — быстрый путь (копия); иначе перекодирование в MP4 (H.264/AAC) + faststart + thumbnail; при необходимости пробуется remux `ffmpeg -c copy`
-
         - **VIDEO_NOTE** → квадратный MP4 (под UI-кружок) + thumbnail
 
+        **Поле файла в multipart:** `file` (предпочтительно); также принимаются `upload`, `media`, `photo`, `video`, `voice`.
 
-        Поле файла в multipart: **`file`** (предпочтительно); также принимаются **`upload`**, **`media`**, **`photo`**, **`video`**, **`voice`**. Лимит тела запроса до **128 MiB** (большие видео).
+        **Лимиты размера входящего файла (проверяются до обработки):**
+        | type          | max size | max duration |
+        |---------------|----------|--------------|
+        | PHOTO         | 15 MiB   | —            |
+        | VOICE / AUDIO | 50 MiB   | 60 сек       |
+        | VIDEO         | 200 MiB  | 60 сек       |
+        | VIDEO_NOTE    | 200 MiB  | 60 сек       |
 
+        Общий лимит тела multipart — **256 MiB**. Превышение per-type лимита → `413 chat_media_too_large`.
+        Несоответствие расширения/MIME выбранному `type` → `400 chat_media_type_not_supported`.
+        Превышение длительности (ffprobe) → `400 chat_media_too_long`.
 
-        Файл хранится на диске сервера, в БД сохраняются метаданные. В `payload` сообщения возвращается `attachment_id` и `url` для скачивания.
+        **Пайплайн обработки (Telegram-style):**
+          - **PHOTO** — ffmpeg ресайз до 1920px по длинной стороне, JPEG q:v 4 (~85%), yuvj420p. Типичное 4000×3000 фото 3-5 MB сжимается до ~300-700 KB без видимых потерь на экране телефона.
+          - **VOICE** — если исходник уже MP3 → копия (нулевые потери). Иначе OGG/Opus 32 kbps, моно, 48 kHz (как у Telegram voice).
+          - **VIDEO** — если уже MP4 → копия; иначе H.264 (main profile, level 3.1, yuv420p) + AAC 96k + `+faststart` для прогрессивного проигрывания. Разрешение — max 1280px по длинной стороне.
+          - **VIDEO_NOTE** — квадратный MP4 480×480 с тем же кодеком (tg-style «кружок»).
+          - Для VIDEO и VIDEO_NOTE дополнительно генерируется JPEG-превью 320px из первого кадра.
 
-        '
+        **Дедупликация и кэш (ключевая фишка):**
+          - Финальный бинарь → SHA-256 → `media_files(content_hash UNIQUE)`. Один и тот же файл, отправленный несколькими пользователями, **занимает на диске ровно одну копию**.
+          - Thumbnails дедуплицируются так же — 100 одинаковых видео делят одно превью.
+          - ffmpeg запускается с флагами `-fflags +bitexact -flags:v +bitexact -flags:a +bitexact -map_metadata -1`, поэтому один и тот же источник даёт бит-идентичный вывод между вызовами → дедуп реально срабатывает на voice/photo, а не только на прямой копии MP3/MP4.
+          - Клиент скачивает медиа через `GET /v1/chat/files/{attachment_id}` — отдача кэшируется в CDN/браузере (`Cache-Control: public, max-age=31536000, immutable` + `ETag` = SHA-256), при включённом `CHAT_USE_X_ACCEL=1` раздача через Nginx `X-Accel-Redirect` с Range для видео.
+
+        **Pre-upload probe (экономия трафика, опционально):**
+          - Сервер хэширует **исходные байты** входящего файла inline при приёме и при успешной обработке сохраняет связку `source_hash → media_file` в `chat_source_hashes`.
+          - Клиент может вычислить `sha256(file_bytes)` локально и ПЕРЕД загрузкой вызвать `POST /v1/chat/files/probe { sha256 }`. Если сервер знает этот источник — клиент отправляет сообщение через `POST /v1/chat/conversations/{id}/messages/media-ref { type, sha256, body? }` без загрузки тела.
+          - Тот же fast-path срабатывает и внутри этого эндпоинта: даже если клиент не делал probe, сервер распознает знакомые байты при записи во временный файл (multiwriter + SHA-256) и пропустит ffmpeg целиком.
+
+        Сразу после создания:
+          - если получатель онлайн (есть активный WS или свежий Redis presence) — `delivered_at` проставляется синхронно, в ответе уже видна «двойная галочка», и отправителю по WS уходит событие `message_delivered`;
+          - по обоим клиентам диалога улетает WS-событие `message` с новым `ChatMessage`.
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -12709,6 +12744,147 @@ paths:
           description: data = ChatPresence
         '400':
           description: invalid user_id
+  /v1/chat/files/probe:
+    post:
+      tags:
+      - Chat
+      summary: Проверить, есть ли файл на сервере по SHA-256 (Telegram-style)
+      description: |
+        Pre-upload probe: клиент считает SHA-256 **исходных байт** файла (до
+        любой локальной перекодировки) и спрашивает сервер — уже знает ли он
+        этот файл.
+
+        **Зачем:** когда один и тот же файл отправляют много раз (пересылка,
+        мемы, один и тот же PDF из группы), не тратить трафик на повторную
+        загрузку и CPU на повторную прогонку через ffmpeg. Аналог Telegram
+        `file_id`.
+
+        **Алгоритм на клиенте:**
+
+        1. Посчитать `sha256(file_bytes)` (hex, lowercase).
+        2. Вызвать `POST /v1/chat/files/probe { sha256 }`.
+        3. Если `exists: true` → отправить сообщение через
+           `POST /v1/chat/conversations/{id}/messages/media-ref` (без тела файла).
+        4. Если `exists: false` → обычный upload через
+           `POST /v1/chat/conversations/{id}/messages/media`.
+
+        Кеш наполняется автоматически: при любом успешном upload сервер
+        связывает source SHA-256 с процессированным файлом (таблица
+        `chat_source_hashes`). Удаляются эти связи только при полном
+        очищении `media_files` через GC (ON DELETE CASCADE).
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      - UserIDHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sha256]
+              properties:
+                sha256:
+                  type: string
+                  description: 'SHA-256 исходных байт файла (hex, lowercase, 64 символа)'
+                  example: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08'
+      responses:
+        '200':
+          description: |
+            Результат поиска в кеше.
+
+            `exists: false`:
+            ```json
+            { "exists": false }
+            ```
+
+            `exists: true` — клиент может дернуть `/messages/media-ref`:
+            ```json
+            {
+              "exists": true,
+              "kind": "VIDEO",
+              "mime": "video/mp4",
+              "size_bytes": 1048576,
+              "duration_ms": 42500,
+              "width": 720,
+              "height": 1280,
+              "has_thumb": true
+            }
+            ```
+        '400':
+          description: invalid sha256 (ожидается 64-символьный hex)
+        '401':
+          description: unauthorized
+  /v1/chat/conversations/{id}/messages/media-ref:
+    post:
+      tags:
+      - Chat
+      summary: Отправить медиа-сообщение по SHA-256 (без загрузки тела)
+      description: |
+        Отправляет сообщение, используя ранее процессированный сервером файл,
+        идентифицируемый по SHA-256 исходных байт. Никакого multipart upload,
+        никакого ffmpeg — просто создаётся attachment + message и рассылается
+        через WebSocket.
+
+        Работает только после успешного probe: `POST /v1/chat/files/probe`
+        вернул `exists: true`. Если к моменту вызова `media-ref` файл уже был
+        удалён GC'ом (очень маловероятно — связи защищены от GC), вернётся
+        `404 chat_media_not_cached`, и клиент должен упасть на обычный
+        multipart upload через `/messages/media`.
+
+        **Поля body:**
+
+        - `type` — `PHOTO` | `VOICE` | `VIDEO` | `VIDEO_NOTE`. Должен совпадать
+          с тем типом, в котором файл был процессирован впервые (иначе 404).
+        - `sha256` — SHA-256 исходных байт, тот же, что передавали в probe.
+        - `body` — необязательная подпись (caption) к медиа.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      - UserIDHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: conversation_id
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, sha256]
+              properties:
+                type:
+                  type: string
+                  enum: [PHOTO, VOICE, VIDEO, VIDEO_NOTE]
+                sha256:
+                  type: string
+                  description: 'SHA-256 исходных байт файла (hex, lowercase)'
+                body:
+                  type: string
+                  nullable: true
+                  description: Необязательная подпись к медиа
+      responses:
+        '201':
+          description: data = ChatMessage (как при обычной отправке)
+        '400':
+          description: invalid payload (invalid type/sha256/body)
+        '401':
+          description: unauthorized
+        '404':
+          description: |
+            - `conversation_not_found` — нет такого диалога
+            - `chat_media_not_cached` — sha256 неизвестен серверу или type
+              не совпадает с процессированным. Клиент должен загрузить
+              файл обычным upload'ом.
   /v1/chat/files/{id}:
     get:
       tags:
@@ -12761,47 +12937,86 @@ paths:
     get:
       tags:
       - Chat
-      summary: WebSocket чат
-      description: 'Подключение к чату в реальном времени. Авторизация через query: **token=JWT**.
+      summary: WebSocket чат (realtime)
+      description: |
+        Единый WebSocket-канал для realtime-событий чата, индикаторов присутствия
+        и сигналинга звонков. Авторизация через query-параметр `token=<JWT access token>`.
 
-        Каждое входящее JSON-сообщение от клиента продлевает TTL «онлайн» в Redis (присутствие).
+        ### Жизненный цикл
+        - При открытии сокета сервер помечает пользователя **online** в Redis
+          (TTL 65 сек) и шлёт событие `presence {online:true}` всем, с кем у пользователя
+          есть диалог (и чьи клиенты в онлайне).
+        - На коннекте сервер также **атомарно помечает все входящие недоставленные**
+          сообщения как `delivered_at = now()` и рассылает каждому отправителю одно
+          событие `message_delivered` со списком ID — это и есть Telegram-style
+          «вторая галочка» для накопившихся сообщений.
+        - Сервер шлёт ping каждые ~54 сек; клиент ДОЛЖЕН отвечать pong автоматически
+          (стандартный механизм WebSocket). Любое входящее JSON-сообщение от клиента
+          дополнительно продлевает presence-TTL — это страховка для платформ, где
+          ping/pong недоступен.
+        - При закрытии **последнего** сокета пользователя: presence обновляется на
+          `offline` + проставляется `last_seen`, а также отправляются события
+          `typing_stop` по всем диалогам, в которых клиент был в статусе «печатает»
+          (чтобы у собеседника не осталось «висящего» индикатора).
 
+        ### Клиент → сервер
+        Все кадры — JSON-объект `{ "type": "<name>", "data": { ... } }`.
 
-        **Клиент → сервер (чат):**
+        | type | data | назначение |
+        |------|------|-----------|
+        | `typing` | `{ "conversation_id": "<uuid>" }` | Начать показывать «печатает» собеседнику. Клиент должен повторять не реже раза в ~5 сек, пока пользователь продолжает печатать (TTL ключа в Redis = 15 сек). |
+        | `typing_stop` | `{ "conversation_id": "<uuid>" }` | Немедленно снять индикатор «печатает». Обязательно слать при отправке сообщения / потере фокуса на поле ввода. |
+        | `webrtc.offer` / `webrtc.answer` / `webrtc.ice` / `call.end` / `call.cancel` / `call.accept` / `call.reject` | `{ "call_id": "<uuid>", "payload": { ... } }` | Сигналинг звонков (см. раздел Chat / Voice). Сервер проверяет, что отправитель является участником `call_id`, и пересылает peer'у. |
 
-        - `typing` — `{ "type":"typing", "data":{ "conversation_id":"<uuid>" } }`
+        > Передачу новых **сообщений** через WS сервер игнорирует. Создание текстовых
+        > сообщений — `POST /v1/chat/conversations/{id}/messages`, медиа — `POST
+        > /v1/chat/conversations/{id}/messages/media`. Это гарантирует, что запись
+        > сохраняется в БД до её broadcast'а.
 
-        - `typing_stop` — сброс индикатора набора у собеседника: `{ "type":"typing_stop", "data":{ "conversation_id":"<uuid>" } }`
+        ### Сервер → клиент
+        | type | data | назначение |
+        |------|------|-----------|
+        | `message` | `ChatMessage` | Новое сообщение (шлётся обоим участникам, включая отправителя — для multi-device синхронизации). Для получателя `delivered_at` часто уже заполнен, если он был онлайн. |
+        | `message_updated` | `ChatMessage` | Сообщение отредактировано (`PATCH /v1/chat/messages/{id}`). |
+        | `message_deleted` | `{ "conversation_id": "<uuid>", "message_id": "<uuid>" }` | Мягкое удаление (`DELETE /v1/chat/messages/{id}`). |
+        | `message_delivered` | `{ "conversation_id": "<uuid>", "message_ids": ["<uuid>", ...], "delivered_at": "<ISO-8601>" }` | Подтверждение доставки **отправителю** для одного или нескольких его сообщений. Используется, чтобы перекрасить «одну галочку» в «две серые». |
+        | `conversation_read` | `{ "conversation_id": "<uuid>", "reader_id": "<uuid>" }` | Собеседник нажал «открыть диалог» или вызвал `POST /conversations/{id}/read`. Клиенту следует для всех своих сообщений в этом диалоге, созданных до этого момента, показать «прочитано» (двойная синяя). |
+        | `typing` / `typing_stop` | `{ "conversation_id": "<uuid>", "user_id": "<uuid>" }` | Индикатор набора от собеседника. |
+        | `presence` | `{ "user_id": "<uuid>", "online": true \| false, "last_seen": <unix_sec?> }` | Изменение онлайн-статуса пользователя, с которым у вас есть диалог. `last_seen` присылается только при `online=false`. |
+        | `webrtc.offer` / `webrtc.answer` / `webrtc.ice` / `call.*` | `{ "call_id": "<uuid>", "from_id": "<uuid>", "payload": { ... } }` | Пересылаемый сигналинг от peer'а. |
 
+        ### Ошибки
+        - Токен не указан или невалиден → HTTP `401` до апгрейда.
+        - После апгрейда «жёстких» ошибок сервер не шлёт — невалидные входящие JSON просто игнорируются, чтобы не ломать соединение.
 
-        **Сервер → клиент:**
+        ### Пример клиентского потока (JS)
+        ```js
+        const ws = new WebSocket(`wss://api.example.com/v1/chat/ws?token=${jwt}`);
 
-        - `message` — новое сообщение (`data` = ChatMessage)
+        ws.onmessage = (e) => {
+          const m = JSON.parse(e.data);
+          switch (m.type) {
+            case 'message':            onMessage(m.data); break;
+            case 'message_delivered':  markDelivered(m.data.message_ids, m.data.delivered_at); break;
+            case 'conversation_read':  markConversationRead(m.data.conversation_id, m.data.reader_id); break;
+            case 'typing':             showTyping(m.data.conversation_id, m.data.user_id); break;
+            case 'typing_stop':        hideTyping(m.data.conversation_id, m.data.user_id); break;
+            case 'presence':           setPresence(m.data.user_id, m.data.online, m.data.last_seen); break;
+            case 'message_updated':    replaceMessage(m.data); break;
+            case 'message_deleted':    removeMessage(m.data.conversation_id, m.data.message_id); break;
+          }
+        };
 
-        - `typing` / `typing_stop` — индикатор набора (`data.conversation_id`, `data.user_id`)
+        // печатает... (вызывать при каждом keystroke, но дебаунсить до 1 раза в 3-5 сек)
+        function onInput(convId) {
+          ws.send(JSON.stringify({ type: 'typing', data: { conversation_id: convId } }));
+        }
 
-        - `conversation_read` — собеседник отметил диалог прочитанным: `data.conversation_id`, `data.reader_id`
-
-        - `message_updated` — отредактировано сообщение (`data` = ChatMessage)
-
-        - `message_deleted` — мягкое удаление: `data.conversation_id`, `data.message_id`
-
-
-        **Дополнительно (Calls / WebRTC signaling):**
-
-        Сервер принимает от клиента события `webrtc.offer`, `webrtc.answer`, `webrtc.ice`, `call.end` и пересылает peer''у, если отправитель является участником `call_id`.
-
-
-        **Формат клиента → сервер:**
-
-        `{ "type": "webrtc.offer", "data": { "call_id": "<uuid>", "payload": { ... } } }`
-
-
-        **Формат сервер → peer:**
-
-        `{ "type": "webrtc.offer", "data": { "call_id": "<uuid>", "from_id": "<uuid>", "payload": { ... } } }`
-
-        '
+        // снять индикатор при отправке
+        function onSend(convId) {
+          ws.send(JSON.stringify({ type: 'typing_stop', data: { conversation_id: convId } }));
+        }
+        ```
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []

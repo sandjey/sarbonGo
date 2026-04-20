@@ -35,12 +35,20 @@ func (s *PresenceStore) SetOnline(ctx context.Context, userID uuid.UUID) error {
 
 // SetOffline removes online and sets last_seen. Call on WS disconnect.
 func (s *PresenceStore) SetOffline(ctx context.Context, userID uuid.UUID) error {
+	_, err := s.SetOfflineNow(ctx, userID)
+	return err
+}
+
+// SetOfflineNow is like SetOffline but returns the last_seen unix timestamp it
+// just persisted, so the caller can include it in a presence broadcast without
+// a second round-trip.
+func (s *PresenceStore) SetOfflineNow(ctx context.Context, userID uuid.UUID) (int64, error) {
 	now := time.Now().Unix()
 	pipe := s.rdb.Pipeline()
 	pipe.Del(ctx, presencePrefix+userID.String())
 	pipe.Set(ctx, lastSeenPrefix+userID.String(), now, lastSeenKeepSec*time.Second)
 	_, err := pipe.Exec(ctx)
-	return err
+	return now, err
 }
 
 // Heartbeat refreshes online TTL. Call every ~30s from connected client.

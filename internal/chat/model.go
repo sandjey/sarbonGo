@@ -26,6 +26,11 @@ type Message struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	DeletedAt      *time.Time `json:"deleted_at,omitempty"`
+	// DeliveredAt is set once the recipient's client has received the message
+	// (their WebSocket acknowledged delivery, or they were online at send time).
+	// Empty while the message is queued — "single-check" UX. Compare with
+	// ReadByPeer (from conversation read cursor) for the "double-check" state.
+	DeliveredAt *time.Time `json:"delivered_at,omitempty"`
 	// Read flags (filled by ListMessages from chat_conversation_reads cursors).
 	ReadByMe   bool `json:"read_by_me"`   // true if this message is from the peer and the current user has read it
 	ReadByPeer bool `json:"read_by_peer"` // true if this message is from the current user and the peer has read it
