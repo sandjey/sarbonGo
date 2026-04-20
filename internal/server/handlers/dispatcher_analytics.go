@@ -507,11 +507,13 @@ func (h *DispatcherAnalyticsHandler) driverManagerDashboardData(ctx context.Cont
 		driverFilterClause = " AND r.driver_id = $" + strconv.Itoa(len(args))
 	}
 
+	// driver_manager_relations не имеет колонки status (см. migration 000074):
+	// наличие строки = активная связь, разрыв — DELETE (UnlinkManager).
 	kpiSQL := `
 WITH rel AS (
   SELECT r.driver_id
   FROM driver_manager_relations r
-  WHERE r.manager_id = $1 AND r.status = 'ACTIVE'` + driverFilterClause + `
+  WHERE r.manager_id = $1` + driverFilterClause + `
 ),
 driver_stats AS (
   SELECT
@@ -649,7 +651,7 @@ FROM driver_manager_relations r
 LEFT JOIN drivers d ON d.id = r.driver_id
 LEFT JOIN trips t ON t.driver_id = r.driver_id AND t.created_at >= $2 AND t.created_at < $3
 LEFT JOIN offers o ON o.id = t.offer_id
-WHERE r.manager_id = $1 AND r.status = 'ACTIVE'
+WHERE r.manager_id = $1
   AND (
     t.id IS NULL OR
     (o.proposed_by = 'DRIVER_MANAGER' AND o.proposed_by_id = $1) OR o.negotiation_dispatcher_id = $1
