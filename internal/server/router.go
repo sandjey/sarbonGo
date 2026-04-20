@@ -173,6 +173,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo, userStreamHub)
 	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo, dispatchersRepo, tripNotifRepo, tripRatingRepo, userStreamHub)
 	sseH := handlers.NewSSEStreamsHandler(userStreamHub)
+	// dispatcherUnifiedSSEH is initialised below (after chatHub) because it needs both hubs.
 
 	cargoDriversH := handlers.NewCargoDriversHandler(logger, cargoRepo, cargoDriversRepo, favRepo)
 
@@ -184,6 +185,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	chatPresence := chat.NewPresenceStore(deps.Redis)
 	chatHub := chat.NewHub(chatPresence, logger)
 	chatH := handlers.NewChatHandler(logger, chatRepo, chatPresence, chatHub, driversRepo, dispatchersRepo)
+	dispatcherUnifiedSSEH := handlers.NewDispatcherUnifiedSSEHandler(userStreamHub, chatHub)
 	pushTokensH := handlers.NewPushTokensHandler(logger, driversRepo, dispatchersRepo)
 	pushSvc, err := push.New(context.Background(), cfg, logger, driversRepo, dispatchersRepo)
 	if err != nil {
@@ -508,6 +510,26 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger) http.Ha
 	dispSSE.GET("/sse/connections", sseH.DispatcherConnectionsSSE)
 	dispSSE.GET("/sse/trip-status", sseH.DispatcherTripStatusSSE)
 	dispSSE.GET("/sse/driver-updates", sseH.DispatcherDriverUpdatesSSE)
+
+	// Unified SSE per manager role (CARGO_MANAGER / DRIVER_MANAGER). Two endpoints per role:
+	//   events        — inbox + trip_status + driver_updates + chat  (for live UI state sync)
+	//   notifications — inbox + driver_updates + chat                (for notifications bell/list)
+	// manager_role is validated against the authenticated dispatcher's freelance_dispatchers.manager_role.
+	cmSSE := v1.Group("/dispatchers/cargo-manager")
+	cmSSE.Use(mw.RequireBaseHeaders(cfg))
+	cmSSE.Use(mw.RequireDispatcherWithQueryToken(jwtm, refreshStore))
+	cmSSE.Use(mw.RequireDispatcherManagerRole(dispatchersRepo, dispatchers.ManagerRoleCargoManager))
+	cmSSE.Use(mw.UpdateDispatcherLastOnline(dispatchersRepo))
+	cmSSE.GET("/sse/events", dispatcherUnifiedSSEH.EventsForCargoManager)
+	cmSSE.GET("/sse/notifications", dispatcherUnifiedSSEH.NotificationsForCargoManager)
+
+	dmSSE := v1.Group("/dispatchers/driver-manager")
+	dmSSE.Use(mw.RequireBaseHeaders(cfg))
+	dmSSE.Use(mw.RequireDispatcherWithQueryToken(jwtm, refreshStore))
+	dmSSE.Use(mw.RequireDispatcherManagerRole(dispatchersRepo, dispatchers.ManagerRoleDriverManager))
+	dmSSE.Use(mw.UpdateDispatcherLastOnline(dispatchersRepo))
+	dmSSE.GET("/sse/events", dispatcherUnifiedSSEH.EventsForDriverManager)
+	dmSSE.GET("/sse/notifications", dispatcherUnifiedSSEH.NotificationsForDriverManager)
 	dispAuthed.POST("/drivers/:driverId/rating", tripsH.PostDispatcherRateDriver)
 	dispAuthed.POST("/dispatchers/:dispatcherId/rating", tripsH.PostDispatcherRateDispatcher)
 	dispAuthed.GET("/offers/:id", cargoH.GetOfferDispatcher)

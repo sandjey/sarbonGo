@@ -274,6 +274,26 @@ func (s *Service) SendByStreamRecipient(ctx context.Context, streamKind, recipie
 			data["kind"] = v
 		}
 	}
+
+	// Business rule: the driver changes trip statuses themselves (IN_TRANSIT, DELIVERED,
+	// COMPLETION_PENDING_MANAGER, CANCELLED). Pushing every hop to the same driver is pure noise.
+	// Firebase для водителя по рейсам отправляем только финальный `COMPLETED` (ставится cargo manager).
+	// Для диспетчера/cargo manager поведение не меняется — он получает все trip-события.
+	// SSE и список /v1/driver/notifications не затрагиваются — в приложении водитель видит всю историю.
+	if skip, reason := shouldSuppressTripPushForDriver(streamKind, recipientKind, data); skip {
+		if s.logger != nil {
+			s.logger.Info("push suppressed (trip event for driver)",
+				zap.String("stream_kind", streamKind),
+				zap.String("recipient_kind", recipientKind),
+				zap.String("recipient_id", recipientID.String()),
+				zap.String("payload_kind", firstNonEmpty(data["kind"], data["event_kind"], data["event"])),
+				zap.String("event_kind", data["event_kind"]),
+				zap.String("reason", reason),
+			)
+		}
+		return
+	}
+
 	tk, source := s.resolveRecipientToken(ctx, recipientKind, recipientID)
 	if strings.TrimSpace(tk) == "" {
 		if s.logger != nil {
@@ -376,4 +396,32 @@ func firstNonEmpty(vs ...string) string {
 		}
 	}
 	return ""
+}
+
+// shouldSuppressTripPushForDriver decides whether to silently skip a Firebase push to a driver
+// for trip-related events. The driver is the one who performs IN_TRANSIT / DELIVERED / cancels /
+// asks for completion, so pushing those back to their own device is noise. The only trip push
+// the driver actually needs is the final COMPLETED (set by the cargo manager).
+//
+// Rules (driver only):
+//   - streamKind == "trip_status"                          → suppress (purely UI snapshot stream).
+//   - streamKind == "notifications" && kind == "trip_notification" && event_kind != COMPLETED
+//                                                          → suppress.
+//
+// Non-trip events (cargo_offer, connection_offer, driver_profile_edit, etc.) and dispatcher
+// recipients are NOT affected.
+func shouldSuppressTripPushForDriver(streamKind, recipientKind string, data map[string]string) (bool, string) {
+	if recipientKind != tripnotif.RecipientDriver {
+		return false, ""
+	}
+	if streamKind == "trip_status" {
+		return true, "driver_trip_status_self_managed"
+	}
+	if streamKind == "notifications" && strings.TrimSpace(data["kind"]) == "trip_notification" {
+		evk := strings.ToUpper(strings.TrimSpace(data["event_kind"]))
+		if evk != tripnotif.EventCompleted {
+			return true, "driver_trip_event_non_final"
+		}
+	}
+	return false, ""
 }

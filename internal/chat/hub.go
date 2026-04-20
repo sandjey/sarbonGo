@@ -127,6 +127,7 @@ type OnCallSignal func(fromUserID uuid.UUID, msgType string, data json.RawMessag
 type Hub struct {
 	mu              sync.RWMutex
 	clients         map[uuid.UUID][]*Client
+	subs            map[uuid.UUID][]chan []byte // side-channel subscribers (SSE) per user
 	presence        *PresenceStore
 	onTyping        OnTypingPeer
 	onCall          OnCallSignal
@@ -138,6 +139,7 @@ type Hub struct {
 func NewHub(presence *PresenceStore, logger *zap.Logger) *Hub {
 	return &Hub{
 		clients:  make(map[uuid.UUID][]*Client),
+		subs:     make(map[uuid.UUID][]chan []byte),
 		presence: presence,
 		logger:   logger,
 	}
@@ -218,6 +220,7 @@ func (h *Hub) Unregister(c *Client) {
 func (h *Hub) SendToUser(userID uuid.UUID, payload []byte) {
 	h.mu.RLock()
 	list := h.clients[userID]
+	subs := append([]chan []byte(nil), h.subs[userID]...)
 	cb := h.onSendToUser
 	h.mu.RUnlock()
 	for _, c := range list {
@@ -227,8 +230,42 @@ func (h *Hub) SendToUser(userID uuid.UUID, payload []byte) {
 			// skip if buffer full
 		}
 	}
+	// Fan-out to SSE side-channel subscribers (non-blocking; slow consumer drops event).
+	for _, ch := range subs {
+		select {
+		case ch <- payload:
+		default:
+		}
+	}
 	if cb != nil {
 		cb(userID, payload)
+	}
+}
+
+// SubscribeUser registers a side-channel subscriber (for SSE) that receives the same
+// payloads that SendToUser delivers to the user's WebSocket clients. It does not affect
+// WebSocket delivery or presence. Caller MUST invoke unsubscribe to avoid leaks.
+func (h *Hub) SubscribeUser(userID uuid.UUID) (ch <-chan []byte, unsubscribe func()) {
+	if h == nil || userID == uuid.Nil {
+		return nil, func() {}
+	}
+	c := make(chan []byte, 48)
+	h.mu.Lock()
+	h.subs[userID] = append(h.subs[userID], c)
+	h.mu.Unlock()
+	return c, func() {
+		h.mu.Lock()
+		arr := h.subs[userID]
+		for i, x := range arr {
+			if x == c {
+				h.subs[userID] = append(arr[:i], arr[i+1:]...)
+				break
+			}
+		}
+		if len(h.subs[userID]) == 0 {
+			delete(h.subs, userID)
+		}
+		h.mu.Unlock()
 	}
 }
 

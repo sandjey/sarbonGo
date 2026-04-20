@@ -1522,6 +1522,13 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Geçersiz X-User-Token",
 		"zh": "X-User-Token无效",
 	},
+	"forbidden_role": {
+		"en": "This endpoint is not available for your manager role",
+		"ru": "Эндпоинт недоступен для вашей роли менеджера",
+		"uz": "Ushbu endpoint sizning menejer rolingiz uchun mavjud emas",
+		"tr": "Bu uç nokta menajer rolünüz için kullanılamaz",
+		"zh": "此端点对您的管理员角色不可用",
+	},
 	"missing_user_token_or_id": {
 		"en": "Missing X-User-Token or X-User-ID (or query user_id/token)",
 		"ru": "Требуется X-User-Token или X-User-ID (или query user_id/token)",

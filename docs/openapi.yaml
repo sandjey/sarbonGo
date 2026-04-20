@@ -27,11 +27,15 @@ tags:
 - name: Cargo Manager / Trips
 - name: Cargo Manager / Likes
 - name: Cargo Manager / Driver managers
+- name: Cargo Manager / SSE
+  description: Единый SSE-поток для Cargo Manager. Доступен только аккаунтам с manager_role=CARGO_MANAGER (иначе 403).
 - name: Driver Manager / Drivers & connections
 - name: Driver Manager / Offers
 - name: Driver Manager / Trips
 - name: Driver Manager / Cargo
 - name: Driver Manager / Likes
+- name: Driver Manager / SSE
+  description: Единый SSE-поток для Driver Manager. Доступен только аккаунтам с manager_role=DRIVER_MANAGER (иначе 403).
 - name: Admin / Auth
 - name: Admin / Companies
 - name: Admin / Tools
@@ -2045,6 +2049,93 @@ components:
           format: uuid
           nullable: true
           description: UUID freelance dispatcher (cargo manager) — кто подтверждает переход в COMPLETED после DELIVERED или владелец груза по цепочке оффера.
+    SSEDispatcherUnifiedEvent:
+      type: object
+      description: |
+        Одна запись в потоке унифицированных SSE для диспетчера —
+        `GET /v1/dispatchers/{cargo-manager|driver-manager}/sse/{events|notifications}`.
+
+        Стабильный конверт: `type` — основная категория события, `id` — UUID главной сущности
+        (notification_id / offer_id / invitation_id / driver_id / trip_id / message_id), `event_kind` —
+        под-категория (например `IN_TRANSIT`, `accepted`, `rejected`, `created`, `message.new`),
+        `data` — исходный payload как есть, как он был опубликован во внутренний хаб.
+      required:
+      - type
+      - stream_kind
+      - recipient_kind
+      - recipient_id
+      - dispatcher_role
+      - at
+      properties:
+        type:
+          type: string
+          description: Основная категория события (стабильный дискриминатор).
+          enum:
+          - trip_notification
+          - cargo_offer
+          - connection_offer
+          - driver_update
+          - trip_status
+          - message
+          - call
+        id:
+          type: string
+          description: |
+            UUID главной сущности события. Маппинг по `type`:
+            - `trip_notification` → `notification_id` (или `trip_id` если первого нет)
+            - `cargo_offer`       → `offer_id`
+            - `connection_offer`  → `invitation_id` (или `token`)
+            - `driver_update`     → `driver_id`
+            - `trip_status`       → `trip_id`
+            - `message`           → `message_id` чата
+            - `call`              → `call_id`
+        event_kind:
+          type: string
+          description: |
+            Подтип/действие. Примеры:
+            - для `trip_status` / `trip_notification`: `IN_TRANSIT`, `DELIVERED`, `COMPLETED`, `CANCELLED`, `COMPLETION_PENDING_MANAGER`
+            - для офферов: `accepted`, `rejected`, `created`, `cancelled`, `confirmed`, `sent_to_driver_manager`
+            - для `connection_offer`: `created`, `accepted`, `declined`, `cancelled`
+            - для `driver_update`: `profile_updated`, `vehicle_updated`, `power_changed`, `trailer_changed`
+            - для `chat`: `message`, `call.ringing`, `call.accepted`, `call.declined`, `call.ended`, `call.missed`
+        stream_kind:
+          type: string
+          description: Из какого внутреннего канала пришло событие.
+          enum:
+          - notifications
+          - trip_status
+          - driver_updates
+          - chat
+        recipient_kind:
+          type: string
+          enum:
+          - dispatcher
+        recipient_id:
+          type: string
+          format: uuid
+          description: ID диспетчера-получателя (== ваш JWT id).
+        dispatcher_role:
+          type: string
+          enum:
+          - CARGO_MANAGER
+          - DRIVER_MANAGER
+          description: manager_role диспетчера, к которому привязан этот SSE-канал.
+        at:
+          type: string
+          format: date-time
+          description: Время доставки события сервером (UTC, RFC3339).
+        data:
+          description: |
+            Исходный payload события **как есть** — структура варьируется в зависимости от `type`/`stream_kind`.
+            Для `notifications` — то же тело, что приходит в `/v1/dispatchers/sse/{trip-notifications|cargo-offers|connections}`.
+            Для `trip_status` — то же тело, что в `/v1/dispatchers/sse/trip-status` (см. `SSETripStatusEvent`).
+            Для `driver_updates` — то же тело, что в `/v1/dispatchers/sse/driver-updates`.
+            Для `chat` — конверт `{type, data}` чат-хаба (текст сообщения, события звонков, typing уже отфильтрован).
+          oneOf:
+          - type: object
+            additionalProperties: true
+          - type: array
+            items: {}
     SSETripNotificationEvent:
       type: object
       description: Одна строка в потоке GET .../sse/trip-notifications (поле `data` в SSE).
@@ -6660,6 +6751,175 @@ paths:
                 type: string
         '401':
           description: unauthorized
+  /v1/dispatchers/cargo-manager/sse/events:
+    get:
+      tags:
+      - Cargo Manager / SSE
+      summary: 'SSE (CM): единый поток событий — inbox + trip_status + driver_updates + chat'
+      description: |
+        **Единый SSE для Cargo Manager.** Один long-lived поток для всего, что нужно фронту в реальном времени:
+        изменение статусов рейсов, принятие/отклонение cargo-офферов и connection-офферов, обновления водителей,
+        входящие чат-сообщения и события звонков. Подходит для синхронизации списков (рейсы / офферы / водители)
+        без отдельных подписок.
+
+        Каждый фрейм — JSON-конверт со стабильной схемой (`type`, `id`, `event_kind`, `data`, …),
+        см. **`#/components/schemas/SSEDispatcherUnifiedEvent`**.
+
+        **Доступ:** только для аккаунтов с `manager_role = CARGO_MANAGER`. Иначе — **403 `forbidden_role`**.
+
+        **Чем отличается от `…/sse/notifications`:** events дополнительно включает поток `trip_status`
+        (raw-снапшоты состояния рейса для UI), которого нет в inbox-списке.
+
+        **Авторизация:** **X-User-Token** или query **`token`**. Базовые заголовки обязательны.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+        description: Дублирует JWT из X-User-Token (для EventSource, где нет кастомных заголовков).
+      responses:
+        '200':
+          description: 'text/event-stream; каждый `data:` — `#/components/schemas/SSEDispatcherUnifiedEvent`. Heartbeat — комментарии `: ping` каждые ~25с.'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  data: {"type":"trip_status","id":"e3...","event_kind":"IN_TRANSIT","stream_kind":"trip_status","recipient_kind":"dispatcher","recipient_id":"...","dispatcher_role":"CARGO_MANAGER","at":"2026-04-20T12:00:00Z","data":{"trip_id":"e3...","status":"IN_TRANSIT","kind":"trip_status"}}
+
+                  data: {"type":"cargo_offer","id":"of...","event_kind":"accepted","stream_kind":"notifications","recipient_kind":"dispatcher","recipient_id":"...","dispatcher_role":"CARGO_MANAGER","at":"2026-04-20T12:00:01Z","data":{"kind":"cargo_offer","offer_id":"of...","event":"accepted"}}
+        '401':
+          description: unauthorized
+        '403':
+          description: forbidden_role — у токена `manager_role` ≠ `CARGO_MANAGER`
+  /v1/dispatchers/cargo-manager/sse/notifications:
+    get:
+      tags:
+      - Cargo Manager / SSE
+      summary: 'SSE (CM): единый inbox уведомлений (всё, что попадает в `/dispatchers/notifications`)'
+      description: |
+        **Единый inbox SSE для Cargo Manager.** Поток ровно тех событий, что попадают в список
+        `GET /v1/dispatchers/notifications`: изменения статусов рейсов (`trip_notification`),
+        cargo-офферы, connection-офферы, обновления водителей и **чат-сообщения / события звонков**.
+
+        В отличие от `…/sse/events`, **не** содержит сырых снапшотов `trip_status`.
+
+        Конверт каждого фрейма — `#/components/schemas/SSEDispatcherUnifiedEvent`.
+
+        **Доступ:** только `manager_role = CARGO_MANAGER`. Иначе — **403 `forbidden_role`**.
+
+        **Авторизация:** **X-User-Token** или query **`token`**.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 'text/event-stream; `data:` — `#/components/schemas/SSEDispatcherUnifiedEvent`'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+        '403':
+          description: forbidden_role
+  /v1/dispatchers/driver-manager/sse/events:
+    get:
+      tags:
+      - Driver Manager / SSE
+      summary: 'SSE (DM): единый поток событий — inbox + trip_status + driver_updates + chat'
+      description: |
+        **Единый SSE для Driver Manager.** Один поток для всего реального времени:
+        изменение статусов рейсов в их зоне ответственности, принятые/отклонённые cargo-офферы
+        (включая офферы от Cargo Manager в их сторону) и connection-офферы (приглашения водителей),
+        обновления водителей (`driver_update`), а также **чат-сообщения / события звонков**.
+
+        Конверт каждого фрейма — `#/components/schemas/SSEDispatcherUnifiedEvent`.
+
+        **Доступ:** только `manager_role = DRIVER_MANAGER`. Иначе — **403 `forbidden_role`**.
+
+        **Чем отличается от `…/sse/notifications`:** events дополнительно включает `trip_status` (UI state sync).
+
+        **Авторизация:** **X-User-Token** или query **`token`**.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 'text/event-stream; `data:` — `#/components/schemas/SSEDispatcherUnifiedEvent`'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  data: {"type":"connection_offer","id":"inv...","event_kind":"accepted","stream_kind":"notifications","recipient_kind":"dispatcher","recipient_id":"...","dispatcher_role":"DRIVER_MANAGER","at":"2026-04-20T12:00:00Z","data":{"kind":"connection_offer","invitation_id":"inv...","event":"accepted"}}
+
+                  data: {"type":"driver_update","id":"drv...","event_kind":"profile_updated","stream_kind":"driver_updates","recipient_kind":"dispatcher","recipient_id":"...","dispatcher_role":"DRIVER_MANAGER","at":"2026-04-20T12:00:01Z","data":{"driver_id":"drv...","action":"profile_updated"}}
+        '401':
+          description: unauthorized
+        '403':
+          description: forbidden_role — у токена `manager_role` ≠ `DRIVER_MANAGER`
+  /v1/dispatchers/driver-manager/sse/notifications:
+    get:
+      tags:
+      - Driver Manager / SSE
+      summary: 'SSE (DM): единый inbox уведомлений'
+      description: |
+        **Единый inbox SSE для Driver Manager.** Поток ровно тех событий, что попадают в список
+        `GET /v1/dispatchers/notifications`: `trip_notification`, `cargo_offer`, `connection_offer`,
+        `driver_update`, `message`, `call.*`.
+
+        В отличие от `…/sse/events`, **не** содержит сырых `trip_status` снапшотов.
+
+        Конверт каждого фрейма — `#/components/schemas/SSEDispatcherUnifiedEvent`.
+
+        **Доступ:** только `manager_role = DRIVER_MANAGER`. Иначе — **403 `forbidden_role`**.
+
+        **Авторизация:** **X-User-Token** или query **`token`**.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: 'text/event-stream; `data:` — `#/components/schemas/SSEDispatcherUnifiedEvent`'
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+        '403':
+          description: forbidden_role
   /v1/dispatchers/drivers/{driverId}/rating:
     post:
       tags:
@@ -9770,6 +10030,9 @@ paths:
 
 
         **Авторизация:** **X-User-Token** или query **`token`**.
+
+
+        **Важно про Firebase (push) для водителя по рейсам.** В SSE и в списке `GET /v1/driver/notifications` водитель получает **все** события рейса (`IN_TRANSIT`, `DELIVERED`, `COMPLETION_PENDING_MANAGER`, `CANCELLED`, `COMPLETED`). Однако Firebase-пуш водителю отправляется **только** для финального `event_kind = COMPLETED` (его ставит cargo manager) — промежуточные статусы водитель ставит сам, поэтому дублирующие пуши подавляются. Для диспетчера/cargo manager пуши остаются по всем статусам.
 
         '
       security:
