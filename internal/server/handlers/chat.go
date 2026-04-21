@@ -1250,7 +1250,7 @@ func (h *ChatHandler) SendMediaRef(c *gin.Context) {
 // GetFile serves a chat attachment file (or thumbnail) if requester is participant.
 // GET /v1/chat/files/:id?thumb=1
 func (h *ChatHandler) GetFile(c *gin.Context) {
-	userID, ok := h.getUserID(c)
+	userID, ok := h.currentUserIDForChat(c)
 	if !ok {
 		resp.ErrorLang(c, http.StatusUnauthorized, "user_not_identified")
 		return
@@ -1286,8 +1286,14 @@ func (h *ChatHandler) GetFile(c *gin.Context) {
 			etag = mf.ContentHash
 		}
 	}
-	path = filepath.FromSlash(path)
+	path = chat.ResolveStoredMediaPath(path)
 	if _, err := os.Stat(path); err != nil {
+		h.logger.Warn("chat file missing on disk",
+			zap.String("attachment_id", attID.String()),
+			zap.String("db_path", a.Path),
+			zap.String("resolved", path),
+			zap.Error(err),
+		)
 		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
 		return
 	}
@@ -1315,6 +1321,9 @@ func (h *ChatHandler) GetFile(c *gin.Context) {
 	}
 
 	// Fallback: serve from Go (slower than Nginx for large video).
+	if strings.TrimSpace(a.Mime) != "" {
+		c.Header("Content-Type", strings.TrimSpace(a.Mime))
+	}
 	c.File(path)
 }
 
