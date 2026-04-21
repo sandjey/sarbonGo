@@ -1,6 +1,15 @@
 # Пример конфига Nginx для API (api.sarbon.me).
 # CORS полностью обрабатывает Go-приложение — Nginx только проксирует запросы.
 # Не добавляйте свои CORS-заголовки в Nginx, чтобы не конфликтовать с бэкендом.
+#
+# ВАЖНО (chat media / 404 HTML от nginx):
+# - Не создавайте отдельный `location /v1/chat/files/` с `alias`/`root` для
+#   «отдачи с диска» — такой запрос не дойдёт до Go, не проверится JWT и
+#   участник диалога; nginx вернёт 404 HTML.
+# - Весь префикс `/v1/` должен уходить в proxy_pass на приложение (кроме
+#   внутреннего `location /_protected/` для X-Accel-Redirect — см. docs/nginx-chat-media.conf.md).
+# - Канонический URL скачивания вложения: GET /v1/chat/media/{attachment_id}
+#   (алиас: GET /v1/chat/files/{id}).
 
 server {
     listen 80;

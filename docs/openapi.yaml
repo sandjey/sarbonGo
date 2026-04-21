@@ -323,10 +323,10 @@ components:
         link:
           type: string
           description: Основная ссылка на файл (то же, что url)
-          example: /v1/chat/files/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+          example: /v1/chat/media/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
         url:
           type: string
-          example: /v1/chat/files/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+          example: /v1/chat/media/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
         links:
           type: object
           description: Удобный объект со ссылками без дополнительных API
@@ -12633,7 +12633,7 @@ paths:
           - Финальный бинарь → SHA-256 → `media_files(content_hash UNIQUE)`. Один и тот же файл, отправленный несколькими пользователями, **занимает на диске ровно одну копию**.
           - Thumbnails дедуплицируются так же — 100 одинаковых видео делят одно превью.
           - ffmpeg запускается с флагами `-fflags +bitexact -flags:v +bitexact -flags:a +bitexact -map_metadata -1`, поэтому один и тот же источник даёт бит-идентичный вывод между вызовами → дедуп реально срабатывает на voice/photo, а не только на прямой копии MP3/MP4.
-          - Клиент скачивает медиа через `GET /v1/chat/files/{attachment_id}` — отдача кэшируется в CDN/браузере (`Cache-Control: public, max-age=31536000, immutable` + `ETag` = SHA-256), при включённом `CHAT_USE_X_ACCEL=1` раздача через Nginx `X-Accel-Redirect` с Range для видео.
+          - Клиент скачивает медиа через `GET /v1/chat/media/{attachment_id}` (алиас `GET /v1/chat/files/{id}`) — отдача кэшируется в CDN/браузере (`Cache-Control: public, max-age=31536000, immutable` + `ETag` = SHA-256), при включённом `CHAT_USE_X_ACCEL=1` раздача через Nginx `X-Accel-Redirect` с Range для видео.
 
         **Pre-upload probe (экономия трафика, опционально):**
           - Сервер хэширует **исходные байты** входящего файла inline при приёме и при успешной обработке сохраняет связку `source_hash → media_file` в `chat_source_hashes`.
@@ -12967,12 +12967,44 @@ paths:
             - `chat_media_not_cached` — sha256 неизвестен серверу или type
               не совпадает с процессированным. Клиент должен загрузить
               файл обычным upload'ом.
+  /v1/chat/media/{id}:
+    get:
+      tags:
+      - Chat
+      summary: Скачать медиа-файл сообщения (канонический URL)
+      description: "То же, что `GET /v1/chat/files/{id}`: бинарный поток вложения по `attachment_id`, если пользователь — участник диалога. Путь **`/v1/chat/media/`** рекомендуется в ссылках внутри сообщений: многие конфиги Nginx перехватывают сегмент `/files/` как статику и отдают **404 HTML**, не доходя до Go.\n\nQuery: `thumb=1` — thumbnail (если есть). Кеширование и `CHAT_USE_X_ACCEL` — как у legacy-эндпоинта `/files/{id}`.\n"
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      - UserIDHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: thumb
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '1'
+      responses:
+        '200':
+          description: Binary file stream
+        '401':
+          description: unauthorized
+        '404':
+          description: not found or access denied
   /v1/chat/files/{id}:
     get:
       tags:
       - Chat
-      summary: Скачать медиа-файл сообщения
-      description: 'Возвращает файл вложения по `attachment_id`, если текущий пользователь является участником диалога.
+      summary: Скачать медиа-файл сообщения (legacy)
+      description: 'Алиас `GET /v1/chat/media/{id}`. Возвращает файл вложения по `attachment_id`, если текущий пользователь является участником диалога.
 
 
         Query:

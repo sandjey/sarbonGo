@@ -33,6 +33,11 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin:     func(r *http.Request) bool { return true },
 }
 
+// chatAttachmentPublicPath is the URL path clients use to download chat
+// attachments (GET with X-User-Token). Prefer "media" over "files" so
+// reverse proxies are less likely to intercept the segment `/files/` as static.
+const chatAttachmentPublicPath = "/v1/chat/media"
+
 type ChatHandler struct {
 	logger      *zap.Logger
 	repo        *chat.Repo
@@ -977,7 +982,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		return
 	}
 
-	baseURL := "/v1/chat/files/" + attID.String()
+	baseURL := chatAttachmentPublicPath + "/" + attID.String()
 	payload := mediaMsgPayload{
 		AttachmentID: attID.String(),
 		Link:         baseURL,
@@ -1083,7 +1088,7 @@ func (h *ChatHandler) sendFromSourceMapping(c *gin.Context, conv *chat.Conversat
 		return true
 	}
 
-	baseURL := "/v1/chat/files/" + attID.String()
+	baseURL := chatAttachmentPublicPath + "/" + attID.String()
 	payload := mediaMsgPayload{
 		AttachmentID: attID.String(),
 		Link:         baseURL,
@@ -1248,7 +1253,7 @@ func (h *ChatHandler) SendMediaRef(c *gin.Context) {
 }
 
 // GetFile serves a chat attachment file (or thumbnail) if requester is participant.
-// GET /v1/chat/files/:id?thumb=1
+// GET /v1/chat/media/:id?thumb=1 (canonical) — GET /v1/chat/files/:id (legacy alias)
 func (h *ChatHandler) GetFile(c *gin.Context) {
 	userID, ok := h.currentUserIDForChat(c)
 	if !ok {

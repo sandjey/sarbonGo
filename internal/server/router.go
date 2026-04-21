@@ -600,7 +600,10 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger, logHub 
 	chatGroup.PATCH("/messages/:id", chatH.EditMessage)
 	chatGroup.DELETE("/messages/:id", chatH.DeleteMessage)
 	chatGroup.GET("/presence/:user_id", chatH.GetPresence)
-	chatGroup.GET("/files/:id", chatH.GetFile)
+	// Media download: canonical path uses "media" so Nginx rules that block
+	// common paths like /files/ (static aliases, security filters) still reach Go.
+	chatGroup.GET("/media/:id", chatH.GetFile)
+	chatGroup.GET("/files/:id", chatH.GetFile) // legacy alias, same handler
 	chatGroup.POST("/push-token", pushTokensH.Upsert)
 	chatGroup.DELETE("/push-token", pushTokensH.Delete)
 	chatGroup.GET("/ws", chatH.ServeWS)
