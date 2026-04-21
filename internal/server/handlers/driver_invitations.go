@@ -1078,6 +1078,23 @@ func (h *DriverInvitationsHandler) Accept(c *gin.Context) {
 		return
 	}
 	if inv.InvitedByDispatcherID != nil && *inv.InvitedByDispatcherID != uuid.Nil {
+		// Guard: freelance connection offers can only bind a driver to a
+		// DRIVER_MANAGER. If the inviting dispatcher's role changed (or the
+		// invitation was created by a legacy path before role checks existed),
+		// refuse to accept — redeeming such a token would let a CARGO_MANAGER
+		// end up with a driver in their "my drivers" list, which is invalid
+		// for the cargo-manager workflow.
+		if invDisp, ierr := h.disp.FindByID(c.Request.Context(), *inv.InvitedByDispatcherID); ierr == nil && invDisp != nil {
+			role := ""
+			if invDisp.ManagerRole != nil {
+				role = strings.TrimSpace(*invDisp.ManagerRole)
+			}
+			if role != dispatchers.ManagerRoleDriverManager {
+				resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+				return
+			}
+		}
+
 		// Many-to-Many Connection Limit Check
 		dCount, err := h.drv.GetDriverCount(c.Request.Context(), *inv.InvitedByDispatcherID)
 		if err != nil {

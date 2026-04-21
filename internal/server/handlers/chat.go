@@ -139,12 +139,12 @@ const (
 
 // chatMediaLimitForType returns the byte cap for the given message type.
 func chatMediaLimitForType(msgType string) int64 {
-	switch msgType {
-	case "PHOTO":
+	switch chat.NormalizeMessageType(msgType) {
+	case chat.MsgTypeImg:
 		return chatMaxPhotoBytes
-	case "VIDEO", "VIDEO_NOTE":
+	case chat.MsgTypeVideo, chat.MsgTypeVideoNote:
 		return chatMaxVideoBytes
-	case "VOICE":
+	case chat.MsgTypeAudio:
 		return chatMaxVoiceBytes
 	default:
 		return chatMaxPhotoBytes
@@ -154,8 +154,8 @@ func chatMediaLimitForType(msgType string) int64 {
 // chatMediaDurationCapMs returns the max allowed duration for a media message
 // type, or 0 if the type has no duration (photo).
 func chatMediaDurationCapMs(msgType string) int {
-	switch msgType {
-	case "VOICE", "VIDEO", "VIDEO_NOTE":
+	switch chat.NormalizeMessageType(msgType) {
+	case chat.MsgTypeAudio, chat.MsgTypeVideo, chat.MsgTypeVideoNote:
 		return chatMaxMediaDurationMs
 	}
 	return 0
@@ -197,16 +197,16 @@ func chatLastMessagePreview(msgType string, body *string) string {
 			return s
 		}
 	}
-	switch strings.ToUpper(strings.TrimSpace(msgType)) {
-	case "PHOTO":
+	switch chat.NormalizeMessageType(msgType) {
+	case chat.MsgTypeImg:
 		return "Photo"
-	case "VOICE":
+	case chat.MsgTypeAudio:
 		return "Voice"
-	case "VIDEO":
+	case chat.MsgTypeVideo:
 		return "Video"
-	case "VIDEO_NOTE":
+	case chat.MsgTypeVideoNote:
 		return "Video message"
-	case "LOCATION":
+	case chat.MsgTypeLocation:
 		return "Location"
 	default:
 		return ""
@@ -229,6 +229,10 @@ func (h *ChatHandler) ListConversations(c *gin.Context) {
 		return
 	}
 	for i := range list {
+		if list[i].LastMessageType != nil {
+			s := chat.CanonicalMessageTypeForAPI(*list[i].LastMessageType)
+			list[i].LastMessageType = &s
+		}
 		list[i].LastMessagePreview = chatLastMessagePreview(
 			strings.TrimSpace(chatStrPtr(list[i].LastMessageType)),
 			list[i].LastMessageBody,
@@ -498,6 +502,9 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_messages")
 		return
 	}
+	for i := range list {
+		list[i].Type = chat.CanonicalMessageTypeForAPI(list[i].Type)
+	}
 	mark := strings.TrimSpace(c.Query("mark_read"))
 	if mark == "1" || strings.EqualFold(mark, "true") {
 		if err := h.repo.MarkConversationRead(c.Request.Context(), convID, userID); err != nil && !errors.Is(err, chat.ErrNotFound) {
@@ -512,7 +519,12 @@ func (h *ChatHandler) ListMessages(c *gin.Context) {
 }
 
 // SendMessage creates a message and broadcasts via WebSocket.
-// POST /v1/chat/conversations/:id/messages body: { "body": "text" }
+// POST /v1/chat/conversations/:id/messages
+//
+//   - Content-Type: application/json
+//       • Text: `{ "body": "..." }` or `{ "type": "text", "body": "..." }`
+//       • Reuse cached media (no separate /media-ref required): `{ "type": "img"|"audio"|"video"|"video_note", "sha256": "<64 hex>", "body": "<optional caption>" }`
+//   - Content-Type: multipart/form-data — same as POST .../messages/media (fields type, body?, file)
 func (h *ChatHandler) SendMessage(c *gin.Context) {
 	userID, ok := h.getUserID(c)
 	if !ok {
@@ -525,44 +537,108 @@ func (h *ChatHandler) SendMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_conversation_id")
 		return
 	}
-	var req struct {
-		Body string `json:"body" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
-		return
-	}
-	if len(req.Body) > 64*1024 {
-		resp.ErrorLang(c, http.StatusBadRequest, "message_too_long")
-		return
-	}
 	conv, err := h.repo.GetConversation(c.Request.Context(), convID, userID)
 	if err != nil || conv == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "conversation_not_found")
 		return
 	}
-	msg, err := h.repo.CreateTextMessage(c.Request.Context(), convID, userID, req.Body)
-	if err != nil {
-		h.logger.Error("chat create message", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
+
+	ct := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	if strings.HasPrefix(ct, "multipart/form-data") {
+		h.SendMediaMessage(c)
 		return
 	}
-	// Stamp delivered_at synchronously if recipient is online, so the response
-	// body and the broadcast already carry the "double-check" state.
-	h.markDeliveredIfPeerOnline(c.Request.Context(), conv, msg)
-	h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
-	resp.SuccessLang(c, http.StatusCreated, "ok", msg)
+
+	var req struct {
+		Type   string `json:"type"`
+		Body   string `json:"body"`
+		SHA256 string `json:"sha256"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+	msgKind := chat.NormalizeMessageType(req.Type)
+	if msgKind == "" {
+		msgKind = chat.MsgTypeText
+	}
+	if msgKind == chat.MsgTypeText && strings.TrimSpace(req.SHA256) != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
+
+	switch msgKind {
+	case chat.MsgTypeText:
+		body := strings.TrimSpace(req.Body)
+		if body == "" {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+		if len(body) > 64*1024 {
+			resp.ErrorLang(c, http.StatusBadRequest, "message_too_long")
+			return
+		}
+		msg, err := h.repo.CreateTextMessage(c.Request.Context(), convID, userID, body)
+		if err != nil {
+			h.logger.Error("chat create message", zap.Error(err))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
+			return
+		}
+		msg.Type = chat.CanonicalMessageTypeForAPI(msg.Type)
+		h.markDeliveredIfPeerOnline(c.Request.Context(), conv, msg)
+		h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
+		resp.SuccessLang(c, http.StatusCreated, "ok", msg)
+	case chat.MsgTypeImg, chat.MsgTypeAudio, chat.MsgTypeVideo, chat.MsgTypeVideoNote:
+		sha := strings.ToLower(strings.TrimSpace(req.SHA256))
+		if len(sha) != 64 {
+			resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+			return
+		}
+		var caption *string
+		if v := strings.TrimSpace(req.Body); v != "" {
+			if len(v) > 64*1024 {
+				resp.ErrorLang(c, http.StatusBadRequest, "message_too_long")
+				return
+			}
+			caption = &v
+		}
+		mapping, mErr := h.repo.GetSourceMapping(c.Request.Context(), sha)
+		if mErr != nil {
+			h.logger.Error("chat send message media-ref", zap.Error(mErr))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		if mapping == nil || !chat.MessageKindsEqual(mapping.Kind, msgKind) {
+			resp.ErrorLang(c, http.StatusNotFound, "chat_media_not_cached")
+			return
+		}
+		if sent := h.sendFromSourceMapping(c, conv, userID, convID, msgKind, caption, mapping); !sent {
+			resp.ErrorLang(c, http.StatusNotFound, "chat_media_not_cached")
+		}
+	default:
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+	}
 }
 
+type mediaLinks struct {
+	Media string `json:"media"`
+	Thumb string `json:"thumb,omitempty"`
+}
+
+// mediaMsgPayload is stored in chat_messages.payload. Links duplicate url /
+// thumb_url so clients can render media from a single JSON object without
+// extra "attachment resolve" APIs.
 type mediaMsgPayload struct {
-	AttachmentID string `json:"attachment_id"`
-	URL          string `json:"url"`
-	ThumbURL     string `json:"thumb_url,omitempty"`
-	Mime         string `json:"mime"`
-	SizeBytes    int64  `json:"size_bytes"`
-	DurationMs   *int   `json:"duration_ms,omitempty"`
-	Width        *int   `json:"width,omitempty"`
-	Height       *int   `json:"height,omitempty"`
+	AttachmentID string      `json:"attachment_id"`
+	Link         string      `json:"link"`
+	URL          string      `json:"url"`
+	ThumbURL     string      `json:"thumb_url,omitempty"`
+	Links        *mediaLinks `json:"links,omitempty"`
+	Mime         string      `json:"mime"`
+	SizeBytes    int64       `json:"size_bytes"`
+	DurationMs   *int        `json:"duration_ms,omitempty"`
+	Width        *int        `json:"width,omitempty"`
+	Height       *int        `json:"height,omitempty"`
 }
 
 // SendMediaMessage uploads media (photo/voice/video/video_note), creates message and broadcasts.
@@ -589,12 +665,9 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		return
 	}
 
-	msgType := strings.ToUpper(strings.TrimSpace(c.PostForm("type")))
-	if msgType == "AUDIO" {
-		msgType = "VOICE"
-	}
+	msgType := chat.NormalizeMessageType(c.PostForm("type"))
 	switch msgType {
-	case "PHOTO", "VOICE", "VIDEO", "VIDEO_NOTE":
+	case chat.MsgTypeImg, chat.MsgTypeAudio, chat.MsgTypeVideo, chat.MsgTypeVideoNote:
 	default:
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
@@ -673,7 +746,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 	// Kind must match (same source reused as a different message type is not
 	// a valid cache hit, e.g. someone sending the same mp4 as VIDEO_NOTE vs
 	// VIDEO would produce different processed outputs).
-	if mapping, mErr := h.repo.GetSourceMapping(c.Request.Context(), sourceHash); mErr == nil && mapping != nil && mapping.Kind == msgType {
+	if mapping, mErr := h.repo.GetSourceMapping(c.Request.Context(), sourceHash); mErr == nil && mapping != nil && chat.MessageKindsEqual(mapping.Kind, msgType) {
 		if sent := h.sendFromSourceMapping(c, conv, userID, convID, msgType, caption, mapping); sent {
 			return
 		}
@@ -690,7 +763,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 	var mime string
 
 	switch msgType {
-	case "VOICE":
+	case chat.MsgTypeAudio:
 		if chatMediaLikelyMP3(fh.Filename, contentType) {
 			outExt = ".mp3"
 			outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
@@ -713,7 +786,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		if ms, _ := ffprobeDurationMs(outPath); ms != nil {
 			durationMs = ms
 		}
-	case "VIDEO":
+	case chat.MsgTypeVideo:
 		outExt = ".mp4"
 		outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
 		if chatMediaLikelyMP4(fh.Filename, contentType) {
@@ -735,7 +808,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		}
 		thumbPath = filepath.Join(baseDir, "thumb_"+uuid.New().String()+".jpg")
 		_ = ffmpegThumbnail(outPath, thumbPath)
-	case "VIDEO_NOTE":
+	case chat.MsgTypeVideoNote:
 		outExt = ".mp4"
 		outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
 		if err := ffmpegVideoToMp4(inPath, outPath, true); err != nil {
@@ -749,7 +822,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		}
 		thumbPath = filepath.Join(baseDir, "thumb_"+uuid.New().String()+".jpg")
 		_ = ffmpegThumbnail(outPath, thumbPath)
-	case "PHOTO":
+	case chat.MsgTypeImg:
 		outExt = ".jpg"
 		outPath = filepath.Join(baseDir, msgType+"_"+uuid.New().String()+outExt)
 		if err := ffmpegImageToJpeg(inPath, outPath); err != nil {
@@ -904,9 +977,11 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		return
 	}
 
+	baseURL := "/v1/chat/files/" + attID.String()
 	payload := mediaMsgPayload{
 		AttachmentID: attID.String(),
-		URL:          "/v1/chat/files/" + attID.String(),
+		Link:         baseURL,
+		URL:          baseURL,
 		Mime:         mime,
 		SizeBytes:    sizeBytes,
 		DurationMs:   durationMs,
@@ -914,7 +989,10 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		Height:       height,
 	}
 	if thumbRel != nil {
-		payload.ThumbURL = "/v1/chat/files/" + attID.String() + "?thumb=1"
+		payload.ThumbURL = baseURL + "?thumb=1"
+		payload.Links = &mediaLinks{Media: baseURL, Thumb: payload.ThumbURL}
+	} else {
+		payload.Links = &mediaLinks{Media: baseURL}
 	}
 
 	msg, err := h.repo.CreateMessage(c.Request.Context(), convID, userID, msgType, caption, payload)
@@ -923,6 +1001,7 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
 		return
 	}
+	msg.Type = chat.CanonicalMessageTypeForAPI(msg.Type)
 	_ = h.repo.LinkAttachment(c.Request.Context(), attID, msg.ID)
 
 	// Cache (source_hash → processed media_file) so the next upload of the
@@ -1004,9 +1083,11 @@ func (h *ChatHandler) sendFromSourceMapping(c *gin.Context, conv *chat.Conversat
 		return true
 	}
 
+	baseURL := "/v1/chat/files/" + attID.String()
 	payload := mediaMsgPayload{
 		AttachmentID: attID.String(),
-		URL:          "/v1/chat/files/" + attID.String(),
+		Link:         baseURL,
+		URL:          baseURL,
 		Mime:         mime,
 		SizeBytes:    sizeBytes,
 		DurationMs:   mapping.DurationMs,
@@ -1014,7 +1095,10 @@ func (h *ChatHandler) sendFromSourceMapping(c *gin.Context, conv *chat.Conversat
 		Height:       mapping.Height,
 	}
 	if thumbRel != nil {
-		payload.ThumbURL = "/v1/chat/files/" + attID.String() + "?thumb=1"
+		payload.ThumbURL = baseURL + "?thumb=1"
+		payload.Links = &mediaLinks{Media: baseURL, Thumb: payload.ThumbURL}
+	} else {
+		payload.Links = &mediaLinks{Media: baseURL}
 	}
 
 	msg, err := h.repo.CreateMessage(ctx, convID, userID, msgType, caption, payload)
@@ -1023,6 +1107,7 @@ func (h *ChatHandler) sendFromSourceMapping(c *gin.Context, conv *chat.Conversat
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_send_message")
 		return true
 	}
+	msg.Type = chat.CanonicalMessageTypeForAPI(msg.Type)
 	_ = h.repo.LinkAttachment(ctx, attID, msg.ID)
 
 	h.markDeliveredIfPeerOnline(ctx, conv, msg)
@@ -1073,7 +1158,7 @@ func (h *ChatHandler) ProbeFile(c *gin.Context) {
 	}
 	out := gin.H{
 		"exists":     true,
-		"kind":       mapping.Kind,
+		"kind":       chat.CanonicalMessageTypeForAPI(mapping.Kind),
 		"mime":       mapping.Mime,
 		"size_bytes": mapping.SizeBytes,
 		"has_thumb":  mapping.ThumbMediaFileID != nil,
@@ -1123,12 +1208,9 @@ func (h *ChatHandler) SendMediaRef(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
-	msgType := strings.ToUpper(strings.TrimSpace(body.Type))
-	if msgType == "AUDIO" {
-		msgType = "VOICE"
-	}
+	msgType := chat.NormalizeMessageType(body.Type)
 	switch msgType {
-	case "PHOTO", "VOICE", "VIDEO", "VIDEO_NOTE":
+	case chat.MsgTypeImg, chat.MsgTypeAudio, chat.MsgTypeVideo, chat.MsgTypeVideoNote:
 	default:
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
@@ -1155,7 +1237,7 @@ func (h *ChatHandler) SendMediaRef(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	if mapping == nil || mapping.Kind != msgType {
+	if mapping == nil || !chat.MessageKindsEqual(mapping.Kind, msgType) {
 		resp.ErrorLang(c, http.StatusNotFound, "chat_media_not_cached")
 		return
 	}
@@ -1266,16 +1348,16 @@ func chatCopyFile(src, dst string) error {
 func chatMediaTypeLooksRight(msgType, filename, contentType string) bool {
 	ext := strings.ToLower(filepath.Ext(filename))
 	ct := strings.ToLower(contentType)
-	switch msgType {
-	case "PHOTO":
+	switch chat.NormalizeMessageType(msgType) {
+	case chat.MsgTypeImg:
 		return chatMediaLikelyRasterImage(filename, contentType)
-	case "VIDEO", "VIDEO_NOTE":
+	case chat.MsgTypeVideo, chat.MsgTypeVideoNote:
 		switch ext {
 		case ".mp4", ".m4v", ".mov", ".webm", ".mkv", ".avi", ".3gp":
 			return true
 		}
 		return strings.HasPrefix(ct, "video/")
-	case "VOICE":
+	case chat.MsgTypeAudio:
 		switch ext {
 		case ".mp3", ".ogg", ".oga", ".opus", ".m4a", ".aac", ".wav", ".webm", ".amr":
 			return true
@@ -1488,6 +1570,7 @@ func (h *ChatHandler) EditMessage(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "message_not_found")
 		return
 	}
+	msg.Type = chat.CanonicalMessageTypeForAPI(msg.Type)
 	if conv, err := h.repo.GetConversation(c.Request.Context(), msg.ConversationID, userID); err == nil && conv != nil {
 		h.hub.BroadcastMessageUpdated(conv.UserAID, conv.UserBID, msg)
 	}

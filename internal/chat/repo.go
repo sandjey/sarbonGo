@@ -289,7 +289,7 @@ func (r *Repo) CreateTextMessage(ctx context.Context, conversationID, senderID u
 	if strings.TrimSpace(body) == "" {
 		return nil, ErrInvalidBody
 	}
-	return r.CreateMessage(ctx, conversationID, senderID, "TEXT", &body, nil)
+	return r.CreateMessage(ctx, conversationID, senderID, MsgTypeText, &body, nil)
 }
 
 // CreateMessage inserts a message with type/body/payload and returns it.

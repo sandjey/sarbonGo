@@ -243,15 +243,10 @@ components:
       - data
     ChatMessage:
       type: object
-      description: 'Сообщение чата. Поддерживаются типы:
-
-        - TEXT: текст в поле body
-
-        - PHOTO/VOICE/VIDEO/VIDEO_NOTE: body = опциональная подпись, payload = объект с attachment_id/url и метаданными
-
-        - LOCATION: body = опциональная подпись, payload = { lat, lng, address?, place_id? }
-
-        '
+      description: "Сообщение чата. **Рекомендуемые значения `type`:** `text`, `img`, `audio`, `video`, `video_note`, `location`.\
+        \ В ответах API исторические сообщения с типами `TEXT` / `PHOTO` / … нормализуются к нижнему регистру.\n\n- **text** (legacy `TEXT`): текст в поле `body`.\n\
+        - **img** / **audio** / **video** / **video_note**: `body` = опциональная подпись; `payload` = объект с `attachment_id`, `link`, `url`, `links.media` / `links.thumb`, `mime`, `size_bytes` и т.д.\n\
+        - **location**: `body` = опциональная подпись, `payload` = { lat, lng, address?, place_id? }\n"
       properties:
         id:
           type: string
@@ -265,6 +260,12 @@ components:
         type:
           type: string
           enum:
+          - text
+          - img
+          - audio
+          - video
+          - video_note
+          - location
           - TEXT
           - PHOTO
           - VOICE
@@ -314,14 +315,27 @@ components:
       - updated_at
     ChatMediaPayload:
       type: object
-      description: payload для PHOTO/VOICE/VIDEO/VIDEO_NOTE
+      description: payload для img / audio / video / video_note (и legacy PHOTO/VOICE/…)
       properties:
         attachment_id:
           type: string
           format: uuid
+        link:
+          type: string
+          description: Основная ссылка на файл (то же, что url)
+          example: /v1/chat/files/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
         url:
           type: string
           example: /v1/chat/files/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+        links:
+          type: object
+          description: Удобный объект со ссылками без дополнительных API
+          properties:
+            media:
+              type: string
+            thumb:
+              type: string
+              nullable: true
         thumb_url:
           type: string
           nullable: true
@@ -5883,9 +5897,12 @@ paths:
       tags:
       - Driver Manager / Drivers & connections
       summary: Принять incoming connection offer от водителя
-      description: 'Тело: `token`.
-
-        '
+      description: "Тело: `token`.\n\n**Проверка ролей.** Принять такой connection\
+        \ offer может **только** диспетчер с ролью `DRIVER_MANAGER`. Если у текущего\
+        \ диспетчера роль `CARGO_MANAGER` (или роль не выбрана), сервер вернёт 403\
+        \ `invalid_manager_role` — даже если токен валиден. Это страховка от legacy-токенов,\
+        \ созданных до появления ролей, и от сценария, когда диспетчер сменил роль\
+        \ на `CARGO_MANAGER` после отправки приглашения.\n"
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -5908,7 +5925,7 @@ paths:
         '400':
           description: invitation not found or expired
         '403':
-          description: invitation was sent to another phone
+          description: invitation was sent to another phone / invalid_manager_role (принимающий не DRIVER_MANAGER)
   /v1/dispatchers/connection-offers/decline:
     post:
       tags:
@@ -10676,12 +10693,16 @@ paths:
       - Drivers / Relations
       - Driver Manager / Drivers & connections
       summary: Принять приглашение (водитель)
-      description: 'Тело: token. Телефон водителя должен совпадать с приглашением.
-
-        **От компании:** после принятия у водителя устанавливается company_id. **От фриланс-диспетчера:** у водителя устанавливается freelancer_id = id диспетчера; у диспетчера в списке GET /v1/dispatchers/drivers
-        появляется этот водитель.
-
-        '
+      description: "Тело: token. Телефон водителя должен совпадать с приглашением.\n\
+        \n**От компании:** после принятия у водителя устанавливается company_id.\
+        \ **От фриланс-диспетчера:** у водителя устанавливается freelancer_id = id\
+        \ диспетчера; у диспетчера в списке GET /v1/dispatchers/drivers появляется\
+        \ этот водитель.\n\n**Проверка ролей (freelance).** При принятии freelance-приглашения\
+        \ сервер дополнительно проверяет, что пригласивший диспетчер всё ещё имеет\
+        \ роль `DRIVER_MANAGER`. Если роль стала `CARGO_MANAGER` (или не задана),\
+        \ accept вернёт 403 `invalid_manager_role` — такой токен не редимится, и\
+        \ водитель не попадёт в список у грузового менеджера. Для company-приглашений\
+        \ проверка роли не применяется (там работает доступ к компании).\n"
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -10706,7 +10727,7 @@ paths:
         '400':
           description: invitation not found or expired
         '403':
-          description: invitation was sent to another phone
+          description: invitation was sent to another phone / invalid_manager_role (пригласивший не DRIVER_MANAGER)
   /v1/driver/driver-invitations/decline:
     post:
       tags:
@@ -11496,10 +11517,18 @@ paths:
       - Drivers / Relations
       - Driver Manager / Drivers & connections
       summary: Пригласить диспетчера (водитель)
-      description: '**Водитель:** отправить приглашение диспетчеру по номеру телефона. Диспетчер увидит приглашение в GET /v1/dispatchers/invitations-from-drivers и может принять или отказать. Тело: phone
-        (обязательно). В ответе — token (передать диспетчеру). Если водитель уже привязан к этому диспетчеру — 409 already_linked_to_this_dispatcher.
-
-        '
+      description: "**Водитель:** отправить приглашение диспетчеру по номеру телефона.\
+        \ Диспетчер увидит приглашение в GET /v1/dispatchers/invitations-from-drivers\
+        \ и может принять или отказать. Тело: phone (обязательно). В ответе — token\
+        \ (передать диспетчеру). Если водитель уже привязан к этому диспетчеру —\
+        \ 409 already_linked_to_this_dispatcher.\n\n**Проверка ролей.** Connection\
+        \ offer допустим только между водителем и диспетчером с ролью `DRIVER_MANAGER`.\
+        \ Если указанный номер уже зарегистрирован как `CARGO_MANAGER`, сервер сразу\
+        \ вернёт 403 `invalid_manager_role` — отправлять такому диспетчеру connection\
+        \ offer нельзя (у грузового менеджера нет «своих водителей», его связь с\
+        \ водительским менеджером строится через `/v1/dispatchers/cargo/{id}/offers/send-to-driver-manager`).\
+        \ Если номер ещё не зарегистрирован — приглашение создаётся, но при accept\
+        \ получатель также обязан иметь роль `DRIVER_MANAGER`.\n"
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -11523,6 +11552,8 @@ paths:
         '400':
           description: phone required
           invalid payload: null
+        '403':
+          description: invalid_manager_role — получатель не DRIVER_MANAGER (например, CARGO_MANAGER)
         '409':
           description: driver_invitation_already_pending / already linked to this dispatcher
   /v1/driver/dispatcher-invitations/{token}:
@@ -12482,8 +12513,8 @@ paths:
     post:
       tags:
       - Chat
-      summary: Отправить сообщение
-      description: body.body — текст сообщения. Сообщение сохраняется и рассылается по WebSocket участникам диалога.
+      summary: Отправить сообщение (текст, медиа по ссылке в payload или загрузка файла)
+      description: "Один эндпоинт для всего исходящего трафика чата.\n\n**1) JSON — текст:** `{ \"body\": \"...\" }` или явно `{ \"type\": \"text\", \"body\": \"...\" }`. Поле `type` можно опустить — по умолчанию считается текст.\n\n**2) JSON — медиа без отдельного вызова media-ref:** если файл уже есть на сервере (после `POST /v1/chat/files/probe`), отправьте `{ \"type\": \"img\"|\"audio\"|\"video\"|\"video_note\", \"sha256\": \"<64 hex>\", \"body\": \"<подпись, опционально>\" }`. Ответ такой же, как у `POST .../messages/media-ref`.\n\n**3) Multipart — загрузка файла:** тот же контракт, что у `POST .../messages/media` (поля `type`, `body?`, `file`). Рекомендуемые значения `type`: **img**, **audio**, **video**, **video_note** (допустимы и устаревшие **PHOTO**, **VOICE**, **VIDEO**, **VIDEO_NOTE**, **AUDIO**).\n\n**Типы сообщений в ответе и в истории:** в основном используются **`text`**, **`img`**, **`audio`**, **`video`**, **`video_note`**, **`location`**. Старые сообщения в БД могли иметь `TEXT` / `PHOTO` / … — API при отдаче нормализует их к нижнему регистру.\n\n**Payload медиа:** в `message.payload` всегда есть ссылки: `link`, `url`, объект **`links`** с полями `media` и опционально `thumb` (то же, что `GET /v1/chat/files/{attachment_id}`), чтобы клиент рендерил вложение из одного объекта сообщения.\n"
       security:
       - DeviceTypeHeader: []
       - LanguageHeader: []
@@ -12502,11 +12533,56 @@ paths:
           application/json:
             schema:
               type: object
-              required:
-              - body
               properties:
+                type:
+                  type: string
+                  description: text (по умолчанию, если не указано) | img | audio | video | video_note; также PHOTO, VOICE, VIDEO, VIDEO_NOTE, TEXT, AUDIO
                 body:
                   type: string
+                  description: Текст сообщения или подпись к медиа при отправке по sha256
+                sha256:
+                  type: string
+                  description: 64 hex — вместе с type медиа создаёт сообщение без загрузки файла
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - type
+              properties:
+                type:
+                  type: string
+                  enum:
+                  - img
+                  - audio
+                  - video
+                  - video_note
+                  - PHOTO
+                  - VOICE
+                  - AUDIO
+                  - VIDEO
+                  - VIDEO_NOTE
+                  description: Рекомендуемые значения — img, audio, video, video_note; legacy-алиасы сохраняются
+                body:
+                  type: string
+                  nullable: true
+                file:
+                  type: string
+                  format: binary
+                upload:
+                  type: string
+                  format: binary
+                media:
+                  type: string
+                  format: binary
+                photo:
+                  type: string
+                  format: binary
+                video:
+                  type: string
+                  format: binary
+                voice:
+                  type: string
+                  format: binary
       responses:
         '201':
           description: data = ChatMessage
@@ -12515,30 +12591,32 @@ paths:
         '401':
           description: unauthorized
         '404':
-          description: conversation not found
+          description: conversation not found / chat_media_not_cached (отправка по sha256 без файла на сервере)
   /v1/chat/conversations/{id}/messages/media:
     post:
       tags:
       - Chat
       summary: Отправить медиа (фото/голос/видео/кружок)
       description: |
-        Загружает файл, оптимизирует «как в Telegram» и создаёт сообщение:
+        Алиас для **multipart**-части `POST /v1/chat/conversations/{id}/messages` (рекомендуется вызывать единый `/messages`). Загружает файл, оптимизирует «как в Telegram» и создаёт сообщение.
 
-        - **PHOTO** → JPEG (оптимизация/пережатие); при ошибке ffmpeg — копия JPEG/PNG/WebP
-        - **VOICE** → если исходник **MP3** (`audio/mpeg`) — сохраняется как MP3; иначе **OGG/Opus** (моно, 48kHz, ~32kbps)
-        - **AUDIO** — синоним **VOICE** (mp3/голос с клиентов, где поле названо audio)
-        - **VIDEO** → если исходник уже **MP4** — быстрый путь (копия); иначе перекодирование в MP4 (H.264/AAC) + faststart + thumbnail; при необходимости пробуется remux `ffmpeg -c copy`
-        - **VIDEO_NOTE** → квадратный MP4 (под UI-кружок) + thumbnail
+        Рекомендуемые значения поля **type**: **img**, **audio**, **video**, **video_note** (в ответе и в истории сообщений используются эти же типы). Устаревшие алиасы всё ещё принимаются:
+
+        - **img** / **PHOTO** → JPEG (оптимизация/пережатие); при ошибке ffmpeg — копия JPEG/PNG/WebP
+        - **audio** / **VOICE** → если исходник **MP3** (`audio/mpeg`) — сохраняется как MP3; иначе **OGG/Opus** (моно, 48kHz, ~32kbps)
+        - **AUDIO** — синоним **VOICE** / **audio** (mp3/голос с клиентов, где поле названо audio)
+        - **video** / **VIDEO** → если исходник уже **MP4** — быстрый путь (копия); иначе перекодирование в MP4 (H.264/AAC) + faststart + thumbnail; при необходимости пробуется remux `ffmpeg -c copy`
+        - **video_note** / **VIDEO_NOTE** → квадратный MP4 (под UI-кружок) + thumbnail
 
         **Поле файла в multipart:** `file` (предпочтительно); также принимаются `upload`, `media`, `photo`, `video`, `voice`.
 
         **Лимиты размера входящего файла (проверяются до обработки):**
-        | type          | max size | max duration |
-        |---------------|----------|--------------|
-        | PHOTO         | 15 MiB   | —            |
-        | VOICE / AUDIO | 50 MiB   | 60 сек       |
-        | VIDEO         | 200 MiB  | 60 сек       |
-        | VIDEO_NOTE    | 200 MiB  | 60 сек       |
+        | type                    | max size | max duration |
+        |-------------------------|----------|--------------|
+        | img / PHOTO             | 15 MiB   | —            |
+        | audio / VOICE / AUDIO   | 50 MiB   | 60 сек       |
+        | video / VIDEO           | 200 MiB  | 60 сек       |
+        | video_note / VIDEO_NOTE | 200 MiB  | 60 сек       |
 
         Общий лимит тела multipart — **256 MiB**. Превышение per-type лимита → `413 chat_media_too_large`.
         Несоответствие расширения/MIME выбранному `type` → `400 chat_media_type_not_supported`.
@@ -12559,7 +12637,7 @@ paths:
 
         **Pre-upload probe (экономия трафика, опционально):**
           - Сервер хэширует **исходные байты** входящего файла inline при приёме и при успешной обработке сохраняет связку `source_hash → media_file` в `chat_source_hashes`.
-          - Клиент может вычислить `sha256(file_bytes)` локально и ПЕРЕД загрузкой вызвать `POST /v1/chat/files/probe { sha256 }`. Если сервер знает этот источник — клиент отправляет сообщение через `POST /v1/chat/conversations/{id}/messages/media-ref { type, sha256, body? }` без загрузки тела.
+          - Клиент может вычислить `sha256(file_bytes)` локально и ПЕРЕД загрузкой вызвать `POST /v1/chat/files/probe { sha256 }`. Если сервер знает этот источник — клиент отправляет сообщение **JSON**-ом на `POST /v1/chat/conversations/{id}/messages` с `{ type, sha256, body? }` (или устаревший алиас `POST .../messages/media-ref`) без загрузки тела.
           - Тот же fast-path срабатывает и внутри этого эндпоинта: даже если клиент не делал probe, сервер распознает знакомые байты при записи во временный файл (multiwriter + SHA-256) и пропустит ffmpeg целиком.
 
         Сразу после создания:
@@ -12590,12 +12668,16 @@ paths:
                 type:
                   type: string
                   enum:
+                  - img
+                  - audio
+                  - video
+                  - video_note
                   - PHOTO
                   - VOICE
                   - AUDIO
                   - VIDEO
                   - VIDEO_NOTE
-                  description: AUDIO обрабатывается как VOICE
+                  description: Рекомендуемые значения — img, audio, video, video_note; AUDIO обрабатывается как audio/VOICE
                 body:
                   type: string
                   nullable: true
@@ -12836,7 +12918,7 @@ paths:
 
         **Поля body:**
 
-        - `type` — `PHOTO` | `VOICE` | `VIDEO` | `VIDEO_NOTE`. Должен совпадать
+        - `type` — **`img` | `audio` | `video` | `video_note`** (или legacy `PHOTO` | `VOICE` | `VIDEO` | `VIDEO_NOTE`). Должен совпадать
           с тем типом, в котором файл был процессирован впервые (иначе 404).
         - `sha256` — SHA-256 исходных байт, тот же, что передавали в probe.
         - `body` — необязательная подпись (caption) к медиа.
@@ -12864,7 +12946,7 @@ paths:
               properties:
                 type:
                   type: string
-                  enum: [PHOTO, VOICE, VIDEO, VIDEO_NOTE]
+                  enum: [img, audio, video, video_note, PHOTO, VOICE, VIDEO, VIDEO_NOTE, AUDIO]
                 sha256:
                   type: string
                   description: 'SHA-256 исходных байт файла (hex, lowercase)'

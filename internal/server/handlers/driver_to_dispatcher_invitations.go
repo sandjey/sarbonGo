@@ -61,10 +61,23 @@ func (h *DriverToDispatcherInvitationsHandler) CreateFromDriver(c *gin.Context) 
 	// Optional: check dispatcher exists by phone (so we don't invite non-existent)
 	disp, _ := h.disp.FindByPhone(c.Request.Context(), phone)
 	if disp == nil {
-		// still allow sending (dispatcher might register later)
+		// still allow sending (dispatcher might register later). The role
+		// check will happen on the receiving side at /accept time.
 	}
-	// If driver already linked to this dispatcher, no need to invite
+	// Connection offers can only bind a driver to a DRIVER_MANAGER. A
+	// CARGO_MANAGER has no concept of "his drivers" — his business is cargo
+	// offers to driver managers. If the invitee is already registered with a
+	// different role, reject synchronously so the client doesn't show a
+	// pending "waiting for dispatcher" state that can never succeed.
 	if disp != nil {
+		role := ""
+		if disp.ManagerRole != nil {
+			role = strings.TrimSpace(*disp.ManagerRole)
+		}
+		if role != "" && role != dispatchers.ManagerRoleDriverManager {
+			resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+			return
+		}
 		if dispID, perr := uuid.Parse(strings.TrimSpace(disp.ID)); perr == nil && dispID != uuid.Nil {
 			isLinked, _ := h.drv.IsLinked(c.Request.Context(), driverID, dispID)
 			if isLinked {
@@ -234,6 +247,18 @@ func (h *DriverToDispatcherInvitationsHandler) AcceptByDispatcher(c *gin.Context
 	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
 	if err != nil || disp == nil {
 		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+		return
+	}
+	// Only a DRIVER_MANAGER can accept driver → dispatcher connection offers.
+	// Catches the case when a driver invited a dispatcher by phone before
+	// that dispatcher chose a role, or when a dispatcher later flipped their
+	// role to CARGO_MANAGER — the pending token must not be redeemable.
+	role := ""
+	if disp.ManagerRole != nil {
+		role = strings.TrimSpace(*disp.ManagerRole)
+	}
+	if role != dispatchers.ManagerRoleDriverManager {
+		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 		return
 	}
 	var req AcceptByDispatcherReq
