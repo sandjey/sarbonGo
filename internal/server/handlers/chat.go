@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/chat"
@@ -45,6 +46,9 @@ type ChatHandler struct {
 	hub         *chat.Hub
 	drivers     *drivers.Repo
 	dispatchers *dispatchers.Repo
+	// test hooks for file endpoint
+	getAttachmentForUserFn func(ctx context.Context, attachmentID, userID uuid.UUID) (*chat.Attachment, error)
+	getMediaFileByIDFn     func(ctx context.Context, id uuid.UUID) (*chat.MediaFile, error)
 }
 
 func NewChatHandler(logger *zap.Logger, repo *chat.Repo, presence *chat.PresenceStore, hub *chat.Hub, drv *drivers.Repo, disp *dispatchers.Repo) *ChatHandler {
@@ -108,6 +112,20 @@ func (h *ChatHandler) getUserID(c *gin.Context) (uuid.UUID, bool) {
 	}
 	id, _ := v.(uuid.UUID)
 	return id, id != uuid.Nil
+}
+
+func (h *ChatHandler) getAttachmentForUser(ctx context.Context, attachmentID, userID uuid.UUID) (*chat.Attachment, error) {
+	if h.getAttachmentForUserFn != nil {
+		return h.getAttachmentForUserFn(ctx, attachmentID, userID)
+	}
+	return h.repo.GetAttachmentForUser(ctx, attachmentID, userID)
+}
+
+func (h *ChatHandler) getMediaFileByID(ctx context.Context, id uuid.UUID) (*chat.MediaFile, error) {
+	if h.getMediaFileByIDFn != nil {
+		return h.getMediaFileByIDFn(ctx, id)
+	}
+	return h.repo.GetMediaFileByID(ctx, id)
 }
 
 // currentUserIDForChat resolves user id from chat JWT or driver/dispatcher scoped routes.
@@ -1265,43 +1283,126 @@ func (h *ChatHandler) GetFile(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
 		return
 	}
-	a, err := h.repo.GetAttachmentForUser(c.Request.Context(), attID, userID)
+	wantThumb := c.Query("thumb") == "1"
+	h.logger.Info("chat file request",
+		zap.String("attachment_id", attID.String()),
+		zap.String("user_id", userID.String()),
+		zap.Bool("thumb", wantThumb),
+	)
+	a, err := h.getAttachmentForUser(c.Request.Context(), attID, userID)
 	if err != nil {
-		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			h.logger.Info("chat file not found in db",
+				zap.String("attachment_id", attID.String()),
+				zap.String("user_id", userID.String()),
+				zap.Bool("thumb", wantThumb),
+			)
+		} else {
+			h.logger.Error("chat file db lookup failed",
+				zap.String("attachment_id", attID.String()),
+				zap.String("user_id", userID.String()),
+				zap.Bool("thumb", wantThumb),
+				zap.Error(err),
+			)
+		}
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "file not found",
+			"file_id": attID.String(),
+		})
 		return
 	}
+	h.logger.Info("chat file db hit",
+		zap.String("attachment_id", attID.String()),
+		zap.String("conversation_id", a.ConversationID.String()),
+		zap.String("uploader_id", a.UploaderID.String()),
+		zap.String("path", a.Path),
+		zap.String("mime", a.Mime),
+		zap.Bool("thumb_requested", wantThumb),
+		zap.Bool("thumb_path_present", a.ThumbPath != nil && strings.TrimSpace(*a.ThumbPath) != ""),
+		zap.Bool("thumb_media_file_id_present", a.ThumbMediaFileID != nil),
+	)
 	// Resolve the actual file on disk + its content ETag. Preference order:
 	//   thumb=1 → deduplicated thumb (media_files) → legacy thumb path
 	//   otherwise → deduplicated main file (media_files) → legacy attachment path
 	path := a.Path
 	etag := ""
-	wantThumb := c.Query("thumb") == "1"
 	if wantThumb {
 		if a.ThumbMediaFileID != nil {
-			if mf, err := h.repo.GetMediaFileByID(c.Request.Context(), *a.ThumbMediaFileID); err == nil && mf != nil {
+			if mf, err := h.getMediaFileByID(c.Request.Context(), *a.ThumbMediaFileID); err == nil && mf != nil {
 				path = mf.Path
 				etag = mf.ContentHash
+				h.logger.Info("chat file resolved thumb via media_files",
+					zap.String("attachment_id", attID.String()),
+					zap.String("media_file_id", mf.ID.String()),
+					zap.String("resolved_path", path),
+				)
+			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				h.logger.Error("chat file thumb media lookup failed",
+					zap.String("attachment_id", attID.String()),
+					zap.String("thumb_media_file_id", a.ThumbMediaFileID.String()),
+					zap.Error(err),
+				)
 			}
 		} else if a.ThumbPath != nil && *a.ThumbPath != "" {
 			path = *a.ThumbPath
+			h.logger.Info("chat file resolved thumb via legacy path",
+				zap.String("attachment_id", attID.String()),
+				zap.String("resolved_path", path),
+			)
+		} else {
+			h.logger.Info("chat file thumbnail missing",
+				zap.String("attachment_id", attID.String()),
+				zap.String("user_id", userID.String()),
+			)
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "thumbnail not found",
+				"file_id": attID.String(),
+			})
+			return
 		}
 	} else if a.MediaFileID != nil {
-		if mf, err := h.repo.GetMediaFileByID(c.Request.Context(), *a.MediaFileID); err == nil && mf != nil {
+		if mf, err := h.getMediaFileByID(c.Request.Context(), *a.MediaFileID); err == nil && mf != nil {
 			path = mf.Path
 			etag = mf.ContentHash
+			h.logger.Info("chat file resolved main via media_files",
+				zap.String("attachment_id", attID.String()),
+				zap.String("media_file_id", mf.ID.String()),
+				zap.String("resolved_path", path),
+			)
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			h.logger.Error("chat file main media lookup failed",
+				zap.String("attachment_id", attID.String()),
+				zap.String("media_file_id", a.MediaFileID.String()),
+				zap.Error(err),
+			)
 		}
 	}
+	h.logger.Info("chat file path before resolve",
+		zap.String("attachment_id", attID.String()),
+		zap.String("path_raw", path),
+	)
 	path = chat.ResolveStoredMediaPath(path)
-	if _, err := os.Stat(path); err != nil {
+	info, err := os.Stat(path)
+	if err != nil {
 		h.logger.Warn("chat file missing on disk",
 			zap.String("attachment_id", attID.String()),
 			zap.String("db_path", a.Path),
 			zap.String("resolved", path),
+			zap.Bool("thumb", wantThumb),
 			zap.Error(err),
 		)
-		resp.ErrorLang(c, http.StatusNotFound, "photo_not_found")
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "file not found on disk",
+			"file_id": attID.String(),
+		})
 		return
 	}
+	h.logger.Info("chat file stat ok",
+		zap.String("attachment_id", attID.String()),
+		zap.String("resolved_path", path),
+		zap.Int64("size_bytes", info.Size()),
+		zap.Bool("thumb", wantThumb),
+	)
 
 	// Caching headers (immutable for stored media).
 	if etag != "" {
