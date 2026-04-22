@@ -2,937 +2,227 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" />
-  <title>Sarbon — Flow: водитель и два типа менеджеров</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;1,9..40,500&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,500,0,0&display=swap" rel="stylesheet" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sarbon Flow Board</title>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <style>
     :root {
-      --page: #f4f6fb;
-      --toolbar-glass: rgba(255, 255, 255, 0.72);
-      --toolbar-border: rgba(15, 23, 42, 0.08);
-      --hairline: rgba(15, 23, 42, 0.1);
-      --text: #0c1222;
-      --text-muted: #475569;
-      --hint-bg: rgba(255, 255, 255, 0.55);
-      --board-mesh-1: rgba(99, 102, 241, 0.07);
-      --board-mesh-2: rgba(14, 165, 233, 0.06);
-      --board-mesh-3: rgba(244, 114, 182, 0.05);
-      --dot: rgba(15, 23, 42, 0.06);
-      --card: rgba(255, 255, 255, 0.92);
-      --card-border: rgba(255, 255, 255, 0.85);
-      --shadow-lg: 0 24px 80px rgba(15, 23, 42, 0.1), 0 8px 24px rgba(15, 23, 42, 0.06);
-      --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
-      --accent: #0d9488;
-      --accent-soft: rgba(13, 148, 136, 0.15);
+      --bg: #f7f8fc;
+      --card: #ffffff;
+      --line: #dbe1ea;
+      --text: #0f172a;
+      --muted: #475569;
       --driver: #0369a1;
-      --driver-soft: #e0f2fe;
-      --cargo: #c2410c;
-      --cargo-soft: #fff7ed;
-      --dmgr: #15803d;
-      --dmgr-soft: #ecfdf5;
-      --pill-bg: rgba(255, 255, 255, 0.65);
-      --radius-xl: 24px;
-      --radius-pill: 999px;
+      --cm: #c2410c;
+      --dm: #15803d;
     }
     * { box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; overflow: hidden; }
     body {
-      font-family: "DM Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-      color: var(--text);
-      background: var(--page);
-      -webkit-font-smoothing: antialiased;
-    }
-
-    .material-symbols-outlined {
-      font-family: "Material Symbols Outlined";
-      font-weight: normal;
-      font-style: normal;
-      font-size: 1.35rem;
-      line-height: 1;
-      letter-spacing: normal;
-      text-transform: none;
-      display: inline-block;
-      white-space: nowrap;
-      word-wrap: normal;
-      direction: ltr;
-      -webkit-font-smoothing: antialiased;
-      font-variation-settings: "FILL" 0, "wght" 500, "GRAD" 0, "opsz" 24;
-    }
-
-    .toolbar {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 100;
-      padding: 14px 20px 16px;
-      background: var(--toolbar-glass);
-      backdrop-filter: blur(16px) saturate(1.4);
-      -webkit-backdrop-filter: blur(16px) saturate(1.4);
-      border-bottom: 1px solid var(--toolbar-border);
-      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset;
-    }
-    .toolbar-top {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 12px 16px;
-      width: 100%;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      min-width: 0;
-    }
-    .brand-mark {
-      width: 48px;
-      height: 48px;
-      border-radius: 14px;
-      background: linear-gradient(145deg, #14b8a6, #0d9488 45%, #0f766e);
-      color: #fff;
-      display: grid;
-      place-items: center;
-      box-shadow: 0 8px 28px rgba(13, 148, 136, 0.45);
-      flex-shrink: 0;
-    }
-    .brand-mark .material-symbols-outlined { font-size: 1.65rem; }
-    .brand-text h1 {
       margin: 0;
-      font-size: 1.05rem;
-      font-weight: 800;
-      letter-spacing: -0.04em;
-      line-height: 1.2;
+      font-family: Inter, "Segoe UI", Roboto, Arial, sans-serif;
       color: var(--text);
+      background: var(--bg);
     }
-    .brand-text .tagline {
-      margin: 4px 0 0;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      letter-spacing: 0.02em;
+    .wrap {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 16px;
     }
-    .toolbar .grow { flex: 1; min-width: 8px; }
-
-    .ctrl-cluster {
-      display: inline-flex;
-      flex-wrap: wrap;
+    .top {
+      display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 6px;
-      background: rgba(15, 23, 42, 0.04);
-      border-radius: 16px;
-      border: 1px solid var(--hairline);
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
     }
-
+    h1 {
+      margin: 0;
+      font-size: 21px;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
     .btn {
-      border: 1px solid transparent;
-      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid var(--line);
+      background: var(--card);
       color: var(--text);
-      padding: 9px 14px 9px 11px;
-      border-radius: 12px;
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 10px;
       font-size: 13px;
       font-weight: 700;
-      font-family: inherit;
-      cursor: pointer;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      box-shadow: var(--shadow-sm);
-      transition: transform 0.12s, box-shadow 0.2s, background 0.2s, border-color 0.2s;
     }
-    .btn .material-symbols-outlined { font-size: 1.25rem; opacity: 0.88; }
-    .btn:hover {
-      background: #fff;
-      border-color: rgba(15, 23, 42, 0.1);
-      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.1);
-    }
-    .btn:active { transform: scale(0.97); }
-    .btn.primary {
-      background: linear-gradient(145deg, #14b8a6, #0d9488);
-      color: #fff;
-      box-shadow: 0 8px 28px rgba(13, 148, 136, 0.38);
-    }
-    .btn.primary .material-symbols-outlined { opacity: 1; }
-    .btn.primary:hover { filter: brightness(1.05); }
-
-    .zoom-readout {
-      font-variant-numeric: tabular-nums;
-      font-size: 13px;
-      font-weight: 800;
-      min-width: 54px;
-      text-align: center;
-      color: var(--text);
-      padding: 9px 12px;
-      border-radius: 12px;
-      background: var(--pill-bg);
-      border: 1px solid var(--hairline);
-    }
-
     .legend {
       display: flex;
-      flex-wrap: wrap;
       gap: 8px;
-      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
     }
-    .legend-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px 6px 8px;
-      border-radius: var(--radius-pill);
+    .pill {
+      padding: 6px 10px;
+      border-radius: 999px;
       font-size: 12px;
       font-weight: 700;
-      letter-spacing: 0.02em;
-      border: 1px solid var(--hairline);
-      background: var(--pill-bg);
-      color: var(--text-muted);
-    }
-    .legend-pill .material-symbols-outlined { font-size: 1.2rem; }
-    .legend-pill.driver { color: var(--driver); background: var(--driver-soft); border-color: rgba(3, 105, 161, 0.15); }
-    .legend-pill.cargo { color: var(--cargo); background: var(--cargo-soft); border-color: rgba(194, 65, 12, 0.12); }
-    .legend-pill.dmgr { color: var(--dmgr); background: var(--dmgr-soft); border-color: rgba(21, 128, 61, 0.15); }
-
-    .hint {
-      margin: 12px 0 0;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-muted);
-      line-height: 1.55;
-      max-width: 100%;
-      padding: 12px 16px 12px 14px;
-      background: var(--hint-bg);
-      border: 1px solid var(--hairline);
-      border-radius: var(--radius-xl);
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-    }
-    .hint .hint-ico {
-      flex-shrink: 0;
-      width: 36px;
-      height: 36px;
-      border-radius: 12px;
-      background: var(--accent-soft);
-      color: var(--accent);
-      display: grid;
-      place-items: center;
-    }
-    .hint .hint-ico .material-symbols-outlined { font-size: 1.35rem; }
-    .hint strong { color: var(--text); font-weight: 700; }
-    .hint kbd {
-      font-family: inherit;
-      font-size: 11px;
-      font-weight: 800;
-      padding: 2px 7px;
-      border-radius: 6px;
-      background: rgba(15, 23, 42, 0.06);
-      border: 1px solid var(--hairline);
-    }
-
-    .viewport {
-      position: fixed;
-      top: var(--toolbar-h, 160px);
-      left: 0;
-      right: 0;
-      bottom: 0;
-      overflow: hidden;
-      cursor: grab;
-      touch-action: none;
-      background:
-        radial-gradient(1200px 800px at 12% -10%, var(--board-mesh-1), transparent 55%),
-        radial-gradient(900px 700px at 88% 8%, var(--board-mesh-2), transparent 50%),
-        radial-gradient(700px 500px at 50% 100%, var(--board-mesh-3), transparent 45%),
-        #eef1f8;
-    }
-    .viewport.dragging { cursor: grabbing; }
-
-    .board {
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 5900px;
-      min-height: 4200px;
-      transform-origin: 0 0;
-      will-change: transform;
-      background-color: rgba(255, 255, 255, 0.35);
-      background-image: radial-gradient(var(--dot) 1.2px, transparent 1.25px);
-      background-size: 22px 22px;
-      background-position: 0 0;
-    }
-
-    .board-inner {
-      padding: 48px 48px 100px;
-      display: flex;
-      flex-direction: row;
-      flex-wrap: nowrap;
-      align-items: flex-start;
-      gap: 40px;
-    }
-
-    .flow-card {
-      flex: 0 0 auto;
-      width: 1880px;
-      max-width: none;
+      border: 1px solid var(--line);
       background: var(--card);
-      border: 1px solid var(--card-border);
-      border-radius: 28px;
-      box-shadow: var(--shadow-lg);
-      overflow: visible;
-      backdrop-filter: blur(8px);
     }
-    .flow-card header {
-      padding: 20px 24px;
-      display: flex;
-      align-items: center;
-      gap: 18px;
-      border-bottom: 1px solid var(--hairline);
+    .pill.driver { color: var(--driver); }
+    .pill.cm { color: var(--cm); }
+    .pill.dm { color: var(--dm); }
+    .hint {
+      border: 1px solid var(--line);
+      background: var(--card);
+      border-radius: 12px;
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+      margin-bottom: 12px;
     }
-    .flow-card .card-ico-wrap {
-      width: 56px;
-      height: 56px;
-      border-radius: 18px;
-      display: grid;
-      place-items: center;
-      flex-shrink: 0;
-      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    .board {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--card);
+      padding: 12px;
+      overflow: auto;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
     }
-    .flow-card .card-ico-wrap .material-symbols-outlined {
-      font-size: 1.85rem;
-      color: inherit;
-    }
-    .flow-card.driver .card-ico-wrap {
-      background: linear-gradient(145deg, #bae6fd, #e0f2fe);
-      color: var(--driver);
-    }
-    .flow-card.driver header {
-      background: linear-gradient(105deg, rgba(224, 242, 254, 0.95) 0%, rgba(248, 250, 252, 0.98) 55%, #fff 100%);
-    }
-    .flow-card.cargo .card-ico-wrap {
-      background: linear-gradient(145deg, #fed7aa, #ffedd5);
-      color: var(--cargo);
-    }
-    .flow-card.cargo header {
-      background: linear-gradient(105deg, rgba(255, 237, 213, 0.95) 0%, rgba(255, 251, 235, 0.98) 50%, #fff 100%);
-    }
-    .flow-card.dmgr .card-ico-wrap {
-      background: linear-gradient(145deg, #bbf7d0, #d1fae5);
-      color: var(--dmgr);
-    }
-    .flow-card.dmgr header {
-      background: linear-gradient(105deg, rgba(236, 253, 245, 0.95) 0%, rgba(248, 250, 252, 0.98) 55%, #fff 100%);
-    }
-    .card-head-text { min-width: 0; }
-    .card-title {
-      display: block;
-      font-size: 1.28rem;
-      font-weight: 800;
-      letter-spacing: -0.035em;
-      line-height: 1.25;
-      color: var(--text);
-    }
-    .card-sub {
-      display: block;
-      margin-top: 6px;
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text-muted);
-      line-height: 1.35;
-    }
-    .flow-card .body {
-      padding: 28px 22px 56px;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, #f8fafc 100%);
-      overflow: visible;
-    }
-    .flow-card .body .mermaid {
-      display: flex;
-      justify-content: center;
-      overflow: visible;
-    }
-    .flow-card .body .mermaid svg {
-      max-width: 100%;
+    .mermaid svg {
+      max-width: 1200px;
       height: auto;
-      overflow: visible;
-      filter: drop-shadow(0 4px 16px rgba(15, 23, 42, 0.07));
     }
-    /* Подписи на рёбрах и узлах: у Mermaid иногда clip-path обрезает текст */
-    .flow-card .body .mermaid svg foreignObject {
-      clip-path: none !important;
+    .role-driver {
+      color: #0369a1;
+      font-weight: 700;
+    }
+    .role-cm {
+      color: #c2410c;
+      font-weight: 700;
+    }
+    .role-dm {
+      color: #15803d;
+      font-weight: 700;
     }
   </style>
 </head>
 <body>
-  <div class="toolbar" id="toolbar" role="banner">
-    <div class="toolbar-top">
-      <div class="brand">
-        <div class="brand-mark" aria-hidden="true">
-          <span class="material-symbols-outlined">hub</span>
-        </div>
-        <div class="brand-text">
-          <h1>Flow-доска · три роли</h1>
-          <p class="tagline">Панорама процессов · масштаб и перетаскивание</p>
-        </div>
-      </div>
-      <div class="legend" aria-label="Легенда колонок">
-        <span class="legend-pill driver"><span class="material-symbols-outlined">local_shipping</span> Водитель</span>
-        <span class="legend-pill cargo"><span class="material-symbols-outlined">inventory_2</span> CARGO_MANAGER</span>
-        <span class="legend-pill dmgr"><span class="material-symbols-outlined">groups</span> DRIVER_MANAGER</span>
-      </div>
-      <div class="grow"></div>
-      <div class="ctrl-cluster" role="toolbar" aria-label="Управление видом">
-        <a class="btn primary" href="/docs"><span class="material-symbols-outlined">menu_book</span> Swagger</a>
-        <button type="button" class="btn" id="btn-zoom-out"><span class="material-symbols-outlined">zoom_out</span> Меньше</button>
-        <button type="button" class="btn" id="btn-zoom-in"><span class="material-symbols-outlined">zoom_in</span> Больше</button>
-        <button type="button" class="btn" id="btn-reset"><span class="material-symbols-outlined">restart_alt</span> Сброс</button>
-        <button type="button" class="btn" id="btn-fit"><span class="material-symbols-outlined">fit_screen</span> Вписать</button>
-        <span class="zoom-readout" id="zoom-pct" aria-live="polite">100%</span>
-      </div>
-    </div>
-    <div class="hint">
-      <div class="hint-ico" aria-hidden="true"><span class="material-symbols-outlined">touch_app</span></div>
+  <div class="wrap">
+    <div class="top">
       <div>
-        <strong>Три колонки:</strong> водитель · менеджер по грузам · менеджер по водителям. В каждой — профиль, уведомления, возможности и логика рейса, где роли расходятся.
-        <strong> Управление:</strong> колесо мыши — масштаб; левая кнопка — сдвиг по холсту. На схемах иконки в заголовках блоков помогают ориентироваться.
+        <h1>Ролевой flow: DM, Driver, CM (пошаговый сценарий)</h1>
+        <p class="sub">Каждая роль отдельной веткой: регистрация → connection offers → cargo offers → один активный trip → этапы → оценки.</p>
       </div>
+      <a class="btn" href="/docs">Swagger</a>
     </div>
-  </div>
 
-  <div class="viewport" id="viewport" aria-label="Холст со схемами">
-    <div class="board" id="board">
-      <div class="board-inner">
-        <article class="flow-card driver" aria-labelledby="t-driver">
-          <header id="t-driver">
-            <div class="card-ico-wrap" aria-hidden="true"><span class="material-symbols-outlined">local_shipping</span></div>
-            <div class="card-head-text">
-              <span class="card-title">Водитель</span>
-              <span class="card-sub">Профиль · уведомления по рейсу · грузы · этапы рейса</span>
-            </div>
-          </header>
-          <div class="body"><pre class="mermaid" id="m-driver"></pre></div>
-        </article>
-        <article class="flow-card cargo" aria-labelledby="t-cargo">
-          <header id="t-cargo">
-            <div class="card-ico-wrap" aria-hidden="true"><span class="material-symbols-outlined">inventory_2</span></div>
-            <div class="card-head-text">
-              <span class="card-title">Менеджер по грузам</span>
-              <span class="card-sub">Кабинет · грузы · офферы · закрытие рейса (COMPLETED)</span>
-            </div>
-          </header>
-          <div class="body"><pre class="mermaid" id="m-cargo"></pre></div>
-        </article>
-        <article class="flow-card dmgr" aria-labelledby="t-dmgr">
-          <header id="t-dmgr">
-            <div class="card-ico-wrap" aria-hidden="true"><span class="material-symbols-outlined">groups</span></div>
-            <div class="card-head-text">
-              <span class="card-title">Менеджер по водителям</span>
-              <span class="card-sub">Свои водители · шаги рейса вместе с водителем · оценки</span>
-            </div>
-          </header>
-          <div class="body"><pre class="mermaid" id="m-dmgr"></pre></div>
-        </article>
-      </div>
+    <div class="legend">
+      <span class="pill driver">Водитель</span>
+      <span class="pill cm">Менеджер по грузам (CM)</span>
+      <span class="pill dm">Менеджер по водителям (DM)</span>
+    </div>
+
+    <div class="hint">
+      Дерево сверху вниз: сначала общий старт, затем отдельные ветки ролей, потом общая точка завершения.<br />
+      <span class="role-driver">Синий — водитель</span>, <span class="role-cm">оранжевый — менеджер по грузам</span>, <span class="role-dm">зеленый — менеджер по водителям</span>.
+    </div>
+
+    <div class="board">
+      <pre class="mermaid" id="flow"></pre>
     </div>
   </div>
 
   <script>
-(function () {
-  var driverChart = [
-    'flowchart TB',
-    '  classDef stepBox fill:#ffffff,stroke:#1e293b,stroke-width:1.5px,color:#0f172a,font-weight:600',
-    '  classDef decision fill:#fffbeb,stroke:#b45309,stroke-width:2px,color:#78350f,font-weight:700',
-    '  subgraph DRZ["⚡ Параллельно: весь срок жизни в приложении"]',
-    '    DRZ1["👤 Профиль: имя фото документы ТС прицеп пароль телефон удаление"]',
-    '    DRZ2["🔔 Уведомления по рейсам: лента · одно или все прочитать"]',
-    '    DRZ3a["📦 Избранные грузы: GET POST DELETE /v1/driver/cargo-likes"]',
-    '    DRZ3b["⭐ Избранные диспетчеры: GET POST DELETE /v1/driver/dispatcher-likes"]',
-    '    DRZ3c["💬 Чат поиск контактов приглашения диспетчеров"]',
-    '    DRZ1 --> DRZ2 --> DRZ3a --> DRZ3b --> DRZ3c',
-    '  end',
-    '  subgraph V0["🔑 1. Вход в аккаунт"]',
-    '    A1["📱 Телефон и код из SMS"]',
-    '    A2{❓ Уже регистрировались?}',
-    '    A3["✅ Сразу в кабинет"]',
-    '    A4["📝 Начать регистрацию"]',
-    '    A1 --> A2',
-    '    A2 -->|да| A3',
-    '    A2 -->|нет| A4',
-    '  end',
-    '  subgraph V1["📋 2. Регистрация анкеты"]',
-    '    B1["✔️ Имя в приложении и согласие с условиями"]',
-    '    B2["📍 Геолокация и push по желанию"]',
-    '    B3["🏢 Тип работы: на себя компания или с диспетчером"]',
-    '    B4["🚚 Тип силового состава и прицепа"]',
-    '    B5["🪪 KYC: паспорт тягач прицеп владелец"]',
-    '    B1 --> B2 --> B3 --> B4 --> B5',
-    '  end',
-    '  subgraph V2["🤝 3. Связь с диспетчерами"]',
-    '    C1["📨 Пригласить по номеру или принять приглашение"]',
-    '  end',
-    '  subgraph V3["🔎 4. Поиск груза и отклик"]',
-    '    D1["📦 Список грузов под ваш профиль"]',
-    '    D2["💰 Отправить своё предложение цены"]',
-    '    D3["✉️ Или принять приглашение на конкретный груз"]',
-    '    D1 --> D2',
-    '    D1 --> D3',
-    '  end',
-    '  subgraph V4["⏳ 5. Назначение перевозчиком"]',
-    '    E1["⌛ Ждёте решения диспетчера по офферу"]',
-    '    E2["🎯 Приняли оффер — появился рейс"]',
-    '    E1 --> E2',
-    '  end',
-    '  subgraph V5["🚛 6. Рейс: этапы и уведомления"]',
-    '    F0["🔔 На каждом шаге — лента уведомлений по рейсу"]',
-    '    F1["✋ Подтвердить участие если приложение просит"]',
-    '    F2["📥 Погрузка — груз у заказчика в работе"]',
-    '    F3["🛣️ В пути"]',
-    '    F4["📬 Доставлено у получателя"]',
-    '    F5["🏁 Запросить завершение после фактической сдачи"]',
-    '    F0 --> F1 --> F2 --> F3 --> F4 --> F5',
-    '  end',
-    '  subgraph V6["✨ 7. Завершение и оценка"]',
-    '    G1["👔 Менеджер по грузам закрывает рейс (COMPLETED)"]',
-    '    G2["⭐ Вы оцениваете cargo manager POST /v1/driver/dispatchers/{id}/rating trip_id+stars 1-5 шаг 0.5"]',
-    '    G3["⭐ Cargo manager оценивает вас на профиль POST /v1/dispatchers/drivers/{id}/rating 1-5 шаг 0.5"]',
-    '    G1 --> G2',
-    '    G1 --> G3',
-    '  end',
-    '  A3 --> DRZ1',
-    '  A4 --> B1',
-    '  B5 --> DRZ1',
-    '  B5 --> C1',
-    '  A3 --> D1',
-    '  C1 --> D1',
-    '  D2 --> E1',
-    '  D3 --> E1',
-    '  E2 --> F0',
-    '  F5 --> G1',
-    '  style DRZ fill:#f0fdf4,stroke:#15803d,stroke-width:1.75px,color:#0f172a',
-    '  style V0 fill:#dbeafe,stroke:#1d4ed8,stroke-width:1.75px,color:#0f172a',
-    '  style V1 fill:#dcfce7,stroke:#15803d,stroke-width:1.75px,color:#0f172a',
-    '  style V2 fill:#fef3c7,stroke:#b45309,stroke-width:1.75px,color:#0f172a',
-    '  style V3 fill:#ede9fe,stroke:#6d28d9,stroke-width:1.75px,color:#0f172a',
-    '  style V4 fill:#fce7f3,stroke:#be185d,stroke-width:1.75px,color:#0f172a',
-    '  style V5 fill:#cffafe,stroke:#0e7490,stroke-width:1.75px,color:#0f172a',
-    '  style V6 fill:#ffedd5,stroke:#c2410c,stroke-width:1.75px,color:#0f172a',
-    '  class DRZ1,DRZ2,DRZ3a,DRZ3b,DRZ3c,A1,A3,A4,B1,B2,B3,B4,B5,C1,D1,D2,D3,E1,E2,F0,F1,F2,F3,F4,F5,G1,G2,G3 stepBox',
-    '  class A2 decision',
-  ].join('\n');
+    (function () {
+      var chart = [
+        "flowchart TB",
+        "classDef driver fill:#e0f2fe,stroke:#0369a1,stroke-width:1.8px,color:#0f172a",
+        "classDef cm fill:#fff7ed,stroke:#c2410c,stroke-width:1.8px,color:#0f172a",
+        "classDef dm fill:#ecfdf5,stroke:#15803d,stroke-width:1.8px,color:#0f172a",
+        "classDef common fill:#f8fafc,stroke:#475569,stroke-width:1.8px,color:#0f172a",
+        "S0[СТАРТ: регистрация в системе]",
+        "S0 --> DR1",
+        "S0 --> DM1",
+        "S0 --> CM1",
+        "",
+        "DR1[DRIVER: профиль готов]",
+        "DR2[DRIVER: connection offer с DM]",
+        "DR3[DRIVER: прием offer через DM или напрямую от CM]",
+        "DR4[DRIVER: согласие и открытие trip]",
+        "DR5[DRIVER этап 1: ACCEPTED]",
+        "DR6[DRIVER этап 2: LOADING]",
+        "DR7[DRIVER этап 3: IN_TRANSIT]",
+        "DR8[DRIVER этап 4: DELIVERED]",
+        "DR9[DRIVER: запрос завершения]",
+        "DR10[DRIVER: оценка]",
+        "DR1 --> DR2",
+        "DR2 --> DR3 --> DR4 --> DR5 --> DR6 --> DR7 --> DR8 --> DR9 --> DR10",
+        "",
+        "DM1[DM: роль DRIVER_MANAGER]",
+        "DM2[DM: прием connection offer от DRIVER]",
+        "DM3[DM: прием cargo offer от CM]",
+        "DM4[DM: выбор водителя и передача offer]",
+        "DM5[DM: сопровождение этапов trip]",
+        "DM6[DM: оценка]",
+        "DM1 --> DM2 --> DM3 --> DM4 --> DM5 --> DM6",
+        "",
+        "CM1[CM: роль CARGO_MANAGER]",
+        "CM2[CM: создать груз SEARCHING]",
+        "CM3[CM: отправить cargo offer]",
+        "CM4[CM: подтверждение по trip]",
+        "CM5[CM: закрытие COMPLETED]",
+        "CM6[CM: оценка]",
+        "CM1 --> CM2 --> CM3 --> CM4 --> CM5 --> CM6",
+        "",
+        "DR2 --> DM2",
+        "CM3 --> DM3",
+        "DM4 --> DR3",
+        "DR9 --> CM5",
+        "CM5 --> DR10",
+        "CM5 --> DM6",
+        "",
+        "RULE1[Правило у Driver один активный trip]",
+        "DR4 --> RULE1",
+        "RULE1 --> F1[Финал история offers chat уведомления синхронизированы]",
+        "DR10 --> F1",
+        "CM6 --> F1",
+        "DM6 --> F1",
+        "class DR1,DR2,DR3,DR4,DR5,DR6,DR7,DR8,DR9,DR10 driver",
+        "class DM1,DM2,DM3,DM4,DM5,DM6 dm",
+        "class CM1,CM2,CM3,CM4,CM5,CM6 cm",
+        "class S0,RULE1,F1 common"
+      ].join("\n");
 
-  var cargoChart = [
-    'flowchart TB',
-    '  classDef stepBox fill:#ffffff,stroke:#1e293b,stroke-width:1.5px,color:#0f172a,font-weight:600',
-    '  classDef decision fill:#fffbeb,stroke:#b45309,stroke-width:2px,color:#78350f,font-weight:700',
-    '  subgraph CA["👤 Кабинет: профиль и роль"]',
-    '    CA1["🏷️ Роль CARGO_MANAGER при регистрации или в профиле"]',
-    '    CA2["🪪 Имя паспорт ПИНФЛ фото пароль телефон удаление"]',
-    '    CA3["🏢 Компании: список и переключение если пригласили"]',
-    '    CA1 --> CA2 --> CA3',
-    '  end',
-    '  subgraph CB["🔔 Уведомления по рейсам своих грузов"]',
-    '    CB1["📋 Смена статуса отмена ожидание завершения и др."]',
-    '    CB2["✔️ Отметить одно или все прочитанными"]',
-    '    CB1 --> CB2',
-    '  end',
-    '  subgraph CC["🧭 Возможности вокруг грузов и людей"]',
-    '    CC1["📊 Мои груза рейсы по грузу водители на грузе"]',
-    '    CC2["📑 Офферы входящие и исходящие принять или отклонить"]',
-    '    CC3["⭐ Избранное экспорт поиск в чате"]',
-    '    CC1 --> CC2 --> CC3',
-    '  end',
-    '  subgraph C0["🔑 1. Вход"]',
-    '    X1["📱 Телефон с кодом или пароль"]',
-    '    X2{❓ Новый аккаунт?}',
-    '    X3["📝 Анкета и выбор роли менеджера по грузам"]',
-    '    X4["✅ Кабинет готов"]',
-    '    X1 --> X2',
-    '    X2 -->|да| X3',
-    '    X2 -->|нет| X4',
-    '    X3 --> X4',
-    '  end',
-    '  subgraph C1["📦 2. Объявление груза"]',
-    '    Y1["🗺️ Карточка: маршрут вес объём ТС оплата контакты"]',
-    '    Y2["📤 Отправка на проверку администратору"]',
-    '    Y1 --> Y2',
-    '  end',
-    '  subgraph C2["🛡️ 3. Модерация админом"]',
-    '    Z1["👁️ Администратор смотрит объявление"]',
-    '    Z2{❓ Итог}',
-    '    Z3["✅ Одобрено — груз в поиске водителей"]',
-    '    Z4["⛔ Отклонено с причиной"]',
-    '    Z1 --> Z2',
-    '    Z2 -->|принято| Z3',
-    '    Z2 -->|отказ| Z4',
-    '  end',
-    '  subgraph C3["🤝 4. Подбор перевозчика"]',
-    '    W1["📥 Смотреть предложения водителей"]',
-    '    W2["📨 Или пригласить своих водителей"]',
-    '    W3["🎯 Принять оффер — создаётся рейс"]',
-    '    W1 --> W3',
-    '    W2 --> W3',
-    '  end',
-    '  subgraph C4["🚫 5. Логика рейса для CARGO_MANAGER"]',
-    '    L1["⛔ Вы НЕ подтверждаете выезд и доставку"]',
-    '    L2["👥 Это водитель и при необходимости DRIVER_MANAGER"]',
-    '    L3["👁️ Вы следите: рейсы и уведомления"]',
-    '    L1 --> L2 --> L3',
-    '  end',
-    '  subgraph C5["🏁 6. Закрытие рейса"]',
-    '    T1["📩 Водитель запросил завершение после доставки"]',
-    '    T2["✅ Вы подтверждаете COMPLETED — финальный шаг"]',
-    '    T1 --> T2',
-    '  end',
-    '  subgraph C6["⭐ 7. После закрытия"]',
-    '    S1["⭐ Оценка водителя по желанию"]',
-    '  end',
-    '  X4 --> CA1',
-    '  CA3 --> CB1',
-    '  CB2 --> CC1',
-    '  CC3 --> Y1',
-    '  Y2 --> Z1',
-    '  Z3 --> W1',
-    '  Z3 --> W2',
-    '  W3 --> L1',
-    '  L3 --> T1',
-    '  T2 --> S1',
-    '  style CA fill:#e0e7ff,stroke:#4338ca,stroke-width:1.75px,color:#0f172a',
-    '  style CB fill:#fce7f3,stroke:#be185d,stroke-width:1.75px,color:#0f172a',
-    '  style CC fill:#fef3c7,stroke:#b45309,stroke-width:1.75px,color:#0f172a',
-    '  style C0 fill:#dbeafe,stroke:#1d4ed8,stroke-width:1.75px,color:#0f172a',
-    '  style C1 fill:#dcfce7,stroke:#15803d,stroke-width:1.75px,color:#0f172a',
-    '  style C2 fill:#fee2e2,stroke:#b91c1c,stroke-width:1.75px,color:#0f172a',
-    '  style C3 fill:#ede9fe,stroke:#6d28d9,stroke-width:1.75px,color:#0f172a',
-    '  style C4 fill:#cffafe,stroke:#0e7490,stroke-width:1.75px,color:#0f172a',
-    '  style C5 fill:#ffedd5,stroke:#c2410c,stroke-width:1.75px,color:#0f172a',
-    '  style C6 fill:#d1fae5,stroke:#047857,stroke-width:1.75px,color:#0f172a',
-    '  class CA1,CA2,CA3,CB1,CB2,CC1,CC2,CC3,X1,X3,X4,Y1,Y2,Z1,Z3,Z4,W1,W2,W3,L1,L2,L3,T1,T2,S1 stepBox',
-    '  class X2,Z2 decision',
-  ].join('\n');
-
-  var dmgrChart = [
-    'flowchart TB',
-    '  classDef stepBox fill:#ffffff,stroke:#1e293b,stroke-width:1.5px,color:#0f172a,font-weight:600',
-    '  classDef decision fill:#fffbeb,stroke:#b45309,stroke-width:2px,color:#78350f,font-weight:700',
-    '  subgraph DA["👤 Кабинет: профиль и роль"]',
-    '    DA1["🏷️ Роль DRIVER_MANAGER при регистрации или в профиле"]',
-    '    DA2["🪪 Имя паспорт ПИНФЛ фото пароль телефон удаление"]',
-    '    DA3["🏢 Компании: список и переключение если пригласили"]',
-    '    DA1 --> DA2 --> DA3',
-    '  end',
-    '  subgraph DB["🔔 Уведомления по рейсам"]',
-    '    DB1["📋 Те же события по доступным рейсам что у коллеги по грузам"]',
-    '    DB2["✔️ Прочитать одно или все"]',
-    '    DB1 --> DB2',
-    '  end',
-    '  subgraph DC["🤝 Возможности: водители в центре"]',
-    '    DC1["🔎 Поиск и список своих водителей приглашения по телефону"]',
-    '    DC2["📨 Принять приглашение от водителя снять привязку"]',
-    '    DC3["🚚 Карточка водителя: силач и прицеп при необходимости"]',
-    '    DC4["⭐ Избранное водители и груза чат поиск"]',
-    '    DC1 --> DC2 --> DC3 --> DC4',
-    '  end',
-    '  subgraph D0["🔑 1. Вход"]',
-    '    M1["📱 Телефон с кодом или пароль"]',
-    '    M2{❓ Новый аккаунт?}',
-    '    M3["📝 Анкета и выбор роли менеджера по водителям"]',
-    '    M4["✅ Кабинет готов"]',
-    '    M1 --> M2',
-    '    M2 -->|да| M3',
-    '    M2 -->|нет| M4',
-    '    M3 --> M4',
-    '  end',
-    '  subgraph D1b["📦 2. Груза коллеги если ведёте груз"]',
-    '    N1["🗂️ Создание груза модерация офферы как у CARGO_MANAGER"]',
-    '    N2["🔐 Доступ к чужим грузам компании по правилам"]',
-    '    N1 --> N2',
-    '  end',
-    '  subgraph DL["🚛 Логика рейса для DRIVER_MANAGER"]',
-    '    Q1["✋ Можете подтверждать промежуточные шаги с водителем"]',
-    '    Q2["🛣️ Выезд в путь и доставка — подтверждение рейса"]',
-    '    Q3["🏁 После запроса водителя — подтверждаете COMPLETED"]',
-    '    Q1 --> Q2 --> Q3',
-    '  end',
-    '  subgraph DR["📊 Связка с рейсом"]',
-    '    R1["📑 Списки рейсов карточка состояние отмена"]',
-    '    R2["⭐ Оценка водителя после завершения"]',
-    '    R1 --> R2',
-    '  end',
-    '  M4 --> DA1',
-    '  DA3 --> DB1',
-    '  DB2 --> DC1',
-    '  DC4 --> N1',
-    '  N2 --> Q1',
-    '  DC4 --> Q1',
-    '  Q3 --> R1',
-    '  style DA fill:#e0e7ff,stroke:#4338ca,stroke-width:1.75px,color:#0f172a',
-    '  style DB fill:#fce7f3,stroke:#be185d,stroke-width:1.75px,color:#0f172a',
-    '  style DC fill:#d1fae5,stroke:#047857,stroke-width:1.75px,color:#0f172a',
-    '  style D0 fill:#dbeafe,stroke:#1d4ed8,stroke-width:1.75px,color:#0f172a',
-    '  style D1b fill:#fef3c7,stroke:#b45309,stroke-width:1.75px,color:#0f172a',
-    '  style DL fill:#bbf7d0,stroke:#15803d,stroke-width:1.75px,color:#0f172a',
-    '  style DR fill:#ffedd5,stroke:#c2410c,stroke-width:1.75px,color:#0f172a',
-    '  class DA1,DA2,DA3,DB1,DB2,DC1,DC2,DC3,DC4,M1,M3,M4,N1,N2,Q1,Q2,Q3,R1,R2 stepBox',
-    '  class M2 decision',
-  ].join('\n');
-
-  function initMermaid() {
-    mermaid.initialize({
-      startOnLoad: false,
-      securityLevel: 'loose',
-      theme: 'base',
-      fontFamily: '"DM Sans", system-ui, sans-serif',
-      flowchart: {
-        useMaxWidth: false,
-        htmlLabels: true,
-        padding: 52,
-        nodeSpacing: 74,
-        rankSpacing: 96,
-        curve: 'basis',
-      },
-      themeVariables: {
-        darkMode: false,
-        fontSize: '17px',
-        fontFamily: '"DM Sans", system-ui, sans-serif',
-        background: '#ffffff',
-        mainBkg: '#ffffff',
-        primaryColor: '#ffffff',
-        primaryTextColor: '#0f172a',
-        primaryBorderColor: '#334155',
-        secondaryColor: '#ffffff',
-        secondaryTextColor: '#0f172a',
-        secondaryBorderColor: '#334155',
-        tertiaryColor: '#f8fafc',
-        lineColor: '#64748b',
-        textColor: '#0f172a',
-        nodeBorder: '#334155',
-        clusterBkg: '#f8fafc',
-        clusterBorder: '#94a3b8',
-        titleColor: '#0f172a',
-        edgeLabelBackground: '#ffffff',
-        labelTextColor: '#0f172a',
-      },
-    });
-  }
-
-  function syncToolbarHeight() {
-    var tb = document.getElementById('toolbar');
-    if (!tb) return;
-    document.documentElement.style.setProperty('--toolbar-h', Math.ceil(tb.getBoundingClientRect().height) + 'px');
-  }
-
-  initMermaid();
-  syncToolbarHeight();
-  requestAnimationFrame(syncToolbarHeight);
-  window.addEventListener('resize', syncToolbarHeight);
-
-  var viewport = document.getElementById('viewport');
-  var board = document.getElementById('board');
-  var elDriver = document.getElementById('m-driver');
-  var elCargo = document.getElementById('m-cargo');
-  var elDmgr = document.getElementById('m-dmgr');
-  var zoomReadout = document.getElementById('zoom-pct');
-
-  elDriver.textContent = driverChart;
-  elCargo.textContent = cargoChart;
-  elDmgr.textContent = dmgrChart;
-
-  var scale = 0.42;
-  var panX = 24;
-  var panY = 20;
-  var minScale = 0.1;
-  var maxScale = 2.5;
-
-  function applyTransform() {
-    board.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')';
-    zoomReadout.textContent = Math.round(scale * 100) + '%';
-  }
-
-  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-
-  function zoomAt(factor, cx, cy) {
-    var rect = viewport.getBoundingClientRect();
-    var vx = (cx - rect.left - panX) / scale;
-    var vy = (cy - rect.top - panY) / scale;
-    var newScale = clamp(scale * factor, minScale, maxScale);
-    panX = cx - rect.left - vx * newScale;
-    panY = cy - rect.top - vy * newScale;
-    scale = newScale;
-    applyTransform();
-  }
-
-  function fitBoard() {
-    var rect = viewport.getBoundingClientRect();
-    var bw = board.offsetWidth;
-    var bh = board.offsetHeight;
-    var pad = 20;
-    var sx = (rect.width - pad * 2) / bw;
-    var sy = (rect.height - pad * 2) / bh;
-    scale = clamp(Math.min(sx, sy), minScale, maxScale);
-    panX = (rect.width - bw * scale) / 2;
-    panY = (rect.height - bh * scale) / 2;
-    applyTransform();
-  }
-
-  function resetView() {
-    scale = 0.42;
-    panX = 24;
-    panY = 20;
-    applyTransform();
-  }
-
-  function runCharts() {
-    [elDriver, elCargo, elDmgr].forEach(function (el) {
-      el.removeAttribute('data-processed');
-    });
-    return mermaid.run({ nodes: [elDriver, elCargo, elDmgr] });
-  }
-
-  /**
-   * Внутри узла текст рисуется в foreignObject фиксированного размера — лишнее режется «белым» фоном
-   * (это граница foreignObject, не overflow div). Подгоняем размер и положение под реальный текст.
-   */
-  function expandFlowForeignObjects() {
-    var padY = 22;
-    var padX = 26;
-    document.querySelectorAll('.flow-card .body .mermaid svg foreignObject').forEach(function (fo) {
-      var inner = fo.firstElementChild;
-      if (!inner || inner.nodeType !== 1) return;
-      var h0 = parseFloat(fo.getAttribute('height'));
-      var w0 = parseFloat(fo.getAttribute('width'));
-      var x0 = parseFloat(fo.getAttribute('x'));
-      var y0 = parseFloat(fo.getAttribute('y'));
-      if (!isFinite(h0) || !isFinite(w0)) return;
-
-      inner.style.overflow = 'visible';
-      inner.style.maxHeight = 'none';
-      inner.style.height = 'auto';
-
-      var nh = Math.ceil(inner.scrollHeight);
-      var newH = Math.max(h0, nh + padY);
-      var dh = newH - h0;
-      if (dh > 0) {
-        fo.setAttribute('height', String(newH));
-        if (isFinite(y0)) fo.setAttribute('y', String(y0 - dh));
-      }
-
-      var prevWs = inner.style.whiteSpace;
-      var prevMaxW = inner.style.maxWidth;
-      inner.style.maxWidth = 'none';
-      inner.style.whiteSpace = 'nowrap';
-      var nw = Math.ceil(inner.scrollWidth);
-      inner.style.whiteSpace = prevWs || '';
-      inner.style.maxWidth = prevMaxW || '';
-
-      var newW = Math.max(w0, nw + padX);
-      var dw = newW - w0;
-      if (dw > 0) {
-        fo.setAttribute('width', String(newW));
-        if (isFinite(x0)) fo.setAttribute('x', String(x0 - dw / 2));
-      }
-    });
-  }
-
-  /** Mermaid иногда задаёт viewBox уже реального содержимого — обрезаются низ узлов и подписи «да/нет». */
-  function fixFlowSvgViewBoxes() {
-    var pad = 32;
-    document.querySelectorAll('.flow-card .body .mermaid svg').forEach(function (svg) {
-      svg.style.overflow = 'visible';
-      var vb = svg.viewBox && svg.viewBox.baseVal;
-      if (!vb || vb.width <= 0 || vb.height <= 0) return;
-      var bbox = null;
-      try {
-        bbox = svg.getBBox();
-      } catch (e) {}
-      if (!bbox || (!(bbox.width > 0) && !(bbox.height > 0))) {
-        try {
-          var g0 = svg.querySelector('g');
-          if (g0) bbox = g0.getBBox();
-        } catch (e2) {}
-      }
-      if (!bbox || (!(bbox.width > 0 || bbox.height > 0))) return;
-      try {
-        var x = Math.min(vb.x, bbox.x - pad);
-        var y = Math.min(vb.y, bbox.y - pad);
-        var right = Math.max(vb.x + vb.width, bbox.x + bbox.width + pad);
-        var bottom = Math.max(vb.y + vb.height, bbox.y + bbox.height + pad);
-        var w = right - x;
-        var h = bottom - y;
-        if (!isFinite(w) || !isFinite(h) || w <= 0 || h <= 0) return;
-        svg.setAttribute('viewBox', [x, y, w, h].join(' '));
-      } catch (e3) {}
-    });
-  }
-
-  runCharts().then(function () {
-    syncToolbarHeight();
-    requestAnimationFrame(function () {
-      requestAnimationFrame(function () {
-        expandFlowForeignObjects();
-        fixFlowSvgViewBoxes();
-        fitBoard();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "loose",
+        theme: "base",
+        flowchart: {
+          useMaxWidth: false,
+          htmlLabels: true,
+          curve: "stepBefore",
+          nodeSpacing: 50,
+          rankSpacing: 90
+        },
+        themeVariables: {
+          background: "#ffffff",
+          primaryColor: "#ffffff",
+          primaryTextColor: "#0f172a",
+          primaryBorderColor: "#334155",
+          lineColor: "#64748b",
+          edgeLabelBackground: "#ffffff",
+          fontFamily: "Inter, Segoe UI, Arial, sans-serif",
+          fontSize: "16px"
+        }
       });
-    });
-  }).catch(function () {
-    applyTransform();
-  });
 
-  var dragging = false;
-  var lastX = 0;
-  var lastY = 0;
-
-  viewport.addEventListener('mousedown', function (e) {
-    if (e.button !== 0) return;
-    var t = e.target;
-    if (t.closest && t.closest('button, a, input, textarea, select')) return;
-    dragging = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
-    viewport.classList.add('dragging');
-    e.preventDefault();
-  });
-
-  window.addEventListener('mousemove', function (e) {
-    if (!dragging) return;
-    panX += e.clientX - lastX;
-    panY += e.clientY - lastY;
-    lastX = e.clientX;
-    lastY = e.clientY;
-    applyTransform();
-  });
-
-  window.addEventListener('mouseup', function () {
-    dragging = false;
-    viewport.classList.remove('dragging');
-  });
-
-  viewport.addEventListener('wheel', function (e) {
-    e.preventDefault();
-    var factor = e.deltaY > 0 ? 0.92 : 1.08;
-    zoomAt(factor, e.clientX, e.clientY);
-  }, { passive: false });
-
-  document.getElementById('btn-zoom-in').addEventListener('click', function () {
-    var r = viewport.getBoundingClientRect();
-    zoomAt(1.15, r.left + r.width / 2, r.top + r.height / 2);
-  });
-  document.getElementById('btn-zoom-out').addEventListener('click', function () {
-    var r = viewport.getBoundingClientRect();
-    zoomAt(1 / 1.15, r.left + r.width / 2, r.top + r.height / 2);
-  });
-  document.getElementById('btn-reset').addEventListener('click', resetView);
-  document.getElementById('btn-fit').addEventListener('click', fitBoard);
-
-  var resizeTimer;
-  window.addEventListener('resize', function () {
-    syncToolbarHeight();
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(fitBoard, 200);
-  });
-})();
+      var el = document.getElementById("flow");
+      el.textContent = chart;
+      mermaid.run({ nodes: [el] });
+    })();
   </script>
 </body>
 </html>
