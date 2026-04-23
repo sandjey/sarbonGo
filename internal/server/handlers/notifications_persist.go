@@ -14,6 +14,41 @@ import (
 	"sarbonNew/internal/tripnotif"
 )
 
+func parseActorIDFromPayload(payload []byte) uuid.UUID {
+	if len(payload) == 0 {
+		return uuid.Nil
+	}
+	var root map[string]any
+	if json.Unmarshal(payload, &root) != nil {
+		return uuid.Nil
+	}
+	parseUUID := func(v any) uuid.UUID {
+		s, _ := v.(string)
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return uuid.Nil
+		}
+		id, err := uuid.Parse(s)
+		if err != nil {
+			return uuid.Nil
+		}
+		return id
+	}
+	for _, key := range []string{"actor_id", "sender_id", "from_id", "reader_id"} {
+		if id := parseUUID(root[key]); id != uuid.Nil {
+			return id
+		}
+	}
+	if data, ok := root["data"].(map[string]any); ok {
+		for _, key := range []string{"actor_id", "sender_id", "from_id", "reader_id"} {
+			if id := parseUUID(data[key]); id != uuid.Nil {
+				return id
+			}
+		}
+	}
+	return uuid.Nil
+}
+
 // NotificationPersister records non-trip events (cargo_offer, connection_offer, driver_update, chat message, call)
 // into trip_user_notifications so mobile clients can paginate over a single "notifications" inbox that mirrors
 // everything that was pushed via SSE / WebSocket / Firebase.
@@ -34,6 +69,9 @@ func NewNotificationPersister(logger *zap.Logger, notif *tripnotif.Repo, drv *dr
 // PersistStream stores a payload published via userstream.Hub for a known recipient (driver or dispatcher).
 func (p *NotificationPersister) PersistStream(ctx context.Context, streamKind, recipientKind string, recipientID uuid.UUID, payload []byte) {
 	if p == nil || p.notif == nil || recipientID == uuid.Nil || len(payload) == 0 {
+		return
+	}
+	if actorID := parseActorIDFromPayload(payload); actorID != uuid.Nil && actorID == recipientID {
 		return
 	}
 
@@ -60,6 +98,9 @@ func (p *NotificationPersister) PersistStream(ctx context.Context, streamKind, r
 // We resolve recipient_kind by looking up the user in drivers / freelance_dispatchers tables.
 func (p *NotificationPersister) PersistChat(ctx context.Context, userID uuid.UUID, payload []byte) {
 	if p == nil || p.notif == nil || userID == uuid.Nil || len(payload) == 0 {
+		return
+	}
+	if actorID := parseActorIDFromPayload(payload); actorID != uuid.Nil && actorID == userID {
 		return
 	}
 

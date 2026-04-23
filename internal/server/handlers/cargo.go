@@ -2379,7 +2379,7 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		if h.stream != nil && h.tripsRepo != nil {
 			if tr, err := h.tripsRepo.GetByID(c.Request.Context(), tripID); err == nil && tr != nil {
 				cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
-				PublishTripStatusForCargoParticipants(h.stream, tr, cg, offer)
+				PublishTripStatusForCargoParticipants(h.stream, tr, cg, offer, userID)
 			}
 		}
 		resp.OKLang(c, "ok", gin.H{
@@ -2549,7 +2549,7 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 		if h.stream != nil {
 			if tr, err := h.tripsRepo.GetByID(c.Request.Context(), tripID); err == nil && tr != nil {
 				cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
-				PublishTripStatusForCargoParticipants(h.stream, tr, cg, offer)
+				PublishTripStatusForCargoParticipants(h.stream, tr, cg, offer, driverID)
 			}
 			// Notify Cargo Manager + Driver Manager (+ CM on company cargo via proposed_by_id)
 			if cargoObj, _ := h.repo.GetByID(c.Request.Context(), cargoID, false); cargoObj != nil {

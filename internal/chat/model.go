@@ -60,6 +60,13 @@ type ConversationListItem struct {
 	LastMessageBody    *string    `json:"last_message_body,omitempty"`
 	LastMessagePreview string     `json:"last_message_preview,omitempty"`
 	LastMessageFromMe  bool       `json:"last_message_from_me"`
-	UnreadCount        int        `json:"unread_count"`
+	// Legacy field: unread messages from peer for current user.
+	UnreadCount int `json:"unread_count"`
+	// New split counters:
+	// - UnreadFromPeerCount: peer -> me unread messages count.
+	// - UnreadMyCount: my -> peer messages that peer has not read yet.
+	UnreadFromPeerCount int `json:"unread_from_peer_count"`
+	UnreadMyCount       int `json:"unread_my_count"`
+	UnreadTotalCount    int `json:"unread_total_count"`
 	PeerReadMyLast     bool       `json:"peer_read_my_last"` // true if last message is mine and peer has read it
 }

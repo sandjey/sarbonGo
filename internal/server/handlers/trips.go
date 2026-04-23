@@ -712,7 +712,13 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	h.notifyTripTransition(ctx, tBefore, tr)
+	var actorID uuid.UUID
+	if asDispatcher {
+		actorID = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	} else {
+		actorID = driverID
+	}
+	h.notifyTripTransition(ctx, tBefore, tr, actorID)
 	out := h.tripRespWithManagers(ctx, tr)
 	resp.OKLang(c, "ok", out)
 }
@@ -816,7 +822,13 @@ func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool, driverRe
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list")
 		return
 	}
-	h.notifyTripCancelled(ctx, t)
+	var actorID uuid.UUID
+	if asDispatcher {
+		actorID = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	} else {
+		actorID = driverID
+	}
+	h.notifyTripCancelled(ctx, t, actorID)
 	resp.OKLang(c, "ok", gin.H{
 		"status":   "cancelled",
 		"trip_id":  tripID.String(),

@@ -12,11 +12,11 @@ import (
 )
 
 // PublishTripStatusForCargoParticipants pushes the same trip snapshot to driver + CM + DM (if present in negotiation chain).
-func PublishTripStatusForCargoParticipants(hub *userstream.Hub, trip *trips.Trip, cg *cargo.Cargo, offer *cargo.Offer) {
+func PublishTripStatusForCargoParticipants(hub *userstream.Hub, trip *trips.Trip, cg *cargo.Cargo, offer *cargo.Offer, actorID uuid.UUID) {
 	if hub == nil || trip == nil {
 		return
 	}
-	payload := buildTripStatusSSEPayload(trip)
+	payload := buildTripStatusSSEPayload(trip, actorID)
 	if trip.DriverID != nil && *trip.DriverID != uuid.Nil {
 		hub.PublishTripStatus(tripnotif.RecipientDriver, *trip.DriverID, payload)
 	}
@@ -31,7 +31,7 @@ func PublishTripStatusForCargoParticipants(hub *userstream.Hub, trip *trips.Trip
 	}
 }
 
-func buildTripStatusSSEPayload(trip *trips.Trip) map[string]any {
+func buildTripStatusSSEPayload(trip *trips.Trip, actorID uuid.UUID) map[string]any {
 	out := map[string]any{
 		"kind":            "trip_status",
 		"trip_id":         trip.ID.String(),
@@ -42,6 +42,9 @@ func buildTripStatusSSEPayload(trip *trips.Trip) map[string]any {
 		"agreed_currency": trip.AgreedCurrency,
 		"updated_at":      trip.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"created_at":      trip.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}
+	if actorID != uuid.Nil {
+		out["actor_id"] = actorID.String()
 	}
 	if trip.DriverID != nil {
 		out["driver_id"] = trip.DriverID.String()

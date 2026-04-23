@@ -141,6 +141,49 @@ func notificationKindFromJSON(b []byte) string {
 	return strings.TrimSpace(k)
 }
 
+func extractPotentialActorID(payload []byte) uuid.UUID {
+	if len(payload) == 0 {
+		return uuid.Nil
+	}
+	var root map[string]any
+	if json.Unmarshal(payload, &root) != nil {
+		return uuid.Nil
+	}
+	parseUUID := func(v any) uuid.UUID {
+		s, _ := v.(string)
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return uuid.Nil
+		}
+		id, err := uuid.Parse(s)
+		if err != nil {
+			return uuid.Nil
+		}
+		return id
+	}
+	for _, key := range []string{"actor_id", "sender_id", "from_id", "reader_id"} {
+		if id := parseUUID(root[key]); id != uuid.Nil {
+			return id
+		}
+	}
+	if data, ok := root["data"].(map[string]any); ok {
+		for _, key := range []string{"actor_id", "sender_id", "from_id", "reader_id"} {
+			if id := parseUUID(data[key]); id != uuid.Nil {
+				return id
+			}
+		}
+	}
+	return uuid.Nil
+}
+
+func shouldSkipSelfRecipient(payload []byte, recipientID uuid.UUID) bool {
+	if recipientID == uuid.Nil {
+		return false
+	}
+	actorID := extractPotentialActorID(payload)
+	return actorID != uuid.Nil && actorID == recipientID
+}
+
 // PublishNotification sends to the full inbox and to a typed sub-stream by JSON `kind`
 // (trip_notification | cargo_offer | connection_offer) for filtered SSE endpoints.
 func (h *Hub) PublishNotification(recipientKind string, recipientID uuid.UUID, v any) {
@@ -149,6 +192,9 @@ func (h *Hub) PublishNotification(recipientKind string, recipientID uuid.UUID, v
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
+		return
+	}
+	if shouldSkipSelfRecipient(b, recipientID) {
 		return
 	}
 	k := subKey(recipientKind, recipientID)
@@ -178,6 +224,9 @@ func (h *Hub) PublishTripStatus(recipientKind string, recipientID uuid.UUID, v a
 	if err != nil {
 		return
 	}
+	if shouldSkipSelfRecipient(b, recipientID) {
+		return
+	}
 	h.broadcast(h.trips, subKey(recipientKind, recipientID), b)
 	h.mu.RLock()
 	cb := h.onPublish
@@ -194,6 +243,9 @@ func (h *Hub) PublishDriverUpdate(recipientKind string, recipientID uuid.UUID, v
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
+		return
+	}
+	if shouldSkipSelfRecipient(b, recipientID) {
 		return
 	}
 	h.broadcast(h.drv, subKey(recipientKind, recipientID), b)
