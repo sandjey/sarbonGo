@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -223,6 +224,40 @@ WHERE phone = $1 AND deleted_at IS NULL
 LIMIT 1`
 	d, err := scanDispatcher(r.pg.QueryRow(ctx, q, phone))
 	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
+func normalizePhoneLookup(phone string) string {
+	s := strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(phone, " ", ""), "-", ""))
+	return strings.TrimPrefix(s, "+")
+}
+
+func (r *Repo) FindByPhoneNormalized(ctx context.Context, phone string) (*Dispatcher, error) {
+	norm := normalizePhoneLookup(phone)
+	if norm == "" {
+		return nil, nil
+	}
+	const q = `
+SELECT
+  id, name, phone, password,
+  passport_series, passport_number, pinfl,
+  cargo_id, driver_id,
+  rating, work_status, account_status AS status,
+  manager_role,
+  photo_path AS photo,
+  (photo_data IS NOT NULL) AS has_photo,
+  created_at, updated_at, last_online_at, deleted_at
+FROM freelance_dispatchers
+WHERE replace(replace(replace(trim(phone), ' ', ''), '-', ''), '+', '') = $1
+  AND deleted_at IS NULL
+LIMIT 1`
+	d, err := scanDispatcher(r.pg.QueryRow(ctx, q, norm))
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return d, nil

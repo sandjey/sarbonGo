@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/tripnotif"
@@ -288,11 +289,16 @@ func (h *TripsHandler) getTripDispatcherParticipants(c *gin.Context, tripID uuid
 	cg, _ := h.cargoRepo.GetByID(c.Request.Context(), t.CargoID, false)
 	out.CargoManagerID = tripNotifyDispatcherID(cg)
 	if offer, _ := h.cargoRepo.GetOfferByID(c.Request.Context(), t.OfferID); offer != nil {
+		if out.CargoManagerID == nil &&
+			strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDispatcher) &&
+			offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
+			out.CargoManagerID = offer.ProposedByID
+		}
 		if offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID != uuid.Nil {
 			out.DriverManagerID = offer.NegotiationDispatcherID
 			return out, nil
 		}
-		if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), "DRIVER_MANAGER") && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
+		if strings.EqualFold(strings.TrimSpace(offer.ProposedBy), cargo.OfferProposedByDriverManager) && offer.ProposedByID != nil && *offer.ProposedByID != uuid.Nil {
 			out.DriverManagerID = offer.ProposedByID
 		}
 	}

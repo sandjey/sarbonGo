@@ -1,0 +1,15 @@
+./base.go
+./bool.go
+./carousel.go
+./copy.go
+./date.go
+./dot.go
+./downloadable.go
+./filesize.go
+./icon.go
+./image.go
+./label.go
+./link.go
+./loading.go
+./progressbar.go
+./qrcode.go

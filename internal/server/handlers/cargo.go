@@ -24,6 +24,7 @@ import (
 
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/config"
+	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/favorites"
 	"sarbonNew/internal/reference"
@@ -53,18 +54,29 @@ var (
 )
 
 type CargoHandler struct {
-	logger    *zap.Logger
-	repo      *cargo.Repo
-	tripsRepo *trips.Repo
-	drivers   *drivers.Repo
-	fav       *favorites.Repo
-	jwtm      *security.JWTManager
-	cfg       config.Config
-	stream    *userstream.Hub
+	logger      *zap.Logger
+	repo        *cargo.Repo
+	tripsRepo   *trips.Repo
+	dispatchers *dispatchers.Repo
+	drivers     *drivers.Repo
+	fav         *favorites.Repo
+	jwtm        *security.JWTManager
+	cfg         config.Config
+	stream      *userstream.Hub
 }
 
-func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, driversRepo *drivers.Repo, fav *favorites.Repo, jwtm *security.JWTManager, cfg config.Config, stream *userstream.Hub) *CargoHandler {
-	return &CargoHandler{logger: logger, repo: repo, tripsRepo: tripsRepo, drivers: driversRepo, fav: fav, jwtm: jwtm, cfg: cfg, stream: stream}
+func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, dispatchersRepo *dispatchers.Repo, driversRepo *drivers.Repo, fav *favorites.Repo, jwtm *security.JWTManager, cfg config.Config, stream *userstream.Hub) *CargoHandler {
+	return &CargoHandler{
+		logger:      logger,
+		repo:        repo,
+		tripsRepo:   tripsRepo,
+		dispatchers: dispatchersRepo,
+		drivers:     driversRepo,
+		fav:         fav,
+		jwtm:        jwtm,
+		cfg:         cfg,
+		stream:      stream,
+	}
 }
 
 // CreateCargoReq body for POST /api/cargo.
@@ -1065,6 +1077,12 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
+	currency, errKey := normalizeAndValidateOfferMoney(req.Price, req.Currency)
+	if errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	req.Currency = currency
 	if obj.Status == cargo.StatusSearchingCompany {
 		if obj.CompanyID == nil {
 			resp.ErrorLang(c, http.StatusBadRequest, "cargo_not_searching")
@@ -1096,14 +1114,19 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 							dispCompanyID = &u
 						}
 					}
+					managerRole, roleErr := currentDispatcherManagerRole(c.Request.Context(), h.dispatchers, userID)
+					if roleErr != nil {
+						h.logger.Error("cargo create offer: dispatcher role lookup failed", zap.Error(roleErr), zap.String("dispatcher_id", userID.String()))
+						resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+						return
+					}
 					if forceDriverManager {
-						isManager, _ := h.drivers.IsLinked(c.Request.Context(), req.CarrierID, userID)
-						if !isManager {
-							// Backward compatibility: old linkage model used drivers.freelancer_id without driver_manager_relations row.
-							if drv, _ := h.drivers.FindByID(c.Request.Context(), req.CarrierID); drv != nil && drv.FreelancerID != nil && strings.TrimSpace(*drv.FreelancerID) == userID.String() {
-								isManager = true
-							}
+						if managerRole != dispatchers.ManagerRoleDriverManager {
+							resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+							return
 						}
+						drv, _ := h.drivers.FindByID(c.Request.Context(), req.CarrierID)
+						isManager := dispatcherLinkedToDriver(c.Request.Context(), h.drivers, userID, req.CarrierID, drv)
 						if !isManager {
 							resp.ErrorLang(c, http.StatusForbidden, "not_your_driver_or_cargo")
 							return
@@ -1112,6 +1135,10 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 						break
 					}
 					if forceCargoManager {
+						if managerRole != dispatchers.ManagerRoleCargoManager {
+							resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+							return
+						}
 						if !dispatcherOwnsCargoForNegotiation(obj, userID, dispCompanyID) {
 							resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 							return
@@ -1121,15 +1148,19 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 					}
 					// If dispatcher owns cargo, it's a normal DISPATCHER offer (to driver).
 					if dispatcherOwnsCargoForNegotiation(obj, userID, dispCompanyID) {
+						if managerRole != dispatchers.ManagerRoleCargoManager {
+							resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+							return
+						}
 						proposedBy = cargo.OfferProposedByDispatcher
 					} else {
 						// Check if dispatcher is a MANAGER for this carrier (driver).
-						isManager, _ := h.drivers.IsLinked(c.Request.Context(), req.CarrierID, userID)
-						if !isManager {
-							if drv, _ := h.drivers.FindByID(c.Request.Context(), req.CarrierID); drv != nil && drv.FreelancerID != nil && strings.TrimSpace(*drv.FreelancerID) == userID.String() {
-								isManager = true
-							}
+						if managerRole != dispatchers.ManagerRoleDriverManager {
+							resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+							return
 						}
+						drv, _ := h.drivers.FindByID(c.Request.Context(), req.CarrierID)
+						isManager := dispatcherLinkedToDriver(c.Request.Context(), h.drivers, userID, req.CarrierID, drv)
 						if !isManager {
 							resp.ErrorLang(c, http.StatusForbidden, "not_your_driver_or_cargo")
 							return
@@ -1635,15 +1666,12 @@ func (h *CargoHandler) DriverCreateOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
-	if req.Price <= 0 {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_price")
+	currency, errKey := normalizeAndValidateOfferMoney(req.Price, req.Currency)
+	if errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
 		return
 	}
-	req.Currency = strings.ToUpper(strings.TrimSpace(req.Currency))
-	if len(req.Currency) < 3 || len(req.Currency) > 5 {
-		resp.ErrorLang(c, http.StatusBadRequest, "invalid_currency")
-		return
-	}
+	req.Currency = currency
 
 	if obj.Status == cargo.StatusSearchingCompany {
 		if obj.CompanyID == nil {
@@ -1898,7 +1926,6 @@ func (h *CargoHandler) ListDriverManagerOffers(c *gin.Context) {
 	})
 }
 
-
 // ListMyCargoOffers lists driver offers (requests) grouped by bucket:
 // sent (PENDING), accepted (ACCEPTED, not completed), completed (ACCEPTED + cargo COMPLETED), rejected (REJECTED), canceled (CANCELED).
 // Endpoint: GET /v1/driver/cargo-offers?bucket=...
@@ -2079,6 +2106,21 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 		return
 	}
+	fullPath := strings.ToLower(strings.TrimSpace(c.FullPath()))
+	if fullPath == "" && c.Request != nil && c.Request.URL != nil {
+		fullPath = strings.ToLower(strings.TrimSpace(c.Request.URL.Path))
+	}
+	acceptAsDriverManager := strings.Contains(fullPath, "/accept-by-driver-manager")
+	acceptAsCargoManager := strings.Contains(fullPath, "/accept-by-cargo-manager")
+	dispatcherManagerRole := ""
+	if role == "dispatcher" {
+		dispatcherManagerRole, err = currentDispatcherManagerRole(c.Request.Context(), h.dispatchers, userID)
+		if err != nil {
+			h.logger.Error("accept offer: dispatcher role lookup failed", zap.Error(err), zap.String("dispatcher_id", userID.String()))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		}
+	}
 
 	// Backward compatibility / data-healing:
 	// Some historical rows may have proposed_by='DISPATCHER' but proposed_by_id points to a Driver Manager
@@ -2091,7 +2133,8 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			}
 		}
 		if dispatcherOwnsCargoForNegotiation(cargoObj, userID, dispCompanyID) && h.drivers != nil {
-			if isMgr, _ := h.drivers.IsLinked(c.Request.Context(), offer.CarrierID, *offer.ProposedByID); isMgr {
+			drv, _ := h.drivers.FindByID(c.Request.Context(), offer.CarrierID)
+			if dispatcherLinkedToDriver(c.Request.Context(), h.drivers, *offer.ProposedByID, offer.CarrierID, drv) {
 				proposedBy = cargo.OfferProposedByDriverManager
 			}
 		}
@@ -2100,6 +2143,14 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	case cargo.OfferProposedByDriver:
 		if role != "dispatcher" {
 			resp.ErrorLang(c, http.StatusForbidden, "only_dispatcher_accepts_driver_offer")
+			return
+		}
+		if dispatcherManagerRole != dispatchers.ManagerRoleCargoManager {
+			resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+			return
+		}
+		if acceptAsDriverManager {
+			resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 			return
 		}
 		var dispCompanyID *uuid.UUID
@@ -2115,6 +2166,14 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	case cargo.OfferProposedByDriverManager:
 		if role != "dispatcher" {
 			resp.ErrorLang(c, http.StatusForbidden, "only_dispatcher_accepts_driver_offer")
+			return
+		}
+		if dispatcherManagerRole != dispatchers.ManagerRoleCargoManager {
+			resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+			return
+		}
+		if acceptAsDriverManager {
+			resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 			return
 		}
 		var dispCompanyID *uuid.UUID
@@ -2177,8 +2236,17 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			}
 			// Driver accepts personally -> proceed to AcceptOffer (Trip creation).
 		} else if role == "dispatcher" {
+			if acceptAsCargoManager {
+				resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+				return
+			}
+			if dispatcherManagerRole != dispatchers.ManagerRoleDriverManager {
+				resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+				return
+			}
 			// Check if this dispatcher is a manager of this driver.
-			isManager, _ := h.drivers.IsLinked(c.Request.Context(), offer.CarrierID, userID)
+			drv, _ := h.drivers.FindByID(c.Request.Context(), offer.CarrierID)
+			isManager := dispatcherLinkedToDriver(c.Request.Context(), h.drivers, userID, offer.CarrierID, drv)
 			if !isManager {
 				resp.ErrorLang(c, http.StatusForbidden, "only_driver_or_manager_accepts_dispatcher_offer")
 				return
@@ -2229,9 +2297,20 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		return
 	}
 
-	cargoID, carrierID, err := h.repo.AcceptOffer(c.Request.Context(), offerID)
 	agreedPrice := offer.Price
 	agreedCurrency := strings.ToUpper(strings.TrimSpace(offer.Currency))
+	tx, err := h.repo.BeginTx(c.Request.Context())
+	if err != nil {
+		h.logger.Error("accept offer begin tx failed", zap.Error(err), zap.String("offer_id", offerID.String()))
+		resp.ErrorWithDataLang(c, http.StatusInternalServerError, "internal_error", gin.H{
+			"reason":   "begin_tx_failed",
+			"offer_id": offerID.String(),
+		})
+		return
+	}
+	defer tx.Rollback(c.Request.Context())
+
+	cargoID, carrierID, err := h.repo.AcceptOfferTx(c.Request.Context(), tx, offerID)
 	if err != nil {
 		h.logger.Error("accept offer failed",
 			zap.Error(err),
@@ -2259,8 +2338,11 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		}
 		return
 	}
+
+	var tripID uuid.UUID
 	if h.tripsRepo != nil {
-		tripID, tripErr := h.tripsRepo.Create(c.Request.Context(), cargoID, offerID, carrierID, agreedPrice, agreedCurrency)
+		var tripErr error
+		tripID, tripErr = h.tripsRepo.CreateTx(c.Request.Context(), tx, cargoID, offerID, carrierID, agreedPrice, agreedCurrency)
 		if tripErr != nil {
 			if errors.Is(tripErr, trips.ErrAgreedPriceOutOfRange) {
 				resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
@@ -2282,39 +2364,51 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			})
 			return
 		}
-		if tripID != uuid.Nil {
-			if h.stream != nil && h.tripsRepo != nil {
-				if tr, err := h.tripsRepo.GetByID(c.Request.Context(), tripID); err == nil && tr != nil {
-					cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
-					PublishTripStatusForCargoParticipants(h.stream, tr, cg, offer)
-				}
-			}
-			resp.OKLang(c, "ok", gin.H{
-				"cargo_id":        cargoID.String(),
-				"offer_id":        offerID.String(),
-				"trip_id":         tripID.String(),
-				"driver_id":       carrierID.String(),
-				"status":          "accepted",
-				"trip_flow":       tripFlow,
-				"agreed_price":    agreedPrice,
-				"agreed_currency": agreedCurrency,
-			})
-			if h.stream != nil {
-				p := gin.H{
-					"kind":       "cargo_offer",
-					"event":      "cargo_offer_accepted",
-					"offer_id":   offerID.String(),
-					"cargo_id":   cargoID.String(),
-					"driver_id":  carrierID.String(),
-					"created_at": time.Now().UTC().Format(time.RFC3339Nano),
-				}
-				ensureSSEID(p)
-				h.stream.PublishNotification(tripnotif.RecipientDriver, carrierID, p)
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		h.logger.Error("accept offer commit failed", zap.Error(err), zap.String("offer_id", offerID.String()))
+		resp.ErrorWithDataLang(c, http.StatusInternalServerError, "internal_error", gin.H{
+			"reason":   "commit_failed",
+			"offer_id": offerID.String(),
+		})
+		return
+	}
+	updatedOffer, _ := h.repo.GetOfferByID(c.Request.Context(), offerID)
+	if updatedOffer != nil {
+		offer = updatedOffer
+	}
+	if tripID != uuid.Nil {
+		if h.stream != nil && h.tripsRepo != nil {
+			if tr, err := h.tripsRepo.GetByID(c.Request.Context(), tripID); err == nil && tr != nil {
 				cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
-				publishCargoOfferToDispatchers(h.stream, cg, offer, p)
+				PublishTripStatusForCargoParticipants(h.stream, tr, cg, offer)
 			}
-			return
 		}
+		resp.OKLang(c, "ok", gin.H{
+			"cargo_id":        cargoID.String(),
+			"offer_id":        offerID.String(),
+			"trip_id":         tripID.String(),
+			"driver_id":       carrierID.String(),
+			"status":          "accepted",
+			"trip_flow":       tripFlow,
+			"agreed_price":    agreedPrice,
+			"agreed_currency": agreedCurrency,
+		})
+		if h.stream != nil {
+			p := gin.H{
+				"kind":       "cargo_offer",
+				"event":      "cargo_offer_accepted",
+				"offer_id":   offerID.String(),
+				"cargo_id":   cargoID.String(),
+				"driver_id":  carrierID.String(),
+				"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+			}
+			ensureSSEID(p)
+			h.stream.PublishNotification(tripnotif.RecipientDriver, carrierID, p)
+			cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
+			publishCargoOfferToDispatchers(h.stream, cg, offer, p)
+		}
+		return
 	}
 	if h.stream != nil {
 		p := gin.H{
@@ -2365,9 +2459,9 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 	}
 	if offer.Status != cargo.OfferStatusWaitingDriverConfirm {
 		resp.ErrorWithDataLang(c, http.StatusBadRequest, "offer_not_waiting_driver_confirm", gin.H{
-			"reason":        "wrong_offer_status",
-			"offer_id":      offerID.String(),
-			"current_status": strings.TrimSpace(offer.Status),
+			"reason":          "wrong_offer_status",
+			"offer_id":        offerID.String(),
+			"current_status":  strings.TrimSpace(offer.Status),
 			"expected_status": cargo.OfferStatusWaitingDriverConfirm,
 		})
 		return
@@ -2424,10 +2518,10 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 			)
 			if errors.Is(tripErr, trips.ErrAgreedPriceOutOfRange) {
 				resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{
-					"reason":        "agreed_price_out_of_range",
-					"offer_id":      offerID.String(),
-					"cargo_id":      cargoID.String(),
-					"agreed_price":  agreedPrice,
+					"reason":          "agreed_price_out_of_range",
+					"offer_id":        offerID.String(),
+					"cargo_id":        cargoID.String(),
+					"agreed_price":    agreedPrice,
 					"agreed_currency": agreedCurrency,
 				})
 				return
@@ -2487,7 +2581,11 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 		return
 	}
 
-	_ = tx.Commit(c.Request.Context())
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		h.logger.Error("driver confirm offer commit", zap.Error(err))
+		resp.ErrorWithDataLang(c, http.StatusInternalServerError, "internal_error", mergeGinH(gin.H{"reason": "commit_failed", "offer_id": offerID.String()}, pgDebugFields(err)))
+		return
+	}
 	resp.OKLang(c, "ok", nil)
 }
 
@@ -2618,6 +2716,12 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 			companyID = &u
 		}
 	}
+	managerRole, err := currentDispatcherManagerRole(c.Request.Context(), h.dispatchers, dispatcherID)
+	if err != nil {
+		h.logger.Error("reject offer: dispatcher role lookup failed", zap.Error(err), zap.String("dispatcher_id", dispatcherID.String()))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 	offerID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
@@ -2642,6 +2746,10 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 			return
 		}
 		if dispatcherID == reqRow.DriverManagerID {
+			if managerRole != dispatchers.ManagerRoleDriverManager {
+				resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+				return
+			}
 			if err := h.repo.RejectCargoManagerDMOfferByDriverManager(c.Request.Context(), offerID, dispatcherID, req.Reason); err != nil {
 				if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
 					resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
@@ -2655,6 +2763,10 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 			return
 		}
 		if dispatcherID == reqRow.CargoManagerID {
+			if managerRole != dispatchers.ManagerRoleCargoManager {
+				resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+				return
+			}
 			if err := h.repo.CancelCargoManagerDMOfferByCargoManager(c.Request.Context(), offerID, dispatcherID, req.Reason); err != nil {
 				if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
 					resp.ErrorLang(c, http.StatusBadRequest, "offer_not_found_or_not_pending")
@@ -2687,6 +2799,14 @@ func (h *CargoHandler) RejectOfferDispatcher(c *gin.Context) {
 	isNegotiator := offer.NegotiationDispatcherID != nil && *offer.NegotiationDispatcherID == dispatcherID
 	isOfferAuthor := offer.ProposedByID != nil && *offer.ProposedByID == dispatcherID &&
 		(pb == cargo.OfferProposedByDispatcher || pb == cargo.OfferProposedByDriverManager)
+	if ownsCargo && managerRole != dispatchers.ManagerRoleCargoManager {
+		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+		return
+	}
+	if !ownsCargo && (isOfferAuthor || isNegotiator) && managerRole != dispatchers.ManagerRoleDriverManager {
+		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+		return
+	}
 	canReject := ownsCargo || isOfferAuthor || (offer.Status == cargo.OfferStatusWaitingDriverConfirm && isNegotiator)
 	if !canReject {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")

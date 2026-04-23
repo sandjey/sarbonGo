@@ -242,7 +242,17 @@ func (r *Repo) UnlinkManager(ctx context.Context, driverID, managerID uuid.UUID)
 
 // GetManagerCount returns the number of managers linked to this driver.
 func (r *Repo) GetManagerCount(ctx context.Context, driverID uuid.UUID) (int, error) {
-	const q = `SELECT COUNT(*) FROM driver_manager_relations WHERE driver_id = $1`
+	const q = `
+SELECT COUNT(*) FROM (
+	SELECT rel.manager_id::text AS manager_id
+	FROM driver_manager_relations rel
+	WHERE rel.driver_id = $1
+	UNION
+	SELECT d.freelancer_id::text AS manager_id
+	FROM drivers d
+	WHERE d.id = $1
+	  AND NULLIF(TRIM(COALESCE(d.freelancer_id::text, '')), '') IS NOT NULL
+) managers`
 	var count int
 	err := r.pg.QueryRow(ctx, q, driverID).Scan(&count)
 	return count, err
@@ -250,17 +260,38 @@ func (r *Repo) GetManagerCount(ctx context.Context, driverID uuid.UUID) (int, er
 
 // GetDriverCount returns the number of drivers linked to this manager.
 func (r *Repo) GetDriverCount(ctx context.Context, managerID uuid.UUID) (int, error) {
-	const q = `SELECT COUNT(*) FROM driver_manager_relations WHERE manager_id = $1`
+	const q = `
+SELECT COUNT(*) FROM (
+	SELECT rel.driver_id::text AS driver_id
+	FROM driver_manager_relations rel
+	WHERE rel.manager_id = $1
+	UNION
+	SELECT d.id::text AS driver_id
+	FROM drivers d
+	WHERE NULLIF(TRIM(COALESCE(d.freelancer_id::text, '')), '') = $2
+) drivers`
 	var count int
-	err := r.pg.QueryRow(ctx, q, managerID).Scan(&count)
+	err := r.pg.QueryRow(ctx, q, managerID, managerID.String()).Scan(&count)
 	return count, err
 }
 
 // IsLinked checks if a driver and a manager are linked.
 func (r *Repo) IsLinked(ctx context.Context, driverID, managerID uuid.UUID) (bool, error) {
-	const q = `SELECT EXISTS(SELECT 1 FROM driver_manager_relations WHERE driver_id = $1 AND manager_id = $2)`
+	const q = `
+SELECT
+	EXISTS(
+		SELECT 1
+		FROM driver_manager_relations
+		WHERE driver_id = $1 AND manager_id = $2
+	)
+	OR EXISTS(
+		SELECT 1
+		FROM drivers d
+		WHERE d.id = $1
+		  AND NULLIF(TRIM(COALESCE(d.freelancer_id::text, '')), '') = $3
+	)`
 	var exists bool
-	err := r.pg.QueryRow(ctx, q, driverID, managerID).Scan(&exists)
+	err := r.pg.QueryRow(ctx, q, driverID, managerID, managerID.String()).Scan(&exists)
 	return exists, err
 }
 

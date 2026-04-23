@@ -1,0 +1,8 @@
+./aggregation_result.pb.go
+./bloom_filter.pb.go
+./common.pb.go
+./document.pb.go
+./firestore.pb.go
+./query.pb.go
+./query_profile.pb.go
+./write.pb.go

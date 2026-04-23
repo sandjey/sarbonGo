@@ -85,8 +85,7 @@ func (h *TripsHandler) Get(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "trip_not_found")
 		return
 	}
-	out := toTripResp(t)
-	enrichTripRespManagerIDs(c.Request.Context(), h.cargoRepo, t, out)
+	out := h.tripRespWithManagers(c.Request.Context(), t)
 	resp.OKLang(c, "ok", out)
 }
 
@@ -110,7 +109,7 @@ func (h *TripsHandler) List(c *gin.Context) {
 	}
 	out := make([]interface{}, 0, len(list))
 	for i := range list {
-		item := toTripResp(&list[i])
+		item := h.tripRespWithManagers(c.Request.Context(), &list[i])
 		cargoObj, _ := h.cargoRepo.GetByID(c.Request.Context(), list[i].CargoID, false)
 		if cargoObj != nil {
 			item["cargo"] = tripCargoMini(cargoObj)
@@ -136,6 +135,12 @@ func tripCargoMini(cg *cargo.Cargo) gin.H {
 		"weight":          cg.Weight,
 		"volume":          cg.Volume,
 	}
+}
+
+func (h *TripsHandler) tripRespWithManagers(ctx context.Context, t *trips.Trip) gin.H {
+	out := toTripResp(t)
+	enrichTripRespManagerIDs(ctx, h.cargoRepo, t, out)
+	return out
 }
 
 // enrichTripRespManagerIDs adds cargo_manager_id and/or driver_manager_id (freelance_dispatchers.id) for trip payloads.
@@ -193,8 +198,7 @@ func (h *TripsHandler) GetMyCurrentTrip(c *gin.Context) {
 		resp.OKLang(c, "ok", gin.H{"trip": nil})
 		return
 	}
-	tripOut := toTripResp(t)
-	enrichTripRespManagerIDs(c.Request.Context(), h.cargoRepo, t, tripOut)
+	tripOut := h.tripRespWithManagers(c.Request.Context(), t)
 	resp.OKLang(c, "ok", gin.H{"trip": tripOut})
 }
 
@@ -249,7 +253,7 @@ func (h *TripsHandler) ListForCargoManager(c *gin.Context) {
 	}
 	out := make([]interface{}, 0, len(list))
 	for i := range list {
-		out = append(out, toTripResp(&list[i]))
+		out = append(out, h.tripRespWithManagers(c.Request.Context(), &list[i]))
 	}
 	resp.OKLang(c, "ok", gin.H{
 		"items":  out,
@@ -285,7 +289,7 @@ func (h *TripsHandler) GetForCargoManager(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 		return
 	}
-	resp.OKLang(c, "ok", toTripResp(t))
+	resp.OKLang(c, "ok", h.tripRespWithManagers(c.Request.Context(), t))
 }
 
 // ListByCargoForCargoManager GET /v1/dispatchers/cargo/:id/trips
@@ -335,7 +339,7 @@ func (h *TripsHandler) ListByCargoForCargoManager(c *gin.Context) {
 	}
 	out := make([]interface{}, 0, len(list))
 	for i := range list {
-		out = append(out, toTripResp(&list[i]))
+		out = append(out, h.tripRespWithManagers(c.Request.Context(), &list[i]))
 	}
 	resp.OKLang(c, "ok", gin.H{
 		"cargo_id": cargoID.String(),
@@ -375,14 +379,14 @@ func (h *TripsHandler) ListMyHistory(c *gin.Context) {
 			items = append(items, gin.H{
 				"event_type": "trip_completed",
 				"event_at":   t.UpdatedAt,
-				"trip":       toTripResp(t),
+				"trip":       h.tripRespWithManagers(c.Request.Context(), t),
 			})
 			continue
 		}
 		items = append(items, gin.H{
 			"event_type": "trip_active",
 			"event_at":   t.UpdatedAt,
-			"trip":       toTripResp(t),
+			"trip":       h.tripRespWithManagers(c.Request.Context(), t),
 		})
 	}
 	for i := range archived {
@@ -391,7 +395,7 @@ func (h *TripsHandler) ListMyHistory(c *gin.Context) {
 			"event_type":        "trip_cancelled",
 			"event_at":          t.ArchivedAt,
 			"cancelled_by_role": t.CancelledByRole,
-			"trip":              toTripResp(&t.Trip),
+			"trip":              h.tripRespWithManagers(c.Request.Context(), &t.Trip),
 		})
 	}
 	accepted, _ := h.cargoRepo.ListDriverOffersAll(c.Request.Context(), driverID, "ACCEPTED", "all", nil, limit, 0)
@@ -478,14 +482,14 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 			items = append(items, gin.H{
 				"event_type": "trip_completed",
 				"event_at":   t.UpdatedAt,
-				"trip":       toTripResp(t),
+				"trip":       h.tripRespWithManagers(c.Request.Context(), t),
 			})
 			continue
 		}
 		items = append(items, gin.H{
 			"event_type": "trip_active",
 			"event_at":   t.UpdatedAt,
-			"trip":       toTripResp(t),
+			"trip":       h.tripRespWithManagers(c.Request.Context(), t),
 		})
 	}
 	for i := range archived {
@@ -494,7 +498,7 @@ func (h *TripsHandler) ListHistoryForCargoManager(c *gin.Context) {
 			"event_type":        "trip_cancelled",
 			"event_at":          t.ArchivedAt,
 			"cancelled_by_role": t.CancelledByRole,
-			"trip":              toTripResp(&t.Trip),
+			"trip":              h.tripRespWithManagers(c.Request.Context(), &t.Trip),
 		})
 	}
 	accepted, _ := h.cargoRepo.ListDispatcherSentOffers(c.Request.Context(), dispID, companyID, "ACCEPTED", "all", nil, limit, 0)
@@ -709,8 +713,7 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		return
 	}
 	h.notifyTripTransition(ctx, tBefore, tr)
-	out := toTripResp(tr)
-	enrichTripRespManagerIDs(ctx, h.cargoRepo, tr, out)
+	out := h.tripRespWithManagers(ctx, tr)
 	resp.OKLang(c, "ok", out)
 }
 
@@ -865,8 +868,7 @@ func (h *TripsHandler) runTripState(c *gin.Context, asDispatcher bool) {
 		}
 	}
 	cargoObj, _ := h.cargoRepo.GetByID(ctx, t.CargoID, false)
-	out := toTripResp(t)
-	enrichTripRespManagerIDs(ctx, h.cargoRepo, t, out)
+	out := h.tripRespWithManagers(ctx, t)
 	if cargoObj != nil {
 		out["cargo"] = gin.H{
 			"id":     cargoObj.ID.String(),
@@ -907,14 +909,14 @@ func sortHistoryByEventAtDesc(items []gin.H) {
 
 func toTripResp(t *trips.Trip) gin.H {
 	res := gin.H{
-		"id":               t.ID.String(),
-		"cargo_id":         t.CargoID.String(),
-		"offer_id":         t.OfferID.String(),
-		"status":           t.Status,
-		"agreed_price":     t.AgreedPrice,
-		"agreed_currency":  t.AgreedCurrency,
-		"created_at":       t.CreatedAt,
-		"updated_at":       t.UpdatedAt,
+		"id":              t.ID.String(),
+		"cargo_id":        t.CargoID.String(),
+		"offer_id":        t.OfferID.String(),
+		"status":          t.Status,
+		"agreed_price":    t.AgreedPrice,
+		"agreed_currency": t.AgreedCurrency,
+		"created_at":      t.CreatedAt,
+		"updated_at":      t.UpdatedAt,
 	}
 	if t.DriverID != nil {
 		res["driver_id"] = t.DriverID.String()
@@ -936,6 +938,18 @@ func toTripResp(t *trips.Trip) gin.H {
 	}
 	if t.RatingFromDispatcher != nil {
 		res["rating_from_dispatcher"] = *t.RatingFromDispatcher
+	}
+	if t.RatingDriverToDM != nil {
+		res["rating_driver_to_dm"] = *t.RatingDriverToDM
+	}
+	if t.RatingDMToDriver != nil {
+		res["rating_dm_to_driver"] = *t.RatingDMToDriver
+	}
+	if t.RatingDMToCM != nil {
+		res["rating_dm_to_cm"] = *t.RatingDMToCM
+	}
+	if t.RatingCMToDM != nil {
+		res["rating_cm_to_dm"] = *t.RatingCMToDM
 	}
 	res["next_status"] = trips.NextStatus(t.Status)
 	return res

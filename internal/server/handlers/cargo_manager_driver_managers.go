@@ -32,11 +32,7 @@ func (h *CargoManagerDriverManagersHandler) ensureCargoManager(c *gin.Context, d
 		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
 		return false
 	}
-	role := ""
-	if d.ManagerRole != nil {
-		role = strings.TrimSpace(*d.ManagerRole)
-	}
-	if role != dispatchers.ManagerRoleCargoManager {
+	if !isCargoManagerRole(d.ManagerRole) {
 		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 		return false
 	}
@@ -159,7 +155,7 @@ func (h *CargoManagerDriverManagersHandler) ListDriversByDriverManagerForCargoMa
 		resp.ErrorLang(c, http.StatusNotFound, "dispatcher_not_found")
 		return
 	}
-	if dm.ManagerRole == nil || strings.TrimSpace(*dm.ManagerRole) != dispatchers.ManagerRoleDriverManager {
+	if !isDriverManagerRole(dm.ManagerRole) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_manager_role")
 		return
 	}

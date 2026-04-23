@@ -55,3 +55,4 @@ api
 # Firebase / GCP service account secrets
 *firebase-adminsdk*.json
 *.service-account.json
+*.md

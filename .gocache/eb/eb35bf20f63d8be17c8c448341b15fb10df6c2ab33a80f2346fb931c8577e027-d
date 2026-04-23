@@ -1,0 +1,7 @@
+./base.go
+./menu.go
+./operation_log.go
+./permission.go
+./role.go
+./site.go
+./user.go

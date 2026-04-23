@@ -16,10 +16,10 @@ import (
 )
 
 type CargoDriversHandler struct {
-	logger     *zap.Logger
-	cargoRepo  *cargo.Repo
-	cdRepo     *cargodrivers.Repo
-	fav        *favorites.Repo
+	logger    *zap.Logger
+	cargoRepo *cargo.Repo
+	cdRepo    *cargodrivers.Repo
+	fav       *favorites.Repo
 }
 
 func NewCargoDriversHandler(logger *zap.Logger, cargoRepo *cargo.Repo, cdRepo *cargodrivers.Repo, fav *favorites.Repo) *CargoDriversHandler {
@@ -29,6 +29,12 @@ func NewCargoDriversHandler(logger *zap.Logger, cargoRepo *cargo.Repo, cdRepo *c
 // ListByCargo GET /v1/dispatchers/cargo/:id/drivers (dispatcher).
 func (h *CargoDriversHandler) ListByCargo(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
 	cargoID, err := uuid.Parse(c.Param("id"))
 	if err != nil || cargoID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
@@ -39,7 +45,7 @@ func (h *CargoDriversHandler) ListByCargo(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 		return
 	}
-	if obj.CreatedByType == nil || *obj.CreatedByType != "DISPATCHER" || obj.CreatedByID == nil || *obj.CreatedByID != dispatcherID {
+	if !dispatcherOwnsCargoForNegotiation(obj, dispatcherID, companyID) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 		return
 	}
@@ -64,7 +70,7 @@ func (h *CargoDriversHandler) ListByCargo(c *gin.Context) {
 		})
 	}
 	resp.OKLang(c, "ok", gin.H{
-		"cargo_id":       cargoID.String(),
+		"cargo_id":        cargoID.String(),
 		"vehicles_amount": obj.VehiclesAmount,
 		"vehicles_left":   obj.VehiclesLeft,
 		"items":           items,
@@ -80,6 +86,12 @@ type RemoveReq struct {
 // NOTE: current behavior uses trip CANCELLED flow for returning slot; here we just mark as CANCELLED to free driver and slot.
 func (h *CargoDriversHandler) RemoveFromCargo(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	var companyID *uuid.UUID
+	if cid, ok := c.Get(mw.CtxDispatcherCompanyID); ok {
+		if u, ok2 := cid.(uuid.UUID); ok2 && u != uuid.Nil {
+			companyID = &u
+		}
+	}
 	cargoID, err := uuid.Parse(c.Param("id"))
 	if err != nil || cargoID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
@@ -90,7 +102,7 @@ func (h *CargoDriversHandler) RemoveFromCargo(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
 		return
 	}
-	if obj.CreatedByType == nil || *obj.CreatedByType != "DISPATCHER" || obj.CreatedByID == nil || *obj.CreatedByID != dispatcherID {
+	if !dispatcherOwnsCargoForNegotiation(obj, dispatcherID, companyID) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 		return
 	}
@@ -140,4 +152,3 @@ func (h *CargoDriversHandler) GetMyActiveCargo(c *gin.Context) {
 	}
 	resp.OKLang(c, "ok", gin.H{"active": true, "cargo": cargoMap})
 }
-

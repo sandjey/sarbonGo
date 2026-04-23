@@ -1,0 +1,6 @@
+./model.go
+./pending_photos.go
+./repo.go
+./pending_photos_test.go
+./trip_flow_integration_test.go
+./trip_status_helpers_test.go

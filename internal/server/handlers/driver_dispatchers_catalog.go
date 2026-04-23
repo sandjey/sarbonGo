@@ -25,9 +25,13 @@ func NewDriverDispatchersCatalogHandler(logger *zap.Logger, disp *dispatchers.Re
 // ListCatalog returns all freelance dispatchers with pagination + filters.
 // GET /v1/driver/dispatchers/catalog
 func (h *DriverDispatchersCatalogHandler) ListCatalog(c *gin.Context) {
-	limit := parseIntDefault(c.Query("limit"), 20)
-	offset := parseIntDefault(c.Query("offset"), 0)
-	if limit < 1 || limit > 10000 || offset < 0 {
+	limit, ok := parseBoundedIntQueryStrict(c.Query("limit"), 20, 1, 100)
+	if !ok {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
+		return
+	}
+	offset, ok := parseBoundedIntQueryStrict(c.Query("offset"), 0, 0, 1000000)
+	if !ok {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
@@ -119,8 +123,8 @@ func (h *DriverDispatchersCatalogHandler) HintByPhone(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "phone_required")
 		return
 	}
-	limit := parseIntDefault(c.Query("limit"), 10)
-	if limit < 1 || limit > 50 {
+	limit, ok := parseBoundedIntQueryStrict(c.Query("limit"), 10, 1, 50)
+	if !ok {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload")
 		return
 	}
@@ -131,17 +135,5 @@ func (h *DriverDispatchersCatalogHandler) HintByPhone(c *gin.Context) {
 		return
 	}
 	resp.OKLang(c, "ok", gin.H{"items": items})
-}
-
-func parseIntDefault(s string, def int) int {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return def
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	return v
 }
 

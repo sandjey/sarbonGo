@@ -55,12 +55,18 @@ func (h *CMToDMOffersHandler) SendToDriverManager(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
+	currency, errKey := normalizeAndValidateOfferMoney(req.Price, req.Currency)
+	if errKey != "" {
+		resp.ErrorLang(c, http.StatusBadRequest, errKey)
+		return
+	}
+	req.Currency = currency
 	dm, err := h.disp.FindByID(c.Request.Context(), req.DriverManagerID)
 	if err != nil || dm == nil {
 		resp.ErrorLang(c, http.StatusNotFound, "dispatcher_not_found")
 		return
 	}
-	if dm.ManagerRole == nil || strings.TrimSpace(*dm.ManagerRole) != dispatchers.ManagerRoleDriverManager {
+	if !isDriverManagerRole(dm.ManagerRole) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_manager_role")
 		return
 	}
@@ -86,7 +92,7 @@ func (h *CMToDMOffersHandler) SendToDriverManager(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
 		return
 	}
-	if cm.ManagerRole == nil || strings.TrimSpace(*cm.ManagerRole) != dispatchers.ManagerRoleCargoManager {
+	if !isCargoManagerRole(cm.ManagerRole) {
 		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 		return
 	}
@@ -94,7 +100,20 @@ func (h *CMToDMOffersHandler) SendToDriverManager(c *gin.Context) {
 	reqID, err := h.cargo.CreateCargoManagerDMOffer(c.Request.Context(), cargoID, cargoManagerID, req.DriverManagerID, req.Price, req.Currency, req.Comment)
 	if err != nil {
 		h.logger.Error("cm->dm offer create", zap.Error(err))
-		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
+		switch {
+		case errors.Is(err, cargo.ErrCargoNotFound):
+			resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
+		case errors.Is(err, cargo.ErrCargoNotSearching):
+			resp.ErrorLang(c, http.StatusConflict, "cargo_not_searching")
+		case errors.Is(err, cargo.ErrCargoSlotsFull):
+			resp.ErrorLang(c, http.StatusConflict, "cargo_slots_full")
+		case errors.Is(err, cargo.ErrOfferPriceOutOfRange):
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{"reason": "offer_price_out_of_range"})
+		case errors.Is(err, cargo.ErrCargoManagerDMOfferAlreadyExists):
+			resp.ErrorLang(c, http.StatusConflict, "driver_manager_offer_already_exists")
+		default:
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
+		}
 		return
 	}
 
@@ -131,7 +150,7 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
 		return
 	}
-	if dm.ManagerRole == nil || strings.TrimSpace(*dm.ManagerRole) != dispatchers.ManagerRoleDriverManager {
+	if !isDriverManagerRole(dm.ManagerRole) {
 		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 		return
 	}
@@ -150,9 +169,17 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
 		return
 	}
-	// driver must be linked to this DM
-	linked, _ := h.drv.IsLinked(c.Request.Context(), body.DriverID, driverManagerID)
-	if !linked {
+	drvRow, err := h.drv.FindByID(c.Request.Context(), body.DriverID)
+	if err != nil {
+		h.logger.Error("cm->dm accept lookup driver", zap.Error(err), zap.String("driver_id", body.DriverID.String()))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if drvRow == nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
+		return
+	}
+	if !dispatcherLinkedToDriver(c.Request.Context(), h.drv, driverManagerID, body.DriverID, drvRow) {
 		resp.ErrorLang(c, http.StatusForbidden, "not_your_driver_or_cargo")
 		return
 	}
@@ -171,8 +198,17 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 		return
 	}
 
-	offerID, err := h.cargo.CreateOffer(
+	tx, err := h.cargo.BeginTx(c.Request.Context())
+	if err != nil {
+		h.logger.Error("cm->dm accept begin tx", zap.Error(err), zap.String("request_id", reqID.String()))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	defer tx.Rollback(c.Request.Context())
+
+	offerID, err := h.cargo.CreateOfferTx(
 		c.Request.Context(),
+		tx,
 		reqRow.CargoID,
 		body.DriverID,
 		reqRow.Price,
@@ -197,12 +233,14 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusConflict, "cargo_slots_full")
 		case errors.Is(err, cargo.ErrCargoNotSearching):
 			resp.ErrorLang(c, http.StatusBadRequest, "cargo_not_searching")
+		case errors.Is(err, cargo.ErrOfferPriceOutOfRange):
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "invalid_payload_detail", gin.H{"reason": "offer_price_out_of_range"})
 		default:
 			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
 		}
 		return
 	}
-	if err := h.cargo.SetOfferStatusWaitingDriver(c.Request.Context(), offerID, &driverManagerID); err != nil {
+	if err := h.cargo.SetOfferStatusWaitingDriverTx(c.Request.Context(), tx, offerID, &driverManagerID); err != nil {
 		if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
 			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
 			return
@@ -211,7 +249,20 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
-	_ = h.cargo.AcceptCargoManagerDMOffer(c.Request.Context(), reqID, body.DriverID, offerID)
+	if err := h.cargo.AcceptCargoManagerDMOfferTx(c.Request.Context(), tx, reqID, body.DriverID, offerID); err != nil {
+		if errors.Is(err, cargo.ErrOfferNotFoundOrNotPending) {
+			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
+			return
+		}
+		h.logger.Error("cm->dm accept mark request accepted", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if err := tx.Commit(c.Request.Context()); err != nil {
+		h.logger.Error("cm->dm accept commit", zap.Error(err), zap.String("request_id", reqID.String()))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
 
 	if h.stream != nil {
 		pubOffer, err := h.cargo.GetOfferByID(c.Request.Context(), offerID)
@@ -245,4 +296,3 @@ func (h *CMToDMOffersHandler) AcceptFromCargoManager(c *gin.Context) {
 		"offer_id": offerID.String(),
 	})
 }
-

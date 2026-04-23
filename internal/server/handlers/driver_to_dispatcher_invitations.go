@@ -16,6 +16,7 @@ import (
 	"sarbonNew/internal/server/resp"
 	"sarbonNew/internal/tripnotif"
 	"sarbonNew/internal/userstream"
+	"sarbonNew/internal/util"
 )
 
 // DriverToDispatcherInvitationsHandler handles invitations FROM driver TO dispatcher (by phone). Driver sends, dispatcher accepts/declines.
@@ -45,9 +46,23 @@ func (h *DriverToDispatcherInvitationsHandler) CreateFromDriver(c *gin.Context) 
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
-	phone := strings.TrimSpace(req.Phone)
+	phone, err := util.NormalizeE164(req.Phone)
+	if err != nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
+		return
+	}
 	if phone == "" {
 		resp.ErrorLang(c, http.StatusBadRequest, "phone_required")
+		return
+	}
+	mCount, err := h.drv.GetManagerCount(c.Request.Context(), driverID)
+	if err != nil {
+		h.logger.Error("driver to dispatcher manager count", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
+		return
+	}
+	if mCount >= 10 {
+		resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
 		return
 	}
 	if dup, err := h.repo.HasPendingForDriverPhone(c.Request.Context(), driverID, phone); err != nil {
@@ -59,7 +74,7 @@ func (h *DriverToDispatcherInvitationsHandler) CreateFromDriver(c *gin.Context) 
 		return
 	}
 	// Optional: check dispatcher exists by phone (so we don't invite non-existent)
-	disp, _ := h.disp.FindByPhone(c.Request.Context(), phone)
+	disp, _ := h.disp.FindByPhoneNormalized(c.Request.Context(), phone)
 	if disp == nil {
 		// still allow sending (dispatcher might register later). The role
 		// check will happen on the receiving side at /accept time.
@@ -70,18 +85,30 @@ func (h *DriverToDispatcherInvitationsHandler) CreateFromDriver(c *gin.Context) 
 	// different role, reject synchronously so the client doesn't show a
 	// pending "waiting for dispatcher" state that can never succeed.
 	if disp != nil {
-		role := ""
-		if disp.ManagerRole != nil {
-			role = strings.TrimSpace(*disp.ManagerRole)
-		}
+		role := normalizedDispatcherManagerRole(disp.ManagerRole)
 		if role != "" && role != dispatchers.ManagerRoleDriverManager {
 			resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 			return
 		}
 		if dispID, perr := uuid.Parse(strings.TrimSpace(disp.ID)); perr == nil && dispID != uuid.Nil {
-			isLinked, _ := h.drv.IsLinked(c.Request.Context(), driverID, dispID)
-			if isLinked {
+			drv, derr := h.drv.FindByID(c.Request.Context(), driverID)
+			if derr != nil {
+				h.logger.Error("driver to dispatcher lookup driver", zap.Error(derr))
+				resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
+				return
+			}
+			if dispatcherLinkedToDriver(c.Request.Context(), h.drv, dispID, driverID, drv) {
 				resp.ErrorLang(c, http.StatusConflict, "already_linked_to_this_dispatcher")
+				return
+			}
+			dCount, derr := h.drv.GetDriverCount(c.Request.Context(), dispID)
+			if derr != nil {
+				h.logger.Error("driver to dispatcher driver count", zap.Error(derr))
+				resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
+				return
+			}
+			if dCount >= 10 {
+				resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
 				return
 			}
 		}
@@ -178,7 +205,7 @@ func (h *DriverToDispatcherInvitationsHandler) CancelByDriver(c *gin.Context) {
 		return
 	}
 	if h.stream != nil {
-		if disp, _ := h.disp.FindByPhone(c.Request.Context(), inv.DispatcherPhone); disp != nil {
+		if disp, _ := h.disp.FindByPhoneNormalized(c.Request.Context(), inv.DispatcherPhone); disp != nil {
 			if dispID, err := uuid.Parse(disp.ID); err == nil && dispID != uuid.Nil {
 				h.stream.PublishNotification(tripnotif.RecipientDispatcher, dispID, gin.H{
 					"kind":       "connection_offer",
@@ -253,11 +280,7 @@ func (h *DriverToDispatcherInvitationsHandler) AcceptByDispatcher(c *gin.Context
 	// Catches the case when a driver invited a dispatcher by phone before
 	// that dispatcher chose a role, or when a dispatcher later flipped their
 	// role to CARGO_MANAGER — the pending token must not be redeemable.
-	role := ""
-	if disp.ManagerRole != nil {
-		role = strings.TrimSpace(*disp.ManagerRole)
-	}
-	if role != dispatchers.ManagerRoleDriverManager {
+	if !isDriverManagerRole(disp.ManagerRole) {
 		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 		return
 	}
@@ -297,8 +320,17 @@ func (h *DriverToDispatcherInvitationsHandler) AcceptByDispatcher(c *gin.Context
 		resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
 		return
 	}
-	isLinked, _ := h.drv.IsLinked(c.Request.Context(), inv.DriverID, dispatcherID)
-	if isLinked {
+	drv, err := h.drv.FindByID(c.Request.Context(), inv.DriverID)
+	if err != nil {
+		h.logger.Error("dispatcher accept driver invitation lookup driver", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if drv == nil {
+		resp.ErrorLang(c, http.StatusBadRequest, "driver_not_found")
+		return
+	}
+	if dispatcherLinkedToDriver(c.Request.Context(), h.drv, dispatcherID, inv.DriverID, drv) {
 		resp.ErrorLang(c, http.StatusConflict, "already_linked_to_this_dispatcher")
 		return
 	}

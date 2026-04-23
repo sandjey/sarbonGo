@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +34,27 @@ type DriverInvitationsHandler struct {
 
 func NewDriverInvitationsHandler(logger *zap.Logger, repo *driverinvitations.Repo, d2d *drivertodispatcherinvitations.Repo, dcr *dispatchercompanies.Repo, drv *drivers.Repo, disp *dispatchers.Repo, stream *userstream.Hub) *DriverInvitationsHandler {
 	return &DriverInvitationsHandler{logger: logger, repo: repo, d2d: d2d, dcr: dcr, drv: drv, disp: disp, stream: stream}
+}
+
+func (h *DriverInvitationsHandler) requireDriverManager(c *gin.Context, dispatcherID uuid.UUID) (*dispatchers.Dispatcher, bool) {
+	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+	if err != nil || disp == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+		return nil, false
+	}
+	if !isDriverManagerRole(disp.ManagerRole) {
+		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+		return nil, false
+	}
+	return disp, true
+}
+
+func (h *DriverInvitationsHandler) dispatcherLinkedToDriver(c *gin.Context, dispatcherID, driverID uuid.UUID, drv *drivers.Driver) bool {
+	linked, _ := h.drv.IsLinked(c.Request.Context(), driverID, dispatcherID)
+	if linked {
+		return true
+	}
+	return drv != nil && drv.FreelancerID != nil && *drv.FreelancerID == dispatcherID.String()
 }
 
 // CreateDriverInvitationReq body for POST /v1/dispatchers/companies/:companyId/driver-invitations
@@ -117,17 +137,7 @@ type CreateForFreelanceReq struct {
 // CreateForFreelance creates driver invitation as freelance (no company) by driver_id.
 func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
-	if err != nil || disp == nil {
-		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
-		return
-	}
-	role := ""
-	if disp.ManagerRole != nil {
-		role = strings.TrimSpace(*disp.ManagerRole)
-	}
-	if role != dispatchers.ManagerRoleDriverManager {
-		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
 		return
 	}
 
@@ -163,9 +173,18 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 	}
 	phone := strings.TrimSpace(drv.Phone)
 
-	isLinked, _ := h.drv.IsLinked(c.Request.Context(), req.DriverID, dispatcherID)
-	if isLinked {
+	if h.dispatcherLinkedToDriver(c, dispatcherID, req.DriverID, drv) {
 		resp.ErrorLang(c, http.StatusConflict, "driver_already_accepted_your_invitation")
+		return
+	}
+	managerCount, err := h.drv.GetManagerCount(c.Request.Context(), req.DriverID)
+	if err != nil {
+		h.logger.Error("get driver manager count before create invite", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+		return
+	}
+	if managerCount >= 10 {
+		resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
 		return
 	}
 
@@ -201,7 +220,10 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 
 // FindDrivers returns drivers matching phone search (для диспетчера: найти водителя и пригласить по driver_id). Совпадения сверху.
 func (h *DriverInvitationsHandler) FindDrivers(c *gin.Context) {
-	_ = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+		return
+	}
 	phoneSearch := strings.TrimSpace(c.Query("phone"))
 	if phoneSearch == "" {
 		resp.OKLang(c, "ok", gin.H{"items": []gin.H{}})
@@ -491,6 +513,9 @@ func (h *DriverInvitationsHandler) ListDriverConnectionOffers(c *gin.Context) {
 // GET /v1/dispatchers/drivers/:driverId
 func (h *DriverInvitationsHandler) GetMyDriver(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+		return
+	}
 	driverID, err := uuid.Parse(c.Param("driverId"))
 	if err != nil || driverID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
@@ -501,8 +526,7 @@ func (h *DriverInvitationsHandler) GetMyDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
 		return
 	}
-	linked, _ := h.drv.IsLinked(c.Request.Context(), driverID, dispatcherID)
-	if !linked && (drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String()) {
+	if !h.dispatcherLinkedToDriver(c, dispatcherID, driverID, drv) {
 		resp.ErrorLang(c, http.StatusForbidden, "driver_not_linked")
 		return
 	}
@@ -512,18 +536,27 @@ func (h *DriverInvitationsHandler) GetMyDriver(c *gin.Context) {
 // UnlinkDriver removes driver from dispatcher's list (sets driver.freelancer_id = NULL). Водитель должен быть принят по приглашению (freelancer_id = я).
 func (h *DriverInvitationsHandler) UnlinkDriver(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+		return
+	}
 	driverID, err := uuid.Parse(c.Param("driverId"))
 	if err != nil || driverID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
 		return
 	}
-	ok, err := h.drv.UnlinkFromFreelancer(c.Request.Context(), driverID, dispatcherID)
+	removedRel, err := h.drv.UnlinkManager(c.Request.Context(), driverID, dispatcherID)
 	if err != nil {
-		h.logger.Error("unlink driver", zap.Error(err))
+		h.logger.Error("unlink driver manager relation", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_unlink")
 		return
 	}
-	if !ok {
+	removedLegacy, err := h.drv.UnlinkFromFreelancer(c.Request.Context(), driverID, dispatcherID)
+	if err != nil {
+		h.logger.Error("unlink driver legacy", zap.Error(err))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_unlink")
+		return
+	}
+	if !removedRel && !removedLegacy {
 		resp.ErrorLang(c, http.StatusForbidden, "driver_not_linked")
 		return
 	}
@@ -543,6 +576,9 @@ type SetDriverPowerReq struct {
 // SetDriverPower adds or updates тягач for a driver. Водитель должен быть принят по приглашению (freelancer_id = я).
 func (h *DriverInvitationsHandler) SetDriverPower(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+		return
+	}
 	driverID, err := uuid.Parse(c.Param("driverId"))
 	if err != nil || driverID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
@@ -553,7 +589,7 @@ func (h *DriverInvitationsHandler) SetDriverPower(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
 		return
 	}
-	if drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String() {
+	if !h.dispatcherLinkedToDriver(c, dispatcherID, driverID, drv) {
 		resp.ErrorLang(c, http.StatusForbidden, "driver_must_accept_invitation")
 		return
 	}
@@ -623,6 +659,9 @@ type SetDriverTrailerReq struct {
 // SetDriverTrailer adds or updates прицеп for a driver. Водитель должен быть принят по приглашению (freelancer_id = я).
 func (h *DriverInvitationsHandler) SetDriverTrailer(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+		return
+	}
 	driverID, err := uuid.Parse(c.Param("driverId"))
 	if err != nil || driverID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
@@ -633,7 +672,7 @@ func (h *DriverInvitationsHandler) SetDriverTrailer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
 		return
 	}
-	if drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String() {
+	if !h.dispatcherLinkedToDriver(c, dispatcherID, driverID, drv) {
 		resp.ErrorLang(c, http.StatusForbidden, "driver_must_accept_invitation")
 		return
 	}
@@ -728,6 +767,9 @@ type PatchMyDriverReq struct {
 // PATCH /v1/dispatchers/drivers/:driverId
 func (h *DriverInvitationsHandler) PatchMyDriver(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+		return
+	}
 	driverID, err := uuid.Parse(c.Param("driverId"))
 	if err != nil || driverID == uuid.Nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_driver_id")
@@ -738,7 +780,7 @@ func (h *DriverInvitationsHandler) PatchMyDriver(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
 		return
 	}
-	if drv.FreelancerID == nil || *drv.FreelancerID != dispatcherID.String() {
+	if !h.dispatcherLinkedToDriver(c, dispatcherID, driverID, drv) {
 		resp.ErrorLang(c, http.StatusForbidden, "driver_must_accept_invitation")
 		return
 	}
@@ -1045,7 +1087,7 @@ func (h *DriverInvitationsHandler) Accept(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "driver_not_found")
 		return
 	}
-	if strings.TrimSpace(strings.ReplaceAll(inv.Phone, " ", "")) != strings.TrimSpace(strings.ReplaceAll(drv.Phone, " ", "")) {
+	if drivers.NormalizePhone(inv.Phone) != drivers.NormalizePhone(drv.Phone) {
 		resp.ErrorLang(c, http.StatusForbidden, "invitation_sent_to_another_phone")
 		return
 	}
@@ -1085,11 +1127,7 @@ func (h *DriverInvitationsHandler) Accept(c *gin.Context) {
 		// end up with a driver in their "my drivers" list, which is invalid
 		// for the cargo-manager workflow.
 		if invDisp, ierr := h.disp.FindByID(c.Request.Context(), *inv.InvitedByDispatcherID); ierr == nil && invDisp != nil {
-			role := ""
-			if invDisp.ManagerRole != nil {
-				role = strings.TrimSpace(*invDisp.ManagerRole)
-			}
-			if role != dispatchers.ManagerRoleDriverManager {
+			if !isDriverManagerRole(invDisp.ManagerRole) {
 				resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 				return
 			}
@@ -1115,6 +1153,10 @@ func (h *DriverInvitationsHandler) Accept(c *gin.Context) {
 		}
 		if mCount >= 10 {
 			resp.ErrorLang(c, http.StatusConflict, "connection_limit_reached")
+			return
+		}
+		if h.dispatcherLinkedToDriver(c, *inv.InvitedByDispatcherID, driverID, drv) {
+			resp.ErrorLang(c, http.StatusConflict, "already_linked_to_this_dispatcher")
 			return
 		}
 
@@ -1179,7 +1221,7 @@ func (h *DriverInvitationsHandler) Decline(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "driver_not_found")
 		return
 	}
-	if strings.TrimSpace(strings.ReplaceAll(inv.Phone, " ", "")) != strings.TrimSpace(strings.ReplaceAll(drv.Phone, " ", "")) {
+	if drivers.NormalizePhone(inv.Phone) != drivers.NormalizePhone(drv.Phone) {
 		resp.ErrorLang(c, http.StatusForbidden, "invitation_sent_to_another_phone")
 		return
 	}
@@ -1214,9 +1256,7 @@ func (h *DriverInvitationsHandler) Decline(c *gin.Context) {
 // Query: phone (search), work_status, truck_type (power_plate_type), page, limit, sort (e.g. updated_at:desc, name:asc, last_online_at:desc).
 func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
-	if err != nil || disp == nil {
-		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
 		return
 	}
 	f := drivers.ListDriversFilter{
@@ -1240,43 +1280,27 @@ func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 	var (
 		list  []*drivers.Driver
 		total int
+		err   error
 	)
-	if disp.ManagerRole != nil && strings.EqualFold(strings.TrimSpace(*disp.ManagerRole), dispatchers.ManagerRoleDriverManager) {
-		// Driver manager: merge new many-to-many link + legacy freelancer_id link.
-		listRel, _, errRel := h.drv.ListByManagerIDFilter(c.Request.Context(), dispatcherID, f)
-		if errRel != nil {
-			h.logger.Error("list my drivers by manager relation", zap.Error(errRel))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
-			return
-		}
-		listLegacy, _, errLegacy := h.drv.ListByFreelancerIDFilter(c.Request.Context(), dispatcherID, f)
-		if errLegacy != nil {
-			h.logger.Error("list my drivers by legacy freelancer", zap.Error(errLegacy))
-			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
-			return
-		}
-		byID := make(map[string]*drivers.Driver, len(listRel)+len(listLegacy))
-		for _, d := range listRel {
-			if d != nil {
-				byID[d.ID] = d
-			}
-		}
-		for _, d := range listLegacy {
-			if d != nil {
-				byID[d.ID] = d
-			}
-		}
-		list = make([]*drivers.Driver, 0, len(byID))
-		for _, d := range byID {
-			list = append(list, d)
-		}
-		sort.Slice(list, func(i, j int) bool {
-			return list[i].UpdatedAt.After(list[j].UpdatedAt)
-		})
-		total = len(list)
-	} else {
-		list, total, err = h.drv.ListByFreelancerIDFilter(c.Request.Context(), dispatcherID, f)
+	// Driver manager: merge new many-to-many link + legacy freelancer_id link.
+	// We fetch the full linked set (business limit is 10 per side) and paginate after
+	// merge so totals/pages are correct and duplicates don't distort the result.
+	fullFilter := f
+	fullFilter.Page = 1
+	fullFilter.Limit = 100
+	listRel, _, errRel := h.drv.ListByManagerIDFilter(c.Request.Context(), dispatcherID, fullFilter)
+	if errRel != nil {
+		h.logger.Error("list my drivers by manager relation", zap.Error(errRel))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
+		return
 	}
+	listLegacy, _, errLegacy := h.drv.ListByFreelancerIDFilter(c.Request.Context(), dispatcherID, fullFilter)
+	if errLegacy != nil {
+		h.logger.Error("list my drivers by legacy freelancer", zap.Error(errLegacy))
+		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
+		return
+	}
+	list, total = mergeDriverListsForManager(listRel, listLegacy, f)
 	if err != nil {
 		h.logger.Error("list my drivers", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_drivers")
@@ -1291,7 +1315,10 @@ func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 // ListAllDriversForFreelance returns all drivers in the system (not only linked ones) with filters and pagination.
 // Query: phone (search), work_status, truck_type (power_plate_type), page, limit, sort (e.g. updated_at:desc, name:asc, last_online_at:desc, work_status:asc).
 func (h *DriverInvitationsHandler) ListAllDriversForFreelance(c *gin.Context) {
-	_ = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
+	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+		return
+	}
 	var (
 		latPtr    *float64
 		lngPtr    *float64

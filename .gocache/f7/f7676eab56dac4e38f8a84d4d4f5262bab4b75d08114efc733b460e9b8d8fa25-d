@@ -1,0 +1,6 @@
+./name.go
+./reflect.go
+./slice.go
+./sql.go
+./strings.go
+./zero.go

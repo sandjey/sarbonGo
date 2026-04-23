@@ -14,7 +14,11 @@ ALTER TABLE trips
   ADD COLUMN IF NOT EXISTS agreed_price NUMERIC(18, 2) NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS agreed_currency VARCHAR(3) NOT NULL DEFAULT 'UZS',
   ADD COLUMN IF NOT EXISTS rating_from_driver NUMERIC(3, 1) NULL,
-  ADD COLUMN IF NOT EXISTS rating_from_dispatcher NUMERIC(3, 1) NULL;
+  ADD COLUMN IF NOT EXISTS rating_from_dispatcher NUMERIC(3, 1) NULL,
+  ADD COLUMN IF NOT EXISTS rating_driver_to_dm INTEGER NULL,
+  ADD COLUMN IF NOT EXISTS rating_dm_to_driver INTEGER NULL,
+  ADD COLUMN IF NOT EXISTS rating_dm_to_cm INTEGER NULL,
+  ADD COLUMN IF NOT EXISTS rating_cm_to_dm INTEGER NULL;
 `)
 	if err != nil {
 		return err

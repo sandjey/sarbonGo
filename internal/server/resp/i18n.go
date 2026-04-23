@@ -1150,6 +1150,13 @@ var apiMessages = map[string]map[string]string{
 		"tr": "Bu yük için zaten bekleyen veya kabul edilmiş bir teklifiniz var",
 		"zh": "您对该货物已有待处理或已接受的报价",
 	},
+	"driver_manager_offer_already_exists": {
+		"en": "A pending cargo manager offer for this driver manager already exists",
+		"ru": "Р”Р»СЏ СЌС‚РѕРіРѕ driver manager СѓР¶Рµ РµСЃС‚СЊ РѕР¶РёРґР°СЋС‰РµРµ РїСЂРµРґР»РѕР¶РµРЅРёРµ РѕС‚ cargo manager",
+		"uz": "Bu driver manager uchun cargo managerdan kutilayotgan taklif allaqachon mavjud",
+		"tr": "Bu driver manager iГ§in cargo manager'dan bekleyen bir teklif zaten var",
+		"zh": "иЇҐdriver managerе·Іжњ‰дёЂжќЎеѕ…е¤„зђ†зљ„cargo managerжЉҐд»·",
+	},
 	"invalid_cargo_offer_bucket": {
 		"en": "Invalid bucket for cargo offers",
 		"ru": "Некорректная вкладка (bucket) для офферов по грузам",

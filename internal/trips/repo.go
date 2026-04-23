@@ -17,8 +17,10 @@ var ErrNotFound = errors.New("trip not found")
 var ErrInvalidTransition = errors.New("invalid status transition")
 var ErrForbiddenRole = errors.New("trip: not allowed for this role")
 var ErrAgreedPriceOutOfRange = errors.New("trip: agreed_price is out of NUMERIC(18,2) range")
+
 // ErrTripCompletionNeedsDriverFirst — диспетчер не может закрыть рейс, пока водитель не запросил завершение (DELIVERED → pending COMPLETED).
 var ErrTripCompletionNeedsDriverFirst = errors.New("trip completion: driver must confirm first")
+
 // ErrTripCompletionAlreadyPending — водитель уже отправил запрос на завершение, ждём cargo manager.
 var ErrTripCompletionAlreadyPending = errors.New("trip completion: already awaiting cargo manager")
 
@@ -102,7 +104,8 @@ func scanTrip(row pgx.Row) (*Trip, error) {
 		&t.AgreedPrice, &t.AgreedCurrency,
 		&t.CreatedAt, &t.UpdatedAt,
 		&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt,
-		&t.RatingFromDriver, &t.RatingFromDispatcher)
+		&t.RatingFromDriver, &t.RatingFromDispatcher,
+		&t.RatingDriverToDM, &t.RatingDMToDriver, &t.RatingDMToCM, &t.RatingCMToDM)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +114,8 @@ func scanTrip(row pgx.Row) (*Trip, error) {
 
 const tripSelect = `SELECT id, cargo_id, offer_id, driver_id, status, agreed_price, agreed_currency, created_at, updated_at,
   pending_confirm_to, driver_confirmed_at, dispatcher_confirmed_at,
-  rating_from_driver, rating_from_dispatcher FROM trips `
+  rating_from_driver, rating_from_dispatcher,
+  rating_driver_to_dm, rating_dm_to_driver, rating_dm_to_cm, rating_cm_to_dm FROM trips `
 
 // GetByID returns trip by id.
 func (r *Repo) GetByID(ctx context.Context, id uuid.UUID) (*Trip, error) {
@@ -501,7 +505,8 @@ func (r *Repo) ListForCargoManager(
 	q := `SELECT
   t.id, t.cargo_id, t.offer_id, t.driver_id, t.status, t.agreed_price, t.agreed_currency, t.created_at, t.updated_at,
   t.pending_confirm_to, t.driver_confirmed_at, t.dispatcher_confirmed_at,
-  t.rating_from_driver, t.rating_from_dispatcher
+  t.rating_from_driver, t.rating_from_dispatcher,
+  t.rating_driver_to_dm, t.rating_dm_to_driver, t.rating_dm_to_cm, t.rating_cm_to_dm
 FROM trips t
 INNER JOIN cargo c ON c.id = t.cargo_id
 WHERE ` + where + ` ORDER BY ` + orderBy + ` ` + dir + ` LIMIT $` + strconv.Itoa(argN) + ` OFFSET $` + strconv.Itoa(argN+1)
@@ -527,7 +532,8 @@ func scanTripRows(rows pgx.Rows) ([]Trip, error) {
 			&t.AgreedPrice, &t.AgreedCurrency,
 			&t.CreatedAt, &t.UpdatedAt,
 			&t.PendingConfirmTo, &t.DriverConfirmedAt, &t.DispatcherConfirmedAt,
-			&t.RatingFromDriver, &t.RatingFromDispatcher)
+			&t.RatingFromDriver, &t.RatingFromDispatcher,
+			&t.RatingDriverToDM, &t.RatingDMToDriver, &t.RatingDMToCM, &t.RatingCMToDM)
 		if err != nil {
 			return nil, err
 		}

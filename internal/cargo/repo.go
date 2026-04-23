@@ -21,6 +21,11 @@ type Repo struct {
 	pg *pgxpool.Pool
 }
 
+type offerStore interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
 func NewRepo(pg *pgxpool.Pool) *Repo {
 	return &Repo{pg: pg}
 }
@@ -445,6 +450,7 @@ var ErrCargoNotSearching = errors.New("cargo: cargo not searching")
 var ErrCargoSlotsFull = errors.New("cargo: cargo has no vehicles_left")
 var ErrDispatcherOfferAlreadyExists = errors.New("cargo: pending dispatcher offer already exists for this cargo and driver")
 var ErrDriverOfferAlreadyExists = errors.New("cargo: driver already has a pending or accepted offer for this cargo")
+var ErrCargoManagerDMOfferAlreadyExists = errors.New("cargo: pending cargo manager to driver manager offer already exists")
 var ErrDriverBusy = errors.New("cargo: driver already has active cargo")
 var ErrOfferPriceOutOfRange = errors.New("cargo: offer price is out of NUMERIC(18,2) range")
 
@@ -1323,8 +1329,7 @@ func driverCargoOffersBucketWhere(bucket string) (string, error) {
 	}
 }
 
-// CreateOffer inserts an offer for a cargo. proposedBy: DRIVER | DISPATCHER | DRIVER_MANAGER.
-func (r *Repo) CreateOffer(ctx context.Context, cargoID, carrierID uuid.UUID, price float64, currency, comment, proposedBy string, proposedByID *uuid.UUID) (uuid.UUID, error) {
+func (r *Repo) createOffer(ctx context.Context, db offerStore, cargoID, carrierID uuid.UUID, price float64, currency, comment, proposedBy string, proposedByID *uuid.UUID) (uuid.UUID, error) {
 	if math.IsNaN(price) || math.IsInf(price, 0) || math.Abs(price) > maxOfferPriceNumeric18_2 {
 		return uuid.Nil, ErrOfferPriceOutOfRange
 	}
@@ -1333,7 +1338,7 @@ func (r *Repo) CreateOffer(ctx context.Context, cargoID, carrierID uuid.UUID, pr
 	}
 	var status CargoStatus
 	var vehiclesLeft int
-	if err := r.pg.QueryRow(ctx, `
+	if err := db.QueryRow(ctx, `
 SELECT status, COALESCE(vehicles_left, 0)
 FROM cargo
 WHERE id = $1 AND deleted_at IS NULL`, cargoID).Scan(&status, &vehiclesLeft); err != nil {
@@ -1350,7 +1355,7 @@ WHERE id = $1 AND deleted_at IS NULL`, cargoID).Scan(&status, &vehiclesLeft); er
 	}
 	if proposedBy == OfferProposedByDriver {
 		var driverDup bool
-		if err := r.pg.QueryRow(ctx, `
+		if err := db.QueryRow(ctx, `
 SELECT EXISTS(
   SELECT 1 FROM offers
   WHERE cargo_id = $1 AND carrier_id = $2
@@ -1365,7 +1370,7 @@ SELECT EXISTS(
 	}
 	if proposedBy == OfferProposedByDriverManager {
 		var managerDup bool
-		if err := r.pg.QueryRow(ctx, `
+		if err := db.QueryRow(ctx, `
 SELECT EXISTS(
   SELECT 1 FROM offers
   WHERE cargo_id = $1 AND carrier_id = $2
@@ -1380,7 +1385,7 @@ SELECT EXISTS(
 	}
 	if proposedBy == OfferProposedByDispatcher {
 		var alreadyExists bool
-		if err := r.pg.QueryRow(ctx, `
+		if err := db.QueryRow(ctx, `
 SELECT EXISTS(
   SELECT 1
   FROM offers
@@ -1394,14 +1399,69 @@ SELECT EXISTS(
 		}
 	}
 	var id uuid.UUID
-	err := r.pg.QueryRow(ctx, `
+	err := db.QueryRow(ctx, `
 INSERT INTO offers (cargo_id, carrier_id, price, currency, comment, status, proposed_by, proposed_by_id, created_at)
 VALUES ($1, $2, $3, $4, $5, 'PENDING', $6, $7, now()) RETURNING id`,
 		cargoID, carrierID, price, currency, nullStr(comment), proposedBy, proposedByID).Scan(&id)
 	return id, err
 }
 
+// CreateOffer inserts an offer for a cargo. proposedBy: DRIVER | DISPATCHER | DRIVER_MANAGER.
+func (r *Repo) CreateOffer(ctx context.Context, cargoID, carrierID uuid.UUID, price float64, currency, comment, proposedBy string, proposedByID *uuid.UUID) (uuid.UUID, error) {
+	return r.createOffer(ctx, r.pg, cargoID, carrierID, price, currency, comment, proposedBy, proposedByID)
+}
+
+// CreateOfferTx inserts an offer inside an existing transaction.
+func (r *Repo) CreateOfferTx(ctx context.Context, tx pgx.Tx, cargoID, carrierID uuid.UUID, price float64, currency, comment, proposedBy string, proposedByID *uuid.UUID) (uuid.UUID, error) {
+	return r.createOffer(ctx, tx, cargoID, carrierID, price, currency, comment, proposedBy, proposedByID)
+}
+
 func (r *Repo) CreateCargoManagerDMOffer(ctx context.Context, cargoID, cargoManagerID, driverManagerID uuid.UUID, price float64, currency, comment string) (uuid.UUID, error) {
+	if math.IsNaN(price) || math.IsInf(price, 0) || price <= 0 || math.Abs(price) > maxOfferPriceNumeric18_2 {
+		return uuid.Nil, ErrOfferPriceOutOfRange
+	}
+
+	tx, err := r.pg.Begin(ctx)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var status CargoStatus
+	var vehiclesLeft int
+	if err := tx.QueryRow(ctx, `
+SELECT status, COALESCE(vehicles_left, 0)
+FROM cargo
+WHERE id = $1 AND deleted_at IS NULL
+FOR UPDATE`, cargoID).Scan(&status, &vehiclesLeft); err != nil {
+		if err == pgx.ErrNoRows {
+			return uuid.Nil, ErrCargoNotFound
+		}
+		return uuid.Nil, err
+	}
+	if !IsSearching(status) {
+		return uuid.Nil, ErrCargoNotSearching
+	}
+	if vehiclesLeft <= 0 {
+		return uuid.Nil, ErrCargoSlotsFull
+	}
+
+	var dup bool
+	if err := tx.QueryRow(ctx, `
+SELECT EXISTS(
+	SELECT 1
+	FROM cargo_manager_dm_offers
+	WHERE cargo_id = $1
+	  AND cargo_manager_id = $2
+	  AND driver_manager_id = $3
+	  AND status = 'PENDING'
+)`, cargoID, cargoManagerID, driverManagerID).Scan(&dup); err != nil {
+		return uuid.Nil, err
+	}
+	if dup {
+		return uuid.Nil, ErrCargoManagerDMOfferAlreadyExists
+	}
+
 	var id uuid.UUID
 	cur := strings.ToUpper(strings.TrimSpace(currency))
 	if cur == "" {
@@ -1411,13 +1471,16 @@ func (r *Repo) CreateCargoManagerDMOffer(ctx context.Context, cargoID, cargoMana
 	if cmt == "" {
 		cmt = ""
 	}
-	err := r.pg.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 INSERT INTO cargo_manager_dm_offers (cargo_id, cargo_manager_id, driver_manager_id, price, currency, comment, status, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), 'PENDING', now(), now())
 RETURNING id`,
 		cargoID, cargoManagerID, driverManagerID, price, cur, cmt,
 	).Scan(&id)
-	return id, err
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return id, tx.Commit(ctx)
 }
 
 func (r *Repo) GetCargoManagerDMOfferByID(ctx context.Context, id uuid.UUID) (*CargoManagerDMOffer, error) {
@@ -1454,15 +1517,29 @@ WHERE id = $1`, id).Scan(
 	return &row, nil
 }
 
-func (r *Repo) AcceptCargoManagerDMOffer(ctx context.Context, reqID uuid.UUID, driverID uuid.UUID, offerID uuid.UUID) error {
-	_, err := r.pg.Exec(ctx, `
+func acceptCargoManagerDMOfferWithExec(ctx context.Context, db offerStore, reqID uuid.UUID, driverID uuid.UUID, offerID uuid.UUID) error {
+	tag, err := db.Exec(ctx, `
 UPDATE cargo_manager_dm_offers
 SET status = 'ACCEPTED',
     driver_id = $2,
     offer_id = $3,
     updated_at = now()
 WHERE id = $1 AND status = 'PENDING'`, reqID, driverID, offerID)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrOfferNotFoundOrNotPending
+	}
+	return nil
+}
+
+func (r *Repo) AcceptCargoManagerDMOffer(ctx context.Context, reqID uuid.UUID, driverID uuid.UUID, offerID uuid.UUID) error {
+	return acceptCargoManagerDMOfferWithExec(ctx, r.pg, reqID, driverID, offerID)
+}
+
+func (r *Repo) AcceptCargoManagerDMOfferTx(ctx context.Context, tx pgx.Tx, reqID uuid.UUID, driverID uuid.UUID, offerID uuid.UUID) error {
+	return acceptCargoManagerDMOfferWithExec(ctx, tx, reqID, driverID, offerID)
 }
 
 func (r *Repo) RejectCargoManagerDMOfferByDriverManager(ctx context.Context, reqID, driverManagerID uuid.UUID, reason string) error {
@@ -1960,7 +2037,7 @@ func (r *Repo) ListDriverOffersAll(ctx context.Context, driverID uuid.UUID, stat
 		argN++
 	}
 	args = append(args, limit, offset)
-q := `SELECT
+	q := `SELECT
   o.id, o.cargo_id, o.carrier_id, o.price, o.currency, o.comment, COALESCE(o.proposed_by, 'DRIVER') AS proposed_by, o.proposed_by_id, o.status, o.rejection_reason, o.created_at,
   c.status, c.name, rpf.city_code AS from_city_code, rpt.city_code AS to_city_code,
   COALESCE(c.vehicles_amount, 0), COALESCE(c.vehicles_left, 0),
@@ -2101,14 +2178,23 @@ FROM offers WHERE id = $1 AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')`, 
 
 // SetOfferStatusWaitingDriver sets offer status to WAITING_DRIVER_CONFIRM and records which dispatcher is the driver-manager counterpart (ratings + notifications).
 func (r *Repo) SetOfferStatusWaitingDriver(ctx context.Context, offerID uuid.UUID, negotiationDispatcherID *uuid.UUID) error {
+	return setOfferStatusWaitingDriverWithExec(ctx, r.pg, offerID, negotiationDispatcherID)
+}
+
+// SetOfferStatusWaitingDriverTx sets offer status inside an existing transaction.
+func (r *Repo) SetOfferStatusWaitingDriverTx(ctx context.Context, tx pgx.Tx, offerID uuid.UUID, negotiationDispatcherID *uuid.UUID) error {
+	return setOfferStatusWaitingDriverWithExec(ctx, tx, offerID, negotiationDispatcherID)
+}
+
+func setOfferStatusWaitingDriverWithExec(ctx context.Context, db offerStore, offerID uuid.UUID, negotiationDispatcherID *uuid.UUID) error {
 	var res pgconn.CommandTag
 	var err error
 	if negotiationDispatcherID != nil && *negotiationDispatcherID != uuid.Nil {
-		res, err = r.pg.Exec(ctx, `
+		res, err = db.Exec(ctx, `
 UPDATE offers SET status = 'WAITING_DRIVER_CONFIRM', negotiation_dispatcher_id = $2
 WHERE id = $1 AND status = 'PENDING'`, offerID, *negotiationDispatcherID)
 	} else {
-		res, err = r.pg.Exec(ctx, `
+		res, err = db.Exec(ctx, `
 UPDATE offers SET status = 'WAITING_DRIVER_CONFIRM'
 WHERE id = $1 AND status = 'PENDING'`, offerID)
 	}
@@ -2229,8 +2315,8 @@ func (r *Repo) GetOfferInvitationStats(ctx context.Context, cargoID uuid.UUID) (
 SELECT
   COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') IN ('DRIVER','DRIVER_MANAGER')),
   COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER'),
-  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') IN ('DRIVER','DRIVER_MANAGER') AND status = 'PENDING'),
-  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER' AND status = 'PENDING')
+  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') IN ('DRIVER','DRIVER_MANAGER') AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')),
+  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER' AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM'))
 FROM offers WHERE cargo_id = $1`, cargoID).Scan(
 		&s.IncomingTotal, &s.OutgoingTotal, &s.IncomingPending, &s.OutgoingPending)
 	return s, err
@@ -2243,8 +2329,8 @@ func (r *Repo) GetDriverOfferInvitationStats(ctx context.Context, driverID uuid.
 SELECT
   COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DRIVER'),
   COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER'),
-  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DRIVER' AND status = 'PENDING'),
-  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER' AND status = 'PENDING')
+  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DRIVER' AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')),
+  COUNT(*) FILTER (WHERE COALESCE(proposed_by,'DRIVER') = 'DISPATCHER' AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM'))
 FROM offers WHERE carrier_id = $1`, driverID).Scan(
 		&s.IncomingTotal, &s.OutgoingTotal, &s.IncomingPending, &s.OutgoingPending)
 	return s, err

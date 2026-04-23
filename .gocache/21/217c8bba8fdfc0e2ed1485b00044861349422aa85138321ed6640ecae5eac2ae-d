@@ -1,0 +1,7 @@
+./admins_schema.go
+./cargo_schema.go
+./chat_schema.go
+./companies_schema.go
+./infra.go
+./schema.go
+./trips_schema.go
