@@ -273,6 +273,22 @@ func (s *Service) SendByStreamRecipient(ctx context.Context, streamKind, recipie
 		if v, ok := msg["kind"].(string); ok && strings.TrimSpace(v) != "" {
 			data["kind"] = v
 		}
+		// Do not send Firebase push for own actions.
+		if v, ok := msg["actor_id"].(string); ok && strings.TrimSpace(v) != "" {
+			data["actor_id"] = strings.TrimSpace(v)
+			if actorID, err := uuid.Parse(strings.TrimSpace(v)); err == nil && actorID == recipientID {
+				if s.logger != nil {
+					s.logger.Info("push suppressed (self action)",
+						zap.String("stream_kind", streamKind),
+						zap.String("recipient_kind", recipientKind),
+						zap.String("recipient_id", recipientID.String()),
+						zap.String("actor_id", actorID.String()),
+						zap.String("payload_kind", firstNonEmpty(data["kind"], data["event_kind"], data["event"])),
+					)
+				}
+				return
+			}
+		}
 	}
 
 	// Business rule: the driver changes trip statuses themselves (IN_TRANSIT, DELIVERED,
@@ -340,10 +356,39 @@ func (s *Service) SendByChatUser(ctx context.Context, userID uuid.UUID, payload 
 	}
 	var env struct {
 		Type string `json:"type"`
-		Data any    `json:"data"`
+		Data map[string]any `json:"data"`
 	}
 	if len(payload) > 0 && json.Unmarshal(payload, &env) == nil {
 		data["type"] = env.Type
+		// Do not send Firebase push for own chat/call actions.
+		if env.Data != nil {
+			if rawSender, ok := env.Data["sender_id"].(string); ok && strings.TrimSpace(rawSender) != "" {
+				data["sender_id"] = strings.TrimSpace(rawSender)
+				if senderID, err := uuid.Parse(strings.TrimSpace(rawSender)); err == nil && senderID == userID {
+					if s.logger != nil {
+						s.logger.Info("push suppressed (chat self action)",
+							zap.String("user_id", userID.String()),
+							zap.String("type", env.Type),
+							zap.String("sender_id", senderID.String()),
+						)
+					}
+					return
+				}
+			}
+			if rawFrom, ok := env.Data["from_id"].(string); ok && strings.TrimSpace(rawFrom) != "" {
+				data["from_id"] = strings.TrimSpace(rawFrom)
+				if fromID, err := uuid.Parse(strings.TrimSpace(rawFrom)); err == nil && fromID == userID {
+					if s.logger != nil {
+						s.logger.Info("push suppressed (chat self action)",
+							zap.String("user_id", userID.String()),
+							zap.String("type", env.Type),
+							zap.String("from_id", fromID.String()),
+						)
+					}
+					return
+				}
+			}
+		}
 		switch {
 		case env.Type == "message":
 			body = "New message"

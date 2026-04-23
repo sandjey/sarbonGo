@@ -272,6 +272,12 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusUnauthorized, "refresh_token_already_used")
 			return
 		}
+		if h.drivers != nil {
+			if uid, err := uuid.Parse(strings.TrimSpace(claims.UserID)); err == nil && uid != uuid.Nil {
+				// Logout must clear FCM token on backend side.
+				_ = h.drivers.UpdatePushToken(c.Request.Context(), uid, "")
+			}
+		}
 		resp.OKLang(c, "ok", gin.H{"status": "ok"})
 		return
 	}
@@ -286,6 +292,10 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	_ = h.refresh.RevokeAll(c.Request.Context(), userID.String())
+	if h.drivers != nil {
+		// Logout must clear FCM token on backend side.
+		_ = h.drivers.UpdatePushToken(c.Request.Context(), userID, "")
+	}
 	resp.OKLang(c, "ok", gin.H{"status": "ok"})
 }
 
