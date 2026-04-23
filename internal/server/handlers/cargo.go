@@ -163,6 +163,20 @@ type WayPointReq struct {
 func (h *CargoHandler) Create(c *gin.Context) {
 	var req CreateCargoReq
 	var multipartPhotoFiles []*multipart.FileHeader
+	rawToken := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken))
+	if rawToken == "" || h.jwtm == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "missing_user_token")
+		return
+	}
+	authUserID, authRole, err := h.jwtm.ParseAccess(rawToken)
+	if err != nil || authUserID == uuid.Nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_user_token")
+		return
+	}
+	if authRole != "dispatcher" && authRole != "admin" {
+		resp.ErrorLang(c, http.StatusForbidden, "forbidden_role")
+		return
+	}
 
 	ct := strings.ToLower(c.ContentType())
 	if strings.Contains(ct, "multipart/form-data") {
@@ -286,48 +300,32 @@ func (h *CargoHandler) Create(c *gin.Context) {
 	if !h.cfg.CargoModerationEnabled {
 		params.Status = cargo.StatusSearchingAll
 	}
-	// Автоматически записываем, кто создал груз: admin, dispatcher или company
-	raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken))
-	if raw != "" && h.jwtm != nil {
-		if userID, role, err := h.jwtm.ParseAccess(raw); err == nil {
-			switch role {
-			case "admin":
-				params.CreatedByType = strPtr("ADMIN")
-				params.CreatedByID = &userID
-			case "dispatcher":
-				params.CreatedByType = strPtr("DISPATCHER")
-				params.CreatedByID = &userID
-				// Лимит грузов для фриланс-диспетчера (из env)
-				if h.cfg.FreelanceDispatcherCargoLimit > 0 {
-					count, err := h.repo.CountByDispatcher(c.Request.Context(), userID)
-					if err != nil {
-						h.logger.Error("cargo count by dispatcher", zap.Error(err))
-						resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_check_cargo_limit")
-						return
-					}
-					if count >= h.cfg.FreelanceDispatcherCargoLimit {
-						resp.ErrorWithData(c, http.StatusForbidden, "cargo limit reached for freelance dispatcher", gin.H{
-							"limit":   h.cfg.FreelanceDispatcherCargoLimit,
-							"current": count,
-						})
-						return
-					}
-				}
+	// Автоматически записываем, кто создал груз: admin или dispatcher.
+	switch authRole {
+	case "admin":
+		params.CreatedByType = strPtr("ADMIN")
+		params.CreatedByID = &authUserID
+	case "dispatcher":
+		params.CreatedByType = strPtr("DISPATCHER")
+		params.CreatedByID = &authUserID
+		// Лимит грузов для фриланс-диспетчера (из env)
+		if h.cfg.FreelanceDispatcherCargoLimit > 0 {
+			count, err := h.repo.CountByDispatcher(c.Request.Context(), authUserID)
+			if err != nil {
+				h.logger.Error("cargo count by dispatcher", zap.Error(err))
+				resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_check_cargo_limit")
+				return
+			}
+			if count >= h.cfg.FreelanceDispatcherCargoLimit {
+				resp.ErrorWithData(c, http.StatusForbidden, "cargo limit reached for freelance dispatcher", gin.H{
+					"limit":   h.cfg.FreelanceDispatcherCargoLimit,
+					"current": count,
+				})
+				return
 			}
 		}
 	}
-	// Если создатель не определён по JWT, но передан company_id — считаем создателем компанию
-	if params.CreatedByType == nil && req.CompanyID != nil {
-		params.CreatedByType = strPtr("COMPANY")
-		params.CreatedByID = req.CompanyID
-		params.CompanyID = req.CompanyID
-	}
-	var uploaderID *uuid.UUID
-	if raw := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken)); raw != "" && h.jwtm != nil {
-		if userID, _, err := h.jwtm.ParseAccess(raw); err == nil && userID != uuid.Nil {
-			uploaderID = &userID
-		}
-	}
+	uploaderID := &authUserID
 
 	id, err := h.repo.Create(c.Request.Context(), params)
 	if err != nil {

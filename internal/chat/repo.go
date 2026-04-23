@@ -124,12 +124,23 @@ SELECT
   lm.last_body,
   lm.last_created_at,
   COALESCE(pr.last_read_at, 'epoch'::timestamptz) AS peer_last_read_at,
-  (
-    SELECT COUNT(*)::int FROM chat_messages m2
-    WHERE m2.conversation_id = c.id AND m2.deleted_at IS NULL
-    AND m2.sender_id <> $1
-    AND m2.created_at > COALESCE(mr.last_read_at, 'epoch'::timestamptz)
-  ) AS unread_count
+  CASE
+    -- If last message is mine, unread_count should show how many of my messages
+    -- the peer has not read yet (outgoing unread for this dialog row).
+    WHEN lm.last_sender_id = $1 THEN (
+      SELECT COUNT(*)::int FROM chat_messages m2
+      WHERE m2.conversation_id = c.id AND m2.deleted_at IS NULL
+      AND m2.sender_id = $1
+      AND m2.created_at > COALESCE(pr.last_read_at, 'epoch'::timestamptz)
+    )
+    -- Otherwise keep classic incoming unread count for current user.
+    ELSE (
+      SELECT COUNT(*)::int FROM chat_messages m2
+      WHERE m2.conversation_id = c.id AND m2.deleted_at IS NULL
+      AND m2.sender_id <> $1
+      AND m2.created_at > COALESCE(mr.last_read_at, 'epoch'::timestamptz)
+    )
+  END AS unread_count
 FROM chat_conversations c
 LEFT JOIN LATERAL (
   SELECT m.id AS last_msg_id, m.sender_id AS last_sender_id, m.type AS last_type, m.body AS last_body, m.created_at AS last_created_at
