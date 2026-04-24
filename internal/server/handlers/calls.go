@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/calls"
 	"sarbonNew/internal/chat"
 	"sarbonNew/internal/server/mw"
@@ -19,16 +20,17 @@ import (
 
 // CallsHandler provides REST API for voice calls (session/state). Media is via WebRTC.
 type CallsHandler struct {
-	logger   *zap.Logger
-	calls    *calls.Repo
-	chatRepo *chat.Repo
-	hub      *chat.Hub
-	limiter  *calls.CreateLimiter
+	logger         *zap.Logger
+	calls          *calls.Repo
+	chatRepo       *chat.Repo
+	hub            *chat.Hub
+	limiter        *calls.CreateLimiter
 	ringingTimeout time.Duration
+	analytics      *adminanalytics.Tracker
 }
 
-func NewCallsHandler(logger *zap.Logger, callsRepo *calls.Repo, chatRepo *chat.Repo, hub *chat.Hub, limiter *calls.CreateLimiter, ringingTimeout time.Duration) *CallsHandler {
-	return &CallsHandler{logger: logger, calls: callsRepo, chatRepo: chatRepo, hub: hub, limiter: limiter, ringingTimeout: ringingTimeout}
+func NewCallsHandler(logger *zap.Logger, callsRepo *calls.Repo, chatRepo *chat.Repo, hub *chat.Hub, limiter *calls.CreateLimiter, ringingTimeout time.Duration, analytics *adminanalytics.Tracker) *CallsHandler {
+	return &CallsHandler{logger: logger, calls: callsRepo, chatRepo: chatRepo, hub: hub, limiter: limiter, ringingTimeout: ringingTimeout, analytics: analytics}
 }
 
 func (h *CallsHandler) userID(c *gin.Context) (uuid.UUID, bool) {
@@ -38,6 +40,15 @@ func (h *CallsHandler) userID(c *gin.Context) (uuid.UUID, bool) {
 	}
 	id, _ := v.(uuid.UUID)
 	return id, id != uuid.Nil
+}
+
+func (h *CallsHandler) analyticsRole(c *gin.Context, userID uuid.UUID) string {
+	if raw, ok := c.Get(mw.CtxUserRole); ok {
+		if role, ok2 := raw.(string); ok2 {
+			return adminanalytics.NormalizeRole(role)
+		}
+	}
+	return adminanalytics.RoleUnknown
 }
 
 // ListMyCalls GET /v1/calls
@@ -156,6 +167,23 @@ func (h *CallsHandler) CreateCall(c *gin.Context) {
 		raw, _ := jsonMarshal(payload)
 		h.hub.SendToUser(peerID, raw)
 	}
+	roleName := h.analyticsRole(c, userID)
+	convIDStr := ""
+	if call.ConversationID != nil {
+		convIDStr = call.ConversationID.String()
+	}
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventCallStarted,
+		UserID:     &userID,
+		ActorID:    &userID,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityCall,
+		EntityID:   &call.ID,
+		Metadata: map[string]any{
+			"callee_id":       peerID.String(),
+			"conversation_id": convIDStr,
+		},
+	})
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"call": call})
 }
 
@@ -269,6 +297,16 @@ func (h *CallsHandler) DeclineCall(c *gin.Context) {
 		return
 	}
 	notifyPeer(h.hub, call, "call.declined")
+	roleName := h.analyticsRole(c, userID)
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventCallEnded,
+		UserID:     &userID,
+		ActorID:    &userID,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityCall,
+		EntityID:   &call.ID,
+		Metadata:   map[string]any{"status": call.Status},
+	})
 	resp.OKLang(c, "ok", gin.H{"call": call})
 }
 
@@ -297,6 +335,16 @@ func (h *CallsHandler) CancelCall(c *gin.Context) {
 		return
 	}
 	notifyPeer(h.hub, call, "call.cancelled")
+	roleName := h.analyticsRole(c, userID)
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventCallEnded,
+		UserID:     &userID,
+		ActorID:    &userID,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityCall,
+		EntityID:   &call.ID,
+		Metadata:   map[string]any{"status": call.Status},
+	})
 	resp.OKLang(c, "ok", gin.H{"call": call})
 }
 
@@ -329,6 +377,16 @@ func (h *CallsHandler) EndCall(c *gin.Context) {
 		return
 	}
 	notifyPeer(h.hub, call, "call.ended")
+	roleName := h.analyticsRole(c, userID)
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventCallEnded,
+		UserID:     &userID,
+		ActorID:    &userID,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityCall,
+		EntityID:   &call.ID,
+		Metadata:   map[string]any{"status": call.Status},
+	})
 	resp.OKLang(c, "ok", gin.H{"call": call})
 }
 
@@ -362,4 +420,3 @@ func notifyPeer(hub *chat.Hub, call *calls.Call, eventType string) {
 	hub.SendToUser(call.CallerID, raw)
 	hub.SendToUser(call.CalleeID, raw)
 }
-

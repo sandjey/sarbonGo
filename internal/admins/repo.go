@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -35,3 +36,19 @@ LIMIT 1`
 	return &a, nil
 }
 
+func (r *Repo) FindByID(ctx context.Context, id uuid.UUID) (*Admin, error) {
+	const q = `
+SELECT id, login, password, name, status, type
+FROM admins
+WHERE id = $1
+LIMIT 1`
+	var a Admin
+	err := r.pg.QueryRow(ctx, q, id).Scan(&a.ID, &a.Login, &a.Password, &a.Name, &a.Status, &a.Type)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &a, nil
+}

@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/chat"
 	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/drivers"
@@ -46,13 +47,14 @@ type ChatHandler struct {
 	hub         *chat.Hub
 	drivers     *drivers.Repo
 	dispatchers *dispatchers.Repo
+	analytics   *adminanalytics.Tracker
 	// test hooks for file endpoint
 	getAttachmentForUserFn func(ctx context.Context, attachmentID, userID uuid.UUID) (*chat.Attachment, error)
 	getMediaFileByIDFn     func(ctx context.Context, id uuid.UUID) (*chat.MediaFile, error)
 }
 
-func NewChatHandler(logger *zap.Logger, repo *chat.Repo, presence *chat.PresenceStore, hub *chat.Hub, drv *drivers.Repo, disp *dispatchers.Repo) *ChatHandler {
-	h := &ChatHandler{logger: logger, repo: repo, presence: presence, hub: hub, drivers: drv, dispatchers: disp}
+func NewChatHandler(logger *zap.Logger, repo *chat.Repo, presence *chat.PresenceStore, hub *chat.Hub, drv *drivers.Repo, disp *dispatchers.Repo, analytics *adminanalytics.Tracker) *ChatHandler {
+	h := &ChatHandler{logger: logger, repo: repo, presence: presence, hub: hub, drivers: drv, dispatchers: disp, analytics: analytics}
 	hub.SetOnTyping(func(conversationID, fromUserID uuid.UUID) (uuid.UUID, bool) {
 		ctx := context.Background()
 		conv, err := repo.GetConversation(ctx, conversationID, fromUserID)
@@ -112,6 +114,23 @@ func (h *ChatHandler) getUserID(c *gin.Context) (uuid.UUID, bool) {
 	}
 	id, _ := v.(uuid.UUID)
 	return id, id != uuid.Nil
+}
+
+func (h *ChatHandler) analyticsRoleForChat(c *gin.Context, userID uuid.UUID) string {
+	if c == nil {
+		return adminanalytics.RoleUnknown
+	}
+	if raw, ok := c.Get(mw.CtxUserRole); ok {
+		if role, ok2 := raw.(string); ok2 {
+			if strings.EqualFold(role, "dispatcher") {
+				if mr, err := currentDispatcherManagerRole(c.Request.Context(), h.dispatchers, userID); err == nil && strings.TrimSpace(mr) != "" {
+					return adminanalytics.NormalizeRole(mr)
+				}
+			}
+			return adminanalytics.NormalizeRole(role)
+		}
+	}
+	return adminanalytics.RoleUnknown
 }
 
 func (h *ChatHandler) getAttachmentForUser(ctx context.Context, attachmentID, userID uuid.UUID) (*chat.Attachment, error) {
@@ -492,7 +511,7 @@ func (h *ChatHandler) GetOrCreateConversation(c *gin.Context) {
 	peerID = conv.PeerID(userID)
 	resp.OKLang(c, "ok", gin.H{
 		"id":         conv.ID,
-		"peer_id":   peerID,
+		"peer_id":    peerID,
 		"created_at": conv.CreatedAt,
 	})
 }
@@ -610,6 +629,19 @@ func (h *ChatHandler) SendMessage(c *gin.Context) {
 		msg.Type = chat.CanonicalMessageTypeForAPI(msg.Type)
 		h.markDeliveredIfPeerOnline(c.Request.Context(), conv, msg)
 		h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
+		roleName := h.analyticsRoleForChat(c, userID)
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventChatMessageSent,
+			UserID:     &userID,
+			ActorID:    &userID,
+			Role:       roleName,
+			EntityType: adminanalytics.EntityChatMessage,
+			EntityID:   &msg.ID,
+			Metadata: map[string]any{
+				"conversation_id": convID.String(),
+				"message_type":    msg.Type,
+			},
+		})
 		resp.SuccessLang(c, http.StatusCreated, "ok", msg)
 	case chat.MsgTypeImg, chat.MsgTypeAudio, chat.MsgTypeVideo, chat.MsgTypeVideoNote:
 		sha := strings.ToLower(strings.TrimSpace(req.SHA256))
@@ -980,18 +1012,18 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 	}
 	rel := storeRel
 	attID, err := h.repo.CreateAttachment(c.Request.Context(), chat.Attachment{
-		MessageID:      nil,
-		ConversationID: convID,
-		UploaderID:     userID,
-		Kind:           msgType,
-		Mime:           mime,
-		SizeBytes:      sizeBytes,
-		Path:           rel,
-		ThumbPath:      thumbRel,
-		Width:          width,
-		Height:         height,
-		DurationMs:     durationMs,
-		MediaFileID:    &mediaID,
+		MessageID:        nil,
+		ConversationID:   convID,
+		UploaderID:       userID,
+		Kind:             msgType,
+		Mime:             mime,
+		SizeBytes:        sizeBytes,
+		Path:             rel,
+		ThumbPath:        thumbRel,
+		Width:            width,
+		Height:           height,
+		DurationMs:       durationMs,
+		MediaFileID:      &mediaID,
 		ThumbMediaFileID: thumbMediaID,
 	})
 	if err != nil {
@@ -1046,6 +1078,19 @@ func (h *ChatHandler) SendMediaMessage(c *gin.Context) {
 
 	h.markDeliveredIfPeerOnline(c.Request.Context(), conv, msg)
 	h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
+	roleName := h.analyticsRoleForChat(c, userID)
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventChatMessageSent,
+		UserID:     &userID,
+		ActorID:    &userID,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityChatMessage,
+		EntityID:   &msg.ID,
+		Metadata: map[string]any{
+			"conversation_id": convID.String(),
+			"message_type":    msg.Type,
+		},
+	})
 	resp.SuccessLang(c, http.StatusCreated, "ok", msg)
 }
 
@@ -1135,6 +1180,19 @@ func (h *ChatHandler) sendFromSourceMapping(c *gin.Context, conv *chat.Conversat
 
 	h.markDeliveredIfPeerOnline(ctx, conv, msg)
 	h.hub.BroadcastMessage(conv.UserAID, conv.UserBID, msg)
+	roleName := h.analyticsRoleForChat(c, userID)
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventChatMessageSent,
+		UserID:     &userID,
+		ActorID:    &userID,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityChatMessage,
+		EntityID:   &msg.ID,
+		Metadata: map[string]any{
+			"conversation_id": convID.String(),
+			"message_type":    msg.Type,
+		},
+	})
 	resp.SuccessLang(c, http.StatusCreated, "ok", msg)
 	return true
 }

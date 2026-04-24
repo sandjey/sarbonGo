@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/config"
 	"sarbonNew/internal/dispatchers"
@@ -63,9 +64,10 @@ type CargoHandler struct {
 	jwtm        *security.JWTManager
 	cfg         config.Config
 	stream      *userstream.Hub
+	analytics   *adminanalytics.Tracker
 }
 
-func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, dispatchersRepo *dispatchers.Repo, driversRepo *drivers.Repo, fav *favorites.Repo, jwtm *security.JWTManager, cfg config.Config, stream *userstream.Hub) *CargoHandler {
+func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo, dispatchersRepo *dispatchers.Repo, driversRepo *drivers.Repo, fav *favorites.Repo, jwtm *security.JWTManager, cfg config.Config, stream *userstream.Hub, analytics *adminanalytics.Tracker) *CargoHandler {
 	return &CargoHandler{
 		logger:      logger,
 		repo:        repo,
@@ -76,6 +78,7 @@ func NewCargoHandler(logger *zap.Logger, repo *cargo.Repo, tripsRepo *trips.Repo
 		jwtm:        jwtm,
 		cfg:         cfg,
 		stream:      stream,
+		analytics:   analytics,
 	}
 }
 
@@ -386,6 +389,26 @@ func (h *CargoHandler) Create(c *gin.Context) {
 		}
 	}
 	// Возвращаем полный объект груза (как GET /api/cargo/:id), чтобы клиент видел все сохранённые данные
+	roleName := adminanalytics.RoleAdmin
+	if authRole == "dispatcher" {
+		roleName = adminanalytics.RoleCargoManager
+		if mr, rerr := currentDispatcherManagerRole(c.Request.Context(), h.dispatchers, authUserID); rerr == nil && strings.TrimSpace(mr) != "" {
+			roleName = adminanalytics.NormalizeRole(mr)
+		}
+	}
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventCargoCreated,
+		UserID:     &authUserID,
+		ActorID:    &authUserID,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityCargo,
+		EntityID:   &id,
+		Metadata: map[string]any{
+			"vehicles_amount":    req.VehiclesAmount,
+			"power_plate_type":   req.PowerPlateType,
+			"trailer_plate_type": req.TrailerPlateType,
+		},
+	})
 	obj, err := h.repo.GetByID(c.Request.Context(), id, false)
 	if err != nil || obj == nil {
 		resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"id": id.String()})
@@ -1244,6 +1267,34 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 			}
 		}
 	}
+	var eventActorID *uuid.UUID
+	var eventRole string
+	switch proposedBy {
+	case cargo.OfferProposedByDriver:
+		eventActorID = &req.CarrierID
+		eventRole = adminanalytics.RoleDriver
+	case cargo.OfferProposedByDispatcher:
+		eventActorID = pByID
+		eventRole = adminanalytics.RoleCargoManager
+	case cargo.OfferProposedByDriverManager:
+		eventActorID = pByID
+		eventRole = adminanalytics.RoleDriverManager
+	}
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventOfferCreated,
+		UserID:     eventActorID,
+		ActorID:    eventActorID,
+		Role:       eventRole,
+		EntityType: adminanalytics.EntityOffer,
+		EntityID:   &offerID,
+		Metadata: map[string]any{
+			"cargo_id":    id.String(),
+			"carrier_id":  req.CarrierID.String(),
+			"proposed_by": proposedBy,
+			"currency":    req.Currency,
+			"price":       req.Price,
+		},
+	})
 	resp.SuccessLang(c, http.StatusCreated, "created", gin.H{"id": offerID.String()})
 }
 
@@ -2376,6 +2427,34 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		offer = updatedOffer
 	}
 	if tripID != uuid.Nil {
+		actorRole := adminanalytics.NormalizeRole(role)
+		if role == "dispatcher" {
+			actorRole = adminanalytics.NormalizeRole(dispatcherManagerRole)
+		}
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventOfferAccepted,
+			UserID:     &userID,
+			ActorID:    &userID,
+			Role:       actorRole,
+			EntityType: adminanalytics.EntityOffer,
+			EntityID:   &offerID,
+			Metadata: map[string]any{
+				"cargo_id": cargoID.String(),
+				"trip_id":  tripID.String(),
+			},
+		})
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventTripStarted,
+			UserID:     &userID,
+			ActorID:    &userID,
+			Role:       actorRole,
+			EntityType: adminanalytics.EntityTrip,
+			EntityID:   &tripID,
+			Metadata: map[string]any{
+				"cargo_id": cargoID.String(),
+				"offer_id": offerID.String(),
+			},
+		})
 		if h.stream != nil && h.tripsRepo != nil {
 			if tr, err := h.tripsRepo.GetByID(c.Request.Context(), tripID); err == nil && tr != nil {
 				cg, _ := h.repo.GetByID(c.Request.Context(), cargoID, false)
@@ -2545,6 +2624,30 @@ func (h *CargoHandler) DriverConfirmOffer(c *gin.Context) {
 			resp.ErrorWithDataLang(c, http.StatusInternalServerError, "internal_error", mergeGinH(gin.H{"reason": "commit_failed", "offer_id": offerID.String()}, pgDebugFields(err)))
 			return
 		}
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventOfferAccepted,
+			UserID:     &driverID,
+			ActorID:    &driverID,
+			Role:       adminanalytics.RoleDriver,
+			EntityType: adminanalytics.EntityOffer,
+			EntityID:   &offerID,
+			Metadata: map[string]any{
+				"cargo_id": cargoID.String(),
+				"trip_id":  tripID.String(),
+			},
+		})
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventTripStarted,
+			UserID:     &driverID,
+			ActorID:    &driverID,
+			Role:       adminanalytics.RoleDriver,
+			EntityType: adminanalytics.EntityTrip,
+			EntityID:   &tripID,
+			Metadata: map[string]any{
+				"cargo_id": cargoID.String(),
+				"offer_id": offerID.String(),
+			},
+		})
 
 		if h.stream != nil {
 			if tr, err := h.tripsRepo.GetByID(c.Request.Context(), tripID); err == nil && tr != nil {

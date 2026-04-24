@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/admins"
 	"sarbonNew/internal/approles"
 	"sarbonNew/internal/appusers"
@@ -149,21 +150,25 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger, logHub 
 	dispResetActions := store.NewDispatcherOTPActionStore(deps.Redis, cfg.JWTSigningKey, "disp_reset", cfg.OTPTTL, cfg.OTPMaxAttempts)
 	dispPhoneActions := store.NewDispatcherOTPActionStore(deps.Redis, cfg.JWTSigningKey, "disp_phone", cfg.OTPTTL, cfg.OTPMaxAttempts)
 
-	authH := handlers.NewAuthHandler(logger, driversRepo, otpStore, sessionStore, refreshStore, jwtm, tgClient, cfg.OTPTTL, cfg.OTPLength)
-	regH := handlers.NewRegistrationHandler(logger, driversRepo, displayNameChecker, sessionStore, jwtm, refreshStore)
+	adminAnalyticsRepo := adminanalytics.NewRepo(deps.PG)
+	adminAnalyticsTracker := adminanalytics.NewTracker(adminAnalyticsRepo, logger, cfg.JWTSigningKey)
+
+	authH := handlers.NewAuthHandler(logger, driversRepo, otpStore, sessionStore, refreshStore, jwtm, tgClient, adminAnalyticsTracker, cfg.OTPTTL, cfg.OTPLength)
+	regH := handlers.NewRegistrationHandler(logger, driversRepo, displayNameChecker, sessionStore, jwtm, refreshStore, adminAnalyticsTracker)
 	kycH := handlers.NewKYCHandler(logger, driversRepo)
 	userStreamHub := userstream.NewHub()
 	profileH := handlers.NewProfileHandler(logger, driversRepo, displayNameChecker, phoneChangeStore, tgClient, cfg.OTPTTL, cfg.OTPLength, userStreamHub)
 
-	dispAuthH := handlers.NewDispatcherAuthHandler(logger, dispatchersRepo, otpStore, dispRegSessions, dispResetActions, jwtm, refreshStore, tgClient, cfg.OTPTTL, cfg.OTPLength)
-	dispRegH := handlers.NewDispatcherRegistrationHandler(logger, dispatchersRepo, displayNameChecker, dispRegSessions, jwtm, refreshStore)
+	dispAuthH := handlers.NewDispatcherAuthHandler(logger, dispatchersRepo, otpStore, dispRegSessions, dispResetActions, jwtm, refreshStore, tgClient, adminAnalyticsTracker, cfg.OTPTTL, cfg.OTPLength)
+	dispRegH := handlers.NewDispatcherRegistrationHandler(logger, dispatchersRepo, displayNameChecker, dispRegSessions, jwtm, refreshStore, adminAnalyticsTracker)
 	dispProfileH := handlers.NewDispatcherProfileHandler(logger, dispatchersRepo, displayNameChecker, dispPhoneActions, tgClient, cfg.OTPTTL, cfg.OTPLength)
-	adminAuthH := handlers.NewAdminAuthHandler(logger, adminsRepo, jwtm, refreshStore)
-	adminCompaniesH := handlers.NewAdminCompaniesHandler(logger, companiesRepo, appusersRepo, cfg)
-	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, dispatchersRepo, driversRepo, favRepo, jwtm, cfg, userStreamHub)
+	adminAuthH := handlers.NewAdminAuthHandler(logger, adminsRepo, jwtm, refreshStore, adminAnalyticsTracker)
+	adminCompaniesH := handlers.NewAdminCompaniesHandler(logger, companiesRepo, appusersRepo, cfg, adminAnalyticsTracker)
+	cargoH := handlers.NewCargoHandler(logger, cargoRepo, tripsRepo, dispatchersRepo, driversRepo, favRepo, jwtm, cfg, userStreamHub, adminAnalyticsTracker)
 	dispCargoExportH := handlers.NewDispatcherCargoExportHandler(logger, cargoRepo)
 	dispAnalyticsH := handlers.NewDispatcherAnalyticsHandler(logger, deps.PG, dispatchersRepo)
-	adminCargoModH := handlers.NewAdminCargoModerationHandler(logger, cargoRepo)
+	adminCargoModH := handlers.NewAdminCargoModerationHandler(logger, cargoRepo, adminAnalyticsTracker)
+	adminAnalyticsH := handlers.NewAdminAnalyticsHandler(logger, adminAnalyticsRepo)
 	dispCompaniesH := handlers.NewDispatcherCompaniesHandler(logger, companiesRepo, dcrRepo, jwtm)
 	dispInvH := handlers.NewDispatcherInvitationsHandler(logger, dispInvRepo, dcrRepo, dispatchersRepo)
 	d2dInvRepo := drivertodispatcherinvitations.NewRepo(deps.PG)
@@ -173,7 +178,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger, logHub 
 	driverDispH := handlers.NewDriverDispatchersHandler(logger, driversRepo, dispatchersRepo, dcrRepo)
 	driverDispCatalogH := handlers.NewDriverDispatchersCatalogHandler(logger, dispatchersRepo)
 	d2dInvH := handlers.NewDriverToDispatcherInvitationsHandler(logger, d2dInvRepo, driversRepo, dispatchersRepo, userStreamHub)
-	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo, dispatchersRepo, tripNotifRepo, tripRatingRepo, userStreamHub)
+	tripsH := handlers.NewTripsHandler(logger, tripsRepo, cargoRepo, driversRepo, dispatchersRepo, tripNotifRepo, tripRatingRepo, userStreamHub, adminAnalyticsTracker)
 	sseH := handlers.NewSSEStreamsHandler(userStreamHub)
 	// dispatcherUnifiedSSEH is initialised below (after chatHub) because it needs both hubs.
 
@@ -186,7 +191,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger, logHub 
 	chatRepo := chat.NewRepo(deps.PG)
 	chatPresence := chat.NewPresenceStore(deps.Redis)
 	chatHub := chat.NewHub(chatPresence, logger)
-	chatH := handlers.NewChatHandler(logger, chatRepo, chatPresence, chatHub, driversRepo, dispatchersRepo)
+	chatH := handlers.NewChatHandler(logger, chatRepo, chatPresence, chatHub, driversRepo, dispatchersRepo, adminAnalyticsTracker)
 	dispatcherUnifiedSSEH := handlers.NewDispatcherUnifiedSSEHandler(userStreamHub, chatHub)
 	pushTokensH := handlers.NewPushTokensHandler(logger, driversRepo, dispatchersRepo)
 	pushSvc, err := push.New(context.Background(), cfg, logger, driversRepo, dispatchersRepo)
@@ -217,7 +222,7 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger, logHub 
 
 	callsRepo := calls.NewRepo(deps.PG)
 	callsLimiter := calls.NewCreateLimiter(deps.Redis, cfg.CallsCreateLimit, cfg.CallsCreateWindow)
-	callsH := handlers.NewCallsHandler(logger, callsRepo, chatRepo, chatHub, callsLimiter, cfg.CallsRingingTimeout)
+	callsH := handlers.NewCallsHandler(logger, callsRepo, chatRepo, chatHub, callsLimiter, cfg.CallsRingingTimeout, adminAnalyticsTracker)
 	chatHub.SetOnUserConnected(func(userID uuid.UUID) {
 		// WS reconnect recovery: clear stale call state for this user.
 		list, err := callsRepo.ListOngoingForUser(context.Background(), userID)
@@ -362,6 +367,24 @@ func NewRouter(cfg config.Config, deps *infra.Infra, logger *zap.Logger, logHub 
 	adminAuthed.POST("/push/send", pushAdminH.SendTest)
 	adminAuthed.GET("/push/recipient-status", pushAdminH.RecipientStatus)
 	adminAuthed.POST("/push/send-by-recipient", pushAdminH.SendByRecipient)
+	adminAnalytics := adminAuthed.Group("")
+	adminAnalytics.Use(mw.RequireAdminCreator(adminsRepo))
+	adminAnalytics.GET("/dashboard", adminAnalyticsH.Dashboard)
+	adminAnalytics.GET("/metrics", adminAnalyticsH.Metrics)
+	adminAnalytics.GET("/users", adminAnalyticsH.ListUsers)
+	adminAnalytics.GET("/users/:id", adminAnalyticsH.GetUser)
+	adminAnalytics.GET("/users/:id/logins", adminAnalyticsH.ListUserLogins)
+	adminAnalytics.GET("/funnels", adminAnalyticsH.Funnels)
+	adminAnalytics.GET("/dropoff", adminAnalyticsH.Dropoff)
+	adminAnalytics.GET("/retention", adminAnalyticsH.Retention)
+	adminAnalytics.GET("/flows/time", adminAnalyticsH.FlowTime)
+	adminAnalytics.GET("/flows/conversion", adminAnalyticsH.FlowConversion)
+	adminAnalytics.GET("/chats", adminAnalyticsH.ListChats)
+	adminAnalytics.GET("/chats/:chat_id/messages", adminAnalyticsH.ListChatMessages)
+	adminAnalytics.GET("/calls", adminAnalyticsH.ListCalls)
+	adminAnalytics.GET("/calls/:id", adminAnalyticsH.GetCall)
+	adminAnalytics.GET("/geo", adminAnalyticsH.Geo)
+	adminAnalytics.GET("/geo/realtime", adminAnalyticsH.GeoRealtime)
 
 	driverAuthed := v1.Group("/driver")
 	driverAuthed.Use(mw.RequireDriver(jwtm, refreshStore))

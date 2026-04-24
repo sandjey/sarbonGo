@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/security"
 	"sarbonNew/internal/server/resp"
@@ -28,9 +29,10 @@ type DispatcherAuthHandler struct {
 	regSessions  *store.DispatcherSessionStore
 	resetActions *store.DispatcherOTPActionStore
 
-	jwtm    *security.JWTManager
-	refresh *store.RefreshStore
-	tg      *telegram.GatewayClient
+	jwtm      *security.JWTManager
+	refresh   *store.RefreshStore
+	tg        *telegram.GatewayClient
+	analytics *adminanalytics.Tracker
 
 	otpTTL time.Duration
 	otpLen int
@@ -45,6 +47,7 @@ func NewDispatcherAuthHandler(
 	jwtm *security.JWTManager,
 	refresh *store.RefreshStore,
 	tg *telegram.GatewayClient,
+	analytics *adminanalytics.Tracker,
 	otpTTL time.Duration,
 	otpLen int,
 ) *DispatcherAuthHandler {
@@ -57,6 +60,7 @@ func NewDispatcherAuthHandler(
 		jwtm:         jwtm,
 		refresh:      refresh,
 		tg:           tg,
+		analytics:    analytics,
 		otpTTL:       otpTTL,
 		otpLen:       otpLen,
 	}
@@ -131,6 +135,13 @@ func (h *DispatcherAuthHandler) VerifyOTP(c *gin.Context) {
 
 	_, err = h.otp.Verify(c.Request.Context(), dispOTPNamespace+phone, otp)
 	if err != nil {
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginFailed,
+			EventTime:  time.Now().UTC(),
+			Role:       "dispatcher",
+			EntityType: adminanalytics.EntityUser,
+			Metadata:   map[string]any{"login_method": "otp", "phone": phone},
+		})
 		switch {
 		case errors.Is(err, store.ErrOTPExpired):
 			resp.ErrorLang(c, http.StatusUnauthorized, "otp_expired")
@@ -158,6 +169,26 @@ func (h *DispatcherAuthHandler) VerifyOTP(c *gin.Context) {
 		}
 		_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 		_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
+		roleName := adminanalytics.NormalizeRole(derefString(d.ManagerRole))
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginSuccess,
+			UserID:     &id,
+			ActorID:    &id,
+			Role:       roleName,
+			EntityType: adminanalytics.EntityUser,
+			EntityID:   &id,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"login_method": "otp"},
+		})
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventSessionStarted,
+			UserID:     &id,
+			ActorID:    &id,
+			Role:       roleName,
+			EntityType: adminanalytics.EntitySession,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"auth_method": "otp"},
+		})
 		resp.OKLang(c, "login", gin.H{"status": "login", "tokens": tokens})
 		return
 	}
@@ -194,10 +225,28 @@ func (h *DispatcherAuthHandler) LoginPassword(c *gin.Context) {
 	}
 	d, err := h.repo.FindByPhone(c.Request.Context(), phone)
 	if err != nil {
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginFailed,
+			EventTime:  time.Now().UTC(),
+			Role:       "dispatcher",
+			EntityType: adminanalytics.EntityUser,
+			Metadata:   map[string]any{"login_method": "password", "phone": phone},
+		})
 		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_phone_or_password")
 		return
 	}
 	if !util.ComparePassword(d.Password, req.Password) {
+		id, _ := uuid.Parse(d.ID)
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginFailed,
+			EventTime:  time.Now().UTC(),
+			UserID:     &id,
+			ActorID:    &id,
+			Role:       adminanalytics.NormalizeRole(derefString(d.ManagerRole)),
+			EntityType: adminanalytics.EntityUser,
+			EntityID:   &id,
+			Metadata:   map[string]any{"login_method": "password"},
+		})
 		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_phone_or_password")
 		return
 	}
@@ -209,6 +258,26 @@ func (h *DispatcherAuthHandler) LoginPassword(c *gin.Context) {
 	}
 	_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 	_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
+	roleName := adminanalytics.NormalizeRole(derefString(d.ManagerRole))
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventLoginSuccess,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityUser,
+		EntityID:   &id,
+		SessionID:  refreshClaims.JTI,
+		Metadata:   map[string]any{"login_method": "password"},
+	})
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventSessionStarted,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       roleName,
+		EntityType: adminanalytics.EntitySession,
+		SessionID:  refreshClaims.JTI,
+		Metadata:   map[string]any{"auth_method": "password"},
+	})
 	resp.OKLang(c, "login", gin.H{"status": "login", "tokens": tokens})
 }
 
@@ -332,6 +401,7 @@ func (h *DispatcherAuthHandler) Logout(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusUnauthorized, "refresh_token_already_used")
 			return
 		}
+		h.analytics.SafeEndSession(c.Request.Context(), claims.JTI, nil, claims.Role, map[string]any{"reason": "logout_by_refresh"})
 		if h.repo != nil {
 			if uid, err := uuid.Parse(strings.TrimSpace(claims.UserID)); err == nil && uid != uuid.Nil {
 				// Logout must clear FCM token on backend side.
@@ -343,7 +413,7 @@ func (h *DispatcherAuthHandler) Logout(c *gin.Context) {
 	}
 
 	// logout по access_token — отзываем все сессии этого диспетчера
-	userID, role, err := h.jwtm.ParseAccess(accessToken)
+	userID, role, _, sid, err := h.jwtm.ParseAccessWithSID(accessToken)
 	if err != nil {
 		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_or_expired_access_token")
 		return
@@ -353,6 +423,7 @@ func (h *DispatcherAuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	_ = h.refresh.RevokeAll(c.Request.Context(), userID.String())
+	h.analytics.SafeEndSession(c.Request.Context(), sid, &userID, role, map[string]any{"reason": "logout_by_access_revoke_all"})
 	if h.repo != nil {
 		// Logout must clear FCM token on backend side.
 		_ = h.repo.UpdatePushToken(c.Request.Context(), userID, "")

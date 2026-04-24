@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/displaynames"
 	"sarbonNew/internal/security"
@@ -24,10 +25,11 @@ type DispatcherRegistrationHandler struct {
 	sessions    *store.DispatcherSessionStore
 	jwtm        *security.JWTManager
 	refresh     *store.RefreshStore
+	analytics   *adminanalytics.Tracker
 }
 
-func NewDispatcherRegistrationHandler(logger *zap.Logger, repo *dispatchers.Repo, displayName *displaynames.Checker, sessions *store.DispatcherSessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore) *DispatcherRegistrationHandler {
-	return &DispatcherRegistrationHandler{logger: logger, repo: repo, displayName: displayName, sessions: sessions, jwtm: jwtm, refresh: refresh}
+func NewDispatcherRegistrationHandler(logger *zap.Logger, repo *dispatchers.Repo, displayName *displaynames.Checker, sessions *store.DispatcherSessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore, analytics *adminanalytics.Tracker) *DispatcherRegistrationHandler {
+	return &DispatcherRegistrationHandler{logger: logger, repo: repo, displayName: displayName, sessions: sessions, jwtm: jwtm, refresh: refresh, analytics: analytics}
 }
 
 type dispCompleteReq struct {
@@ -72,6 +74,26 @@ func (h *DispatcherRegistrationHandler) Complete(c *gin.Context) {
 		}
 		_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 		_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
+		roleName := adminanalytics.NormalizeRole(derefString(existing.ManagerRole))
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginSuccess,
+			UserID:     &id,
+			ActorID:    &id,
+			Role:       roleName,
+			EntityType: adminanalytics.EntityUser,
+			EntityID:   &id,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"login_method": "registration_idempotent"},
+		})
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventSessionStarted,
+			UserID:     &id,
+			ActorID:    &id,
+			Role:       roleName,
+			EntityType: adminanalytics.EntitySession,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"auth_method": "registration_idempotent"},
+		})
 		resp.OKLang(c, "login", gin.H{"status": "login", "tokens": tokens, "dispatcher": existing})
 		return
 	}
@@ -153,6 +175,35 @@ func (h *DispatcherRegistrationHandler) Complete(c *gin.Context) {
 	}
 	_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 	_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
+	roleName := adminanalytics.NormalizeRole(role)
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventUserRegistered,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityUser,
+		EntityID:   &id,
+		Metadata:   map[string]any{"registration_source": "dispatcher"},
+	})
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventLoginSuccess,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       roleName,
+		EntityType: adminanalytics.EntityUser,
+		EntityID:   &id,
+		SessionID:  refreshClaims.JTI,
+		Metadata:   map[string]any{"login_method": "registration"},
+	})
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventSessionStarted,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       roleName,
+		EntityType: adminanalytics.EntitySession,
+		SessionID:  refreshClaims.JTI,
+		Metadata:   map[string]any{"auth_method": "registration"},
+	})
 
 	disp, err := h.repo.FindByID(c.Request.Context(), id)
 	if err != nil {

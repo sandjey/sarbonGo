@@ -29,6 +29,34 @@ Notes:
 - In Docker mode, `DATABASE_URL` and `REDIS_ADDR` are overridden to internal service names (`postgres`, `redis`).
 - `.env` is required for both local run and Docker run.
 
+## Admin Analytics API
+
+Creator admins now have a dedicated analytics backend under `/v1/admin/*`:
+
+- `GET /v1/admin/dashboard`
+- `GET /v1/admin/metrics`
+- `GET /v1/admin/users`
+- `GET /v1/admin/users/:id`
+- `GET /v1/admin/users/:id/logins`
+- `GET /v1/admin/funnels`
+- `GET /v1/admin/dropoff`
+- `GET /v1/admin/retention`
+- `GET /v1/admin/flows/time`
+- `GET /v1/admin/flows/conversion`
+- `GET /v1/admin/chats`
+- `GET /v1/admin/chats/:chat_id/messages`
+- `GET /v1/admin/calls`
+- `GET /v1/admin/calls/:id`
+- `GET /v1/admin/geo`
+- `GET /v1/admin/geo/realtime`
+
+Rules:
+
+- access is restricted to `admin.type=creator`
+- every endpoint accepts `from`, `to`, `tz`
+- every response includes `time_window` and `generated_at_utc`
+- analytics events are persisted in `analytics_events`, with session/login rollups in `sessions` and `user_login_stats`
+
 ## Run without Docker
 
 If you want to run API directly on host:

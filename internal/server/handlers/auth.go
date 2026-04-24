@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/drivers"
 	"sarbonNew/internal/security"
 	"sarbonNew/internal/server/resp"
@@ -21,12 +22,13 @@ import (
 type AuthHandler struct {
 	logger *zap.Logger
 
-	drivers *drivers.Repo
-	otp     *store.OTPStore
-	sessions *store.SessionStore
-	refresh *store.RefreshStore
-	jwtm    *security.JWTManager
-	tg      *telegram.GatewayClient
+	drivers   *drivers.Repo
+	otp       *store.OTPStore
+	sessions  *store.SessionStore
+	refresh   *store.RefreshStore
+	jwtm      *security.JWTManager
+	tg        *telegram.GatewayClient
+	analytics *adminanalytics.Tracker
 
 	otpTTL time.Duration
 	otpLen int
@@ -40,19 +42,21 @@ func NewAuthHandler(
 	refreshStore *store.RefreshStore,
 	jwtm *security.JWTManager,
 	tg *telegram.GatewayClient,
+	analytics *adminanalytics.Tracker,
 	otpTTL time.Duration,
 	otpLen int,
 ) *AuthHandler {
 	return &AuthHandler{
-		logger:  logger,
-		drivers: driversRepo,
-		otp:     otpStore,
-		sessions: sessionStore,
-		refresh: refreshStore,
-		jwtm:    jwtm,
-		tg:      tg,
-		otpTTL:  otpTTL,
-		otpLen:  otpLen,
+		logger:    logger,
+		drivers:   driversRepo,
+		otp:       otpStore,
+		sessions:  sessionStore,
+		refresh:   refreshStore,
+		jwtm:      jwtm,
+		tg:        tg,
+		analytics: analytics,
+		otpTTL:    otpTTL,
+		otpLen:    otpLen,
 	}
 }
 
@@ -135,6 +139,16 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 
 	rec, err := h.otp.Verify(c.Request.Context(), normalizedPhone, otp)
 	if err != nil {
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginFailed,
+			EventTime:  time.Now().UTC(),
+			Role:       adminanalytics.RoleDriver,
+			EntityType: adminanalytics.EntityUser,
+			Metadata: map[string]any{
+				"login_method": "otp",
+				"phone":        normalizedPhone,
+			},
+		})
 		switch {
 		case errors.Is(err, store.ErrOTPExpired):
 			resp.ErrorLang(c, http.StatusUnauthorized, "otp_expired")
@@ -162,6 +176,25 @@ func (h *AuthHandler) VerifyOTP(c *gin.Context) {
 		}
 		_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 		_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginSuccess,
+			UserID:     &driverUUID,
+			ActorID:    &driverUUID,
+			Role:       adminanalytics.RoleDriver,
+			EntityType: adminanalytics.EntityUser,
+			EntityID:   &driverUUID,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"login_method": "otp"},
+		})
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventSessionStarted,
+			UserID:     &driverUUID,
+			ActorID:    &driverUUID,
+			Role:       adminanalytics.RoleDriver,
+			EntityType: adminanalytics.EntitySession,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"auth_method": "otp"},
+		})
 
 		resp.OKLang(c, "login", gin.H{
 			"status": "login",
@@ -219,6 +252,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_or_expired_refresh_token")
 		return
 	}
+	h.analytics.SafeEndSession(c.Request.Context(), claims.JTI, nil, claims.Role, map[string]any{"reason": "refresh"})
 	// rotate: old jti must exist
 	if err := h.refresh.Consume(c.Request.Context(), claims.UserID, claims.JTI); err != nil {
 		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_or_expired_refresh_token")
@@ -272,6 +306,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 			resp.ErrorLang(c, http.StatusUnauthorized, "refresh_token_already_used")
 			return
 		}
+		h.analytics.SafeEndSession(c.Request.Context(), claims.JTI, nil, claims.Role, map[string]any{"reason": "logout_by_refresh"})
 		if h.drivers != nil {
 			if uid, err := uuid.Parse(strings.TrimSpace(claims.UserID)); err == nil && uid != uuid.Nil {
 				// Logout must clear FCM token on backend side.
@@ -282,7 +317,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 
-	userID, role, err := h.jwtm.ParseAccess(accessToken)
+	userID, role, _, sid, err := h.jwtm.ParseAccessWithSID(accessToken)
 	if err != nil {
 		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_or_expired_access_token")
 		return
@@ -292,6 +327,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 		return
 	}
 	_ = h.refresh.RevokeAll(c.Request.Context(), userID.String())
+	h.analytics.SafeEndSession(c.Request.Context(), sid, &userID, role, map[string]any{"reason": "logout_by_access_revoke_all"})
 	if h.drivers != nil {
 		// Logout must clear FCM token on backend side.
 		_ = h.drivers.UpdatePushToken(c.Request.Context(), userID, "")
@@ -310,5 +346,3 @@ func isJWTFormat(s string) bool {
 	}
 	return n == jwtParts-1
 }
-
-

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/cargo"
 	"sarbonNew/internal/dispatchers"
 	"sarbonNew/internal/drivers"
@@ -33,10 +34,11 @@ type TripsHandler struct {
 	notif       *tripnotif.Repo
 	rating      *triprating.Repo
 	stream      *userstream.Hub
+	analytics   *adminanalytics.Tracker
 }
 
-func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo, dispatchersRepo *dispatchers.Repo, notif *tripnotif.Repo, rating *triprating.Repo, stream *userstream.Hub) *TripsHandler {
-	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo, drivers: driversRepo, dispatchers: dispatchersRepo, notif: notif, rating: rating, stream: stream}
+func NewTripsHandler(logger *zap.Logger, repo *trips.Repo, cargoRepo *cargo.Repo, driversRepo *drivers.Repo, dispatchersRepo *dispatchers.Repo, notif *tripnotif.Repo, rating *triprating.Repo, stream *userstream.Hub, analytics *adminanalytics.Tracker) *TripsHandler {
+	return &TripsHandler{logger: logger, repo: repo, cargoRepo: cargoRepo, drivers: driversRepo, dispatchers: dispatchersRepo, notif: notif, rating: rating, stream: stream, analytics: analytics}
 }
 
 func dispatcherOwnsCargo(c *cargo.Cargo, dispatcherID uuid.UUID, companyID *uuid.UUID) bool {
@@ -717,6 +719,27 @@ func (h *TripsHandler) runConfirmTransition(c *gin.Context, asDispatcher bool) {
 		actorID = c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
 	} else {
 		actorID = driverID
+	}
+	if tr.Status == trips.StatusCompleted {
+		actorRole := adminanalytics.RoleDriver
+		if asDispatcher {
+			actorRole = adminanalytics.RoleCargoManager
+			if dispRole, err := currentDispatcherManagerRole(ctx, h.dispatchers, actorID); err == nil && strings.TrimSpace(dispRole) != "" {
+				actorRole = adminanalytics.NormalizeRole(dispRole)
+			}
+		}
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventTripCompleted,
+			UserID:     &actorID,
+			ActorID:    &actorID,
+			Role:       actorRole,
+			EntityType: adminanalytics.EntityTrip,
+			EntityID:   &tr.ID,
+			Metadata: map[string]any{
+				"cargo_id": tr.CargoID.String(),
+				"offer_id": tr.OfferID.String(),
+			},
+		})
 	}
 	h.notifyTripTransition(ctx, tBefore, tr, actorID)
 	out := h.tripRespWithManagers(ctx, tr)

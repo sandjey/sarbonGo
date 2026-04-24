@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/displaynames"
 	"sarbonNew/internal/domain"
 	"sarbonNew/internal/drivers"
@@ -25,9 +26,10 @@ type RegistrationHandler struct {
 	sessions    *store.SessionStore
 	jwtm        *security.JWTManager
 	refresh     *store.RefreshStore
+	analytics   *adminanalytics.Tracker
 }
 
-func NewRegistrationHandler(logger *zap.Logger, driversRepo *drivers.Repo, displayName *displaynames.Checker, sessions *store.SessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore) *RegistrationHandler {
+func NewRegistrationHandler(logger *zap.Logger, driversRepo *drivers.Repo, displayName *displaynames.Checker, sessions *store.SessionStore, jwtm *security.JWTManager, refresh *store.RefreshStore, analytics *adminanalytics.Tracker) *RegistrationHandler {
 	return &RegistrationHandler{
 		logger:      logger,
 		drivers:     driversRepo,
@@ -35,6 +37,7 @@ func NewRegistrationHandler(logger *zap.Logger, driversRepo *drivers.Repo, displ
 		sessions:    sessions,
 		jwtm:        jwtm,
 		refresh:     refresh,
+		analytics:   analytics,
 	}
 }
 
@@ -88,6 +91,25 @@ func (h *RegistrationHandler) Start(c *gin.Context) {
 		}
 		_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 		_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventLoginSuccess,
+			UserID:     &driverUUID,
+			ActorID:    &driverUUID,
+			Role:       adminanalytics.RoleDriver,
+			EntityType: adminanalytics.EntityUser,
+			EntityID:   &driverUUID,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"login_method": "registration_idempotent"},
+		})
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventSessionStarted,
+			UserID:     &driverUUID,
+			ActorID:    &driverUUID,
+			Role:       adminanalytics.RoleDriver,
+			EntityType: adminanalytics.EntitySession,
+			SessionID:  refreshClaims.JTI,
+			Metadata:   map[string]any{"auth_method": "registration_idempotent"},
+		})
 
 		resp.OKLang(c, "ok", gin.H{
 			"status": "login",
@@ -127,6 +149,34 @@ func (h *RegistrationHandler) Start(c *gin.Context) {
 	}
 	_ = h.refresh.Put(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
 	_ = h.refresh.PutSession(c.Request.Context(), refreshClaims.UserID, refreshClaims.JTI)
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventUserRegistered,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       adminanalytics.RoleDriver,
+		EntityType: adminanalytics.EntityUser,
+		EntityID:   &id,
+		Metadata:   map[string]any{"registration_source": "driver"},
+	})
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventLoginSuccess,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       adminanalytics.RoleDriver,
+		EntityType: adminanalytics.EntityUser,
+		EntityID:   &id,
+		SessionID:  refreshClaims.JTI,
+		Metadata:   map[string]any{"login_method": "registration"},
+	})
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventSessionStarted,
+		UserID:     &id,
+		ActorID:    &id,
+		Role:       adminanalytics.RoleDriver,
+		EntityType: adminanalytics.EntitySession,
+		SessionID:  refreshClaims.JTI,
+		Metadata:   map[string]any{"auth_method": "registration"},
+	})
 
 	drv, err := h.drivers.FindByID(c.Request.Context(), id)
 	if err != nil {
@@ -135,18 +185,18 @@ func (h *RegistrationHandler) Start(c *gin.Context) {
 		return
 	}
 	resp.OKLang(c, "ok", gin.H{
-		"status":               "registered",
-		"tokens":               tokens,
-		"driver":               drv,
-		"registration_status":  domain.StatusStart,
-		"registration_step":    domain.StepNameOferta,
+		"status":              "registered",
+		"tokens":              tokens,
+		"driver":              drv,
+		"registration_status": domain.StatusStart,
+		"registration_step":   domain.StepNameOferta,
 	})
 }
 
 type geoReq struct {
 	Latitude  *float64 `json:"latitude"`
 	Longitude *float64 `json:"longitude"`
-	PushToken *string `json:"push_token,omitempty"`
+	PushToken *string  `json:"push_token,omitempty"`
 }
 
 func (h *RegistrationHandler) GeoPush(c *gin.Context) {
@@ -207,11 +257,11 @@ func (h *RegistrationHandler) GeoPush(c *gin.Context) {
 }
 
 type transportReq struct {
-	DriverType      string  `json:"driver_type" binding:"required"`       // company|freelancer|driver
-	PowerPlateType  string  `json:"power_plate_type" binding:"required"`  // required for completing step
-	TrailerPlateType string `json:"trailer_plate_type" binding:"required"` // required for completing step
-	FreelancerID    *string `json:"freelancer_id,omitempty"`              // uuid (optional)
-	CompanyID       *string `json:"company_id,omitempty"`                 // uuid (optional)
+	DriverType       string  `json:"driver_type" binding:"required"`        // company|freelancer|driver
+	PowerPlateType   string  `json:"power_plate_type" binding:"required"`   // required for completing step
+	TrailerPlateType string  `json:"trailer_plate_type" binding:"required"` // required for completing step
+	FreelancerID     *string `json:"freelancer_id,omitempty"`               // uuid (optional)
+	CompanyID        *string `json:"company_id,omitempty"`                  // uuid (optional)
 }
 
 func (h *RegistrationHandler) TransportType(c *gin.Context) {
@@ -289,4 +339,3 @@ func (h *RegistrationHandler) TransportType(c *gin.Context) {
 	}
 	resp.OKLang(c, "ok", gin.H{"status": "ok", "driver": updated})
 }
-

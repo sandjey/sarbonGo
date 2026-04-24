@@ -47,6 +47,8 @@ tags:
 - name: Legacy / Deprecated
 - name: Cargo Manager / Analytics
 - name: Driver Manager / Analytics
+- name: Admin / Analytics
+  description: Creator-only analytics endpoints for the main admin dashboard, funnels, drill-down, chats, calls and geo monitoring.
 components:
   securitySchemes:
     DeviceTypeHeader:
@@ -14290,6 +14292,723 @@ paths:
           description: forbidden (role is not DRIVER_MANAGER)
         '500':
           description: internal_error
+  /v1/admin/dashboard:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Admin analytics dashboard
+      description: Creator-only dashboard with KPI, funnel, growth, geography and alerts. Every response includes `time_window` and `generated_at_utc`.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Window start. Supports RFC3339 or `YYYY-MM-DD`. Default is 30 days before now.
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Window end. Supports RFC3339 or `YYYY-MM-DD`. Default is now.
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      responses:
+        '200':
+          description: Dashboard payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+              examples:
+                dashboard:
+                  value:
+                    status: success
+                    code: 200
+                    description: ok
+                    data:
+                      time_window:
+                        from: '2026-03-25T00:00:00Z'
+                        to: '2026-04-24T00:00:00Z'
+                        tz: UTC
+                      generated_at_utc: '2026-04-24T09:00:00Z'
+                      data:
+                        kpi:
+                          cargo_count: 320
+                          offer_count: 1180
+                          trip_count: 210
+                          completed_trip_count: 170
+                          cancelled_trip_count: 18
+                          completion_rate_pct: 80.95
+                        funnel:
+                          stages:
+                          - stage: cargo
+                            count: 320
+                          - stage: offer
+                            count: 1180
+                        alerts: []
+        '400':
+          description: invalid_payload_detail
+        '401':
+          description: invalid_user_token
+        '403':
+          description: forbidden (admin creator only)
+  /v1/admin/metrics:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Universal analytics metrics
+      description: Universal metrics endpoint with grouping by time, role or user.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: metrics
+        in: query
+        required: false
+        schema:
+          type: string
+          example: cargo_count,offer_count,trip_count,completed_trip_count
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [time, role, user]
+          default: time
+      - name: interval
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [hour, day, week, month]
+          default: day
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Metrics payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (admin creator only)
+  /v1/admin/users:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: List users for admin analytics
+      description: Unified users list across drivers, cargo managers, driver managers and admins with filtering, sorting and pagination.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: sort_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [registered_at, last_seen_at, display_name, role]
+          default: registered_at
+      - name: sort_dir
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Users page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '403':
+          description: forbidden (admin creator only)
+  /v1/admin/users/{id}:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Get user analytics profile
+      description: Drill-down into one user with business counters and authentication statistics.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: User analytics profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '404':
+          description: user_not_found
+  /v1/admin/users/{id}/logins:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: List user login sessions
+      description: Returns recent login sessions and session durations for a specific user.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: User login sessions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/funnels:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Funnel analytics
+      description: Funnel for Cargo → Offer → Trip → Completed with conversion and drop-off.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Funnel payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/dropoff:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Drop-off analytics
+      description: Drop-off between main business stages.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Drop-off payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/retention:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Retention analytics
+      description: Cohort retention based on post-registration activity.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Retention payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/flows/time:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Flow timing analytics
+      description: Average, median and p95 for registration/login/offer/trip timing chains.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      responses:
+        '200':
+          description: Flow timing payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/flows/conversion:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Flow conversion analytics
+      description: Conversion percentages between major operational stages.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Flow conversion payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/chats:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: List chats for admin monitoring
+      description: Conversation list for drill-down into user communications.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Chats page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/chats/{chat_id}/messages:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: List chat messages for admin monitoring
+      description: Returns messages for a specific conversation.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: chat_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Chat messages page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/calls:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: List calls for admin monitoring
+      description: Returns call sessions with status, duration, caller and callee.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Calls page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/calls/{id}:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Get call detail for admin monitoring
+      description: Returns one call with timeline events and duration.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Call detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+        '404':
+          description: call_not_found
+  /v1/admin/geo:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Geo analytics
+      description: Aggregated geo activity from analytics events.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      responses:
+        '200':
+          description: Geo analytics payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
+  /v1/admin/geo/realtime:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Realtime geo analytics
+      description: Near realtime online users by role and last known geo city.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      responses:
+        '200':
+          description: Realtime geo payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Envelope'
   /v1/dispatchers/analytics/driver-manager/export.xlsx:
     get:
       tags:

@@ -9,19 +9,22 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/cargo"
+	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 )
 
 // AdminCargoModerationHandler handles admin moderation of cargo (accept → searching, reject with reason).
 type AdminCargoModerationHandler struct {
-	logger *zap.Logger
-	repo   *cargo.Repo
+	logger    *zap.Logger
+	repo      *cargo.Repo
+	analytics *adminanalytics.Tracker
 }
 
 // NewAdminCargoModerationHandler creates the handler.
-func NewAdminCargoModerationHandler(logger *zap.Logger, repo *cargo.Repo) *AdminCargoModerationHandler {
-	return &AdminCargoModerationHandler{logger: logger, repo: repo}
+func NewAdminCargoModerationHandler(logger *zap.Logger, repo *cargo.Repo, analytics *adminanalytics.Tracker) *AdminCargoModerationHandler {
+	return &AdminCargoModerationHandler{logger: logger, repo: repo, analytics: analytics}
 }
 
 // ListPending returns cargo list with status pending_moderation.
@@ -93,6 +96,19 @@ func (h *AdminCargoModerationHandler) Accept(c *gin.Context) {
 	if visibility == cargo.SearchVisibilityCompany {
 		status = cargo.StatusSearchingCompany
 	}
+	if rawAdminID, ok := c.Get(mw.CtxAdminID); ok {
+		if adminID, ok2 := rawAdminID.(uuid.UUID); ok2 && adminID != uuid.Nil {
+			h.analytics.SafeTrack(c, adminanalytics.EventInput{
+				EventName:  adminanalytics.EventAdminAction,
+				UserID:     &adminID,
+				ActorID:    &adminID,
+				Role:       adminanalytics.RoleAdmin,
+				EntityType: adminanalytics.EntityCargo,
+				EntityID:   &cargoID,
+				Metadata:   map[string]any{"action": "cargo_moderation_accept", "status": status},
+			})
+		}
+	}
 	resp.OKLang(c, "ok", gin.H{"status": status})
 }
 
@@ -114,6 +130,19 @@ func (h *AdminCargoModerationHandler) Reject(c *gin.Context) {
 	if err := h.repo.ModerationReject(c.Request.Context(), cargoID, req.Reason); err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "cargo_not_pending_moderation")
 		return
+	}
+	if rawAdminID, ok := c.Get(mw.CtxAdminID); ok {
+		if adminID, ok2 := rawAdminID.(uuid.UUID); ok2 && adminID != uuid.Nil {
+			h.analytics.SafeTrack(c, adminanalytics.EventInput{
+				EventName:  adminanalytics.EventAdminAction,
+				UserID:     &adminID,
+				ActorID:    &adminID,
+				Role:       adminanalytics.RoleAdmin,
+				EntityType: adminanalytics.EntityCargo,
+				EntityID:   &cargoID,
+				Metadata:   map[string]any{"action": "cargo_moderation_reject"},
+			})
+		}
 	}
 	resp.OKLang(c, "ok", gin.H{"status": cargo.StatusCancelled})
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"sarbonNew/internal/adminanalytics"
 	"sarbonNew/internal/appusers"
 	"sarbonNew/internal/companies"
 	"sarbonNew/internal/config"
@@ -20,14 +21,15 @@ import (
 //        2) PATCH /v1/admin/companies/:id/owner — привязать владельца из company_users.
 
 type AdminCompaniesHandler struct {
-	logger   *zap.Logger
-	repo     *companies.Repo
+	logger    *zap.Logger
+	repo      *companies.Repo
 	usersRepo *appusers.Repo
-	cfg      config.Config
+	cfg       config.Config
+	analytics *adminanalytics.Tracker
 }
 
-func NewAdminCompaniesHandler(logger *zap.Logger, repo *companies.Repo, usersRepo *appusers.Repo, cfg config.Config) *AdminCompaniesHandler {
-	return &AdminCompaniesHandler{logger: logger, repo: repo, usersRepo: usersRepo, cfg: cfg}
+func NewAdminCompaniesHandler(logger *zap.Logger, repo *companies.Repo, usersRepo *appusers.Repo, cfg config.Config, analytics *adminanalytics.Tracker) *AdminCompaniesHandler {
+	return &AdminCompaniesHandler{logger: logger, repo: repo, usersRepo: usersRepo, cfg: cfg, analytics: analytics}
 }
 
 type adminCreateCompanyReq struct {
@@ -120,6 +122,14 @@ func (h *AdminCompaniesHandler) Create(c *gin.Context) {
 		return
 	}
 
+	h.analytics.SafeTrack(c, adminanalytics.EventInput{
+		EventName:  adminanalytics.EventAdminAction,
+		UserID:     &adminID,
+		ActorID:    &adminID,
+		Role:       adminanalytics.RoleAdmin,
+		EntityType: "company",
+		Metadata:   map[string]any{"action": "company_created"},
+	})
 	resp.OKLang(c, "created", gin.H{"company_id": id})
 }
 
@@ -176,6 +186,18 @@ func (h *AdminCompaniesHandler) SetOwner(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
+	rawAdminID, _ := c.Get(mw.CtxAdminID)
+	if adminID, ok := rawAdminID.(uuid.UUID); ok && adminID != uuid.Nil {
+		h.analytics.SafeTrack(c, adminanalytics.EventInput{
+			EventName:  adminanalytics.EventAdminAction,
+			UserID:     &adminID,
+			ActorID:    &adminID,
+			Role:       adminanalytics.RoleAdmin,
+			EntityType: "company",
+			EntityID:   &companyID,
+			Metadata:   map[string]any{"action": "company_owner_set", "owner_id": ownerID.String()},
+		})
+	}
 	resp.OKLang(c, "ok", gin.H{"status": "ok", "message": "owner set, status set to active"})
 }
 
@@ -196,16 +218,15 @@ func (h *AdminCompaniesHandler) SearchOwners(c *gin.Context) {
 	out := make([]gin.H, 0, len(list))
 	for _, u := range list {
 		out = append(out, gin.H{
-			"id":          u.ID,
-			"phone":       u.Phone,
+			"id":         u.ID,
+			"phone":      u.Phone,
 			"first_name": u.FirstName,
-			"last_name":   u.LastName,
-			"company_id":  u.CompanyID,
-			"role":        u.Role,
-			"created_at":  u.CreatedAt,
-			"updated_at":  u.UpdatedAt,
+			"last_name":  u.LastName,
+			"company_id": u.CompanyID,
+			"role":       u.Role,
+			"created_at": u.CreatedAt,
+			"updated_at": u.UpdatedAt,
 		})
 	}
 	resp.OKLang(c, "ok", out)
 }
-
