@@ -340,6 +340,12 @@ func (h *CargoHandler) Create(c *gin.Context) {
 
 	id, err := h.repo.Create(c.Request.Context(), params)
 	if err != nil {
+		if errors.Is(err, cargo.ErrReadyAtNotAllowedWhenReadyEnabledTrue) {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
+				"fields": gin.H{"ready_at": "not_allowed_when_ready_enabled_true"},
+			})
+			return
+		}
 		// Turn FK violations into 400 with a clear field name.
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
@@ -991,6 +997,10 @@ func (h *CargoHandler) GetByID(c *gin.Context) {
 	}
 	obj, err := h.repo.GetByID(c.Request.Context(), id, false)
 	if err != nil {
+		if errors.Is(err, cargo.ErrCargoNotFound) {
+			resp.ErrorLang(c, http.StatusNotFound, "cargo_not_found")
+			return
+		}
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_get_cargo")
 		return
 	}
@@ -1250,6 +1260,14 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 		h.logger.Error("cargo create offer", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
 		return
+	}
+	// Cargo manager -> driver offer must always wait for driver confirmation.
+	if proposedBy == cargo.OfferProposedByDispatcher {
+		if err := h.repo.SetOfferStatusWaitingDriver(c.Request.Context(), offerID, nil); err != nil {
+			h.logger.Error("cargo create offer: set waiting driver failed", zap.Error(err), zap.String("offer_id", offerID.String()))
+			resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_offer")
+			return
+		}
 	}
 	if h.stream != nil {
 		if proposedBy == cargo.OfferProposedByDispatcher {
@@ -1796,6 +1814,21 @@ func (h *CargoHandler) DriverCreateOffer(c *gin.Context) {
 }
 
 func (h *CargoHandler) ListOffers(c *gin.Context) {
+	rawToken := strings.TrimSpace(c.GetHeader(mw.HeaderUserToken))
+	if rawToken == "" || h.jwtm == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "missing_user_token")
+		return
+	}
+	_, role, err := h.jwtm.ParseAccess(rawToken)
+	if err != nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "invalid_user_token")
+		return
+	}
+	if role != "dispatcher" && role != "admin" {
+		resp.ErrorLang(c, http.StatusForbidden, "forbidden_role")
+		return
+	}
+
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_id")
@@ -1908,9 +1941,6 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 	payload := gin.H{
 		"items":           items,
 		"counterparty_id": counterpartyID,
-	}
-	if status != "" {
-		payload["status"] = status
 	}
 	if direction != "" {
 		payload["direction"] = direction
@@ -2150,10 +2180,6 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
 		return
 	}
-	if offer.Status != "PENDING" {
-		resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
-		return
-	}
 	proposedBy := offer.ProposedBy
 	if proposedBy == "" {
 		proposedBy = cargo.OfferProposedByDriver
@@ -2200,6 +2226,10 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 	}
 	switch proposedBy {
 	case cargo.OfferProposedByDriver:
+		if offer.Status != cargo.OfferStatusPending {
+			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
+			return
+		}
 		if role != "dispatcher" {
 			resp.ErrorLang(c, http.StatusForbidden, "only_dispatcher_accepts_driver_offer")
 			return
@@ -2223,6 +2253,10 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 			return
 		}
 	case cargo.OfferProposedByDriverManager:
+		if offer.Status != cargo.OfferStatusPending {
+			resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
+			return
+		}
 		if role != "dispatcher" {
 			resp.ErrorLang(c, http.StatusForbidden, "only_dispatcher_accepts_driver_offer")
 			return
@@ -2289,12 +2323,20 @@ func (h *CargoHandler) AcceptOffer(c *gin.Context) {
 		// Cargo Manager (DISPATCHER) proposed price TO Driver (CarrierID).
 		// Either the driver personally accepts it, or their Manager accepts it.
 		if role == "driver" {
+			if offer.Status != cargo.OfferStatusPending && offer.Status != cargo.OfferStatusWaitingDriverConfirm {
+				resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
+				return
+			}
 			if userID != offer.CarrierID {
 				resp.ErrorLang(c, http.StatusForbidden, "not_your_offer")
 				return
 			}
 			// Driver accepts personally -> proceed to AcceptOffer (Trip creation).
 		} else if role == "dispatcher" {
+			if offer.Status != cargo.OfferStatusPending {
+				resp.ErrorLang(c, http.StatusNotFound, "offer_not_found_or_not_pending")
+				return
+			}
 			if acceptAsCargoManager {
 				resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 				return
@@ -3156,6 +3198,15 @@ func (h *CargoHandler) ListCargoNegotiation(c *gin.Context) {
 		} else {
 			item["waits_accept_from"] = "DRIVER"
 		}
+		if h.drivers != nil {
+			if drv, _ := h.drivers.FindByID(c.Request.Context(), o.CarrierID); drv != nil {
+				item["driver"] = gin.H{
+					"id":    drv.ID,
+					"phone": drv.Phone,
+					"name":  drv.Name,
+				}
+			}
+		}
 		if t := tripByOffer[o.ID]; t != nil {
 			item["trip_id"] = t.ID.String()
 			item["trip_status"] = t.Status
@@ -3301,6 +3352,17 @@ func validateCargoCreate(req CreateCargoReq) error {
 		}
 	}
 	if req.Payment != nil {
+		if req.Payment.WithPrepayment {
+			if req.Payment.PrepaymentAmount == nil {
+				return errors.New("payment.prepayment_amount is required when payment.with_prepayment is true")
+			}
+			if req.Payment.PrepaymentCurrency == nil || strings.TrimSpace(*req.Payment.PrepaymentCurrency) == "" {
+				return errors.New("payment.prepayment_currency is required when payment.with_prepayment is true")
+			}
+			if req.Payment.PrepaymentType == nil || strings.TrimSpace(*req.Payment.PrepaymentType) == "" {
+				return errors.New("payment.prepayment_type is required when payment.with_prepayment is true")
+			}
+		}
 		if !req.Payment.PriceRequest && req.Payment.TotalAmount == nil {
 			return errors.New("total_amount or price_request required in payment")
 		}
@@ -3375,6 +3437,17 @@ func validateCargoUpdate(req UpdateCargoReq) error {
 		}
 	}
 	if req.Payment != nil {
+		if req.Payment.WithPrepayment {
+			if req.Payment.PrepaymentAmount == nil {
+				return errors.New("payment.prepayment_amount is required when payment.with_prepayment is true")
+			}
+			if req.Payment.PrepaymentCurrency == nil || strings.TrimSpace(*req.Payment.PrepaymentCurrency) == "" {
+				return errors.New("payment.prepayment_currency is required when payment.with_prepayment is true")
+			}
+			if req.Payment.PrepaymentType == nil || strings.TrimSpace(*req.Payment.PrepaymentType) == "" {
+				return errors.New("payment.prepayment_type is required when payment.with_prepayment is true")
+			}
+		}
 		if req.Payment.TotalCurrency != nil && *req.Payment.TotalCurrency != "" && !reference.IsAllowed(*req.Payment.TotalCurrency, reference.AllowedCurrencies()) {
 			return errors.New("payment.total_currency must be from reference GET /v1/reference/cargo → currency")
 		}

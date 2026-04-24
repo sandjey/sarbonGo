@@ -192,6 +192,9 @@ type PaymentInput struct {
 
 // Create creates cargo, route_points and payment in a transaction.
 func (r *Repo) Create(ctx context.Context, p CreateParams) (uuid.UUID, error) {
+	if p.ReadyEnabled && p.ReadyAt != nil && strings.TrimSpace(*p.ReadyAt) != "" {
+		return uuid.Nil, ErrReadyAtNotAllowedWhenReadyEnabledTrue
+	}
 	tx, err := r.pg.Begin(ctx)
 	if err != nil {
 		return uuid.Nil, err
@@ -287,7 +290,14 @@ WHERE c.id = $1`
 	if !includeDeleted {
 		q += ` AND c.deleted_at IS NULL`
 	}
-	return scanCargo(r.pg.QueryRow(ctx, q, id))
+	cg, err := scanCargo(r.pg.QueryRow(ctx, q, id))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return cg, nil
 }
 
 // GetRoutePoints returns route points for a cargo.
@@ -448,6 +458,7 @@ var ErrOfferNotFoundOrNotPending = errors.New("cargo: offer not found or not pen
 var ErrCargoNotFound = errors.New("cargo: cargo not found")
 var ErrCargoNotSearching = errors.New("cargo: cargo not searching")
 var ErrCargoSlotsFull = errors.New("cargo: cargo has no vehicles_left")
+var ErrReadyAtNotAllowedWhenReadyEnabledTrue = errors.New("cargo: ready_at not allowed when ready_enabled is true")
 var ErrDispatcherOfferAlreadyExists = errors.New("cargo: pending dispatcher offer already exists for this cargo and driver")
 var ErrDriverOfferAlreadyExists = errors.New("cargo: driver already has a pending or accepted offer for this cargo")
 var ErrCargoManagerDMOfferAlreadyExists = errors.New("cargo: pending cargo manager to driver manager offer already exists")
@@ -1390,7 +1401,7 @@ SELECT EXISTS(
   SELECT 1
   FROM offers
   WHERE cargo_id = $1 AND carrier_id = $2 AND COALESCE(proposed_by, 'DRIVER') = 'DISPATCHER'
-    AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM')
+    AND status IN ('PENDING', 'WAITING_DRIVER_CONFIRM', 'ACCEPTED')
 )`, cargoID, carrierID).Scan(&alreadyExists); err != nil {
 			return uuid.Nil, err
 		}
@@ -2348,11 +2359,11 @@ func (r *Repo) MarkDriverCompleted(ctx context.Context, cargoID, driverID uuid.U
 
 // refreshCargoProcessingStatusTx synchronises cargo.status with the current
 // number of ACCEPTED offers for the cargo:
-//   - SEARCHING_ALL / SEARCHING_COMPANY → PROCESSING when accepted_count == vehicles_amount
-//     (all slots are filled; cargo is no longer visible in driver search). The previous
-//     searching variant is saved in cargo.prev_status so we can roll back.
-//   - PROCESSING → prev_status (SEARCHING_*) when a slot frees up
-//     (e.g. offer reverted to PENDING via OnTripCancelledTx or a driver is marked cancelled).
+//   - SEARCHING_ALL / SEARCHING_COMPANY → PROCESSING when accepted_count > 0
+//     (cargo already entered execution and should not stay in searching state).
+//     The previous searching variant is saved in cargo.prev_status so we can roll back.
+//   - PROCESSING → prev_status (SEARCHING_*) when accepted_count == 0
+//     (all accepted slots were released/cancelled and cargo returns to search).
 //     prev_status is cleared on rollback.
 //
 // Called from AcceptOfferTx, OnTripCancelledTx and MarkDriverCancelledTx inside
@@ -2389,14 +2400,14 @@ FOR UPDATE`, cargoID).Scan(&status, &vehiclesAmount, &prevStatus)
 	}
 
 	switch {
-	case IsSearching(status) && accepted >= vehiclesAmount:
+	case IsSearching(status) && accepted > 0:
 		_, err = tx.Exec(ctx,
 			`UPDATE cargo
 			 SET prev_status = status::text, status = $1, updated_at = now()
 			 WHERE id = $2 AND deleted_at IS NULL`,
 			StatusProcessing, cargoID)
 		return err
-	case status == StatusProcessing && accepted < vehiclesAmount:
+	case status == StatusProcessing && accepted == 0:
 		revert := StatusSearchingAll
 		if prevStatus != nil {
 			switch CargoStatus(strings.ToUpper(strings.TrimSpace(*prevStatus))) {

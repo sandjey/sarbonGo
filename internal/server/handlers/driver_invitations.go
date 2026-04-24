@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -86,6 +87,10 @@ func (h *DriverInvitationsHandler) Create(c *gin.Context) {
 	}
 	drv, err := h.drv.FindByID(c.Request.Context(), req.DriverID)
 	if err != nil {
+		if errors.Is(err, drivers.ErrNotFound) {
+			resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
+			return
+		}
 		h.logger.Error("driver invitation create check", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return
@@ -163,6 +168,10 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 	}
 	drv, err := h.drv.FindByID(c.Request.Context(), req.DriverID)
 	if err != nil {
+		if errors.Is(err, drivers.ErrNotFound) {
+			resp.ErrorLang(c, http.StatusNotFound, "driver_not_found")
+			return
+		}
 		h.logger.Error("driver invitation create freelance check", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_create_invitation")
 		return

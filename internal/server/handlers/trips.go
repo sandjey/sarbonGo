@@ -125,6 +125,27 @@ func (h *TripsHandler) List(c *gin.Context) {
 				}
 			}
 		}
+		if h.cargoRepo != nil {
+			if off, _ := h.cargoRepo.GetOfferByID(c.Request.Context(), list[i].OfferID); off != nil {
+				var proposedByID any = nil
+				if off.ProposedByID != nil {
+					proposedByID = off.ProposedByID.String()
+				}
+				item["offer"] = gin.H{
+					"id":               off.ID.String(),
+					"cargo_id":         off.CargoID.String(),
+					"driver_id":        off.CarrierID.String(),
+					"price":            off.Price,
+					"currency":         off.Currency,
+					"status":           off.Status,
+					"proposed_by":      off.ProposedBy,
+					"proposed_by_id":   proposedByID,
+					"rejection_reason": off.RejectionReason,
+					"comment":          off.Comment,
+					"created_at":       off.CreatedAt,
+				}
+			}
+		}
 		out = append(out, item)
 	}
 	resp.OKLang(c, "ok", gin.H{"items": out})
