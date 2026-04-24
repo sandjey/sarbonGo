@@ -12425,7 +12425,7 @@ paths:
       tags:
       - Admin / Analytics
       summary: Главный дашборд аналитики администратора
-      description: Сводный экран аналитики для creator-admin: KPI, конверсии, рост, география, алерты и ключевые проблемы.
+      description: "Сводный экран аналитики для creator-admin: KPI, конверсии, рост, география, алерты и ключевые проблемы."
       security:
       - DeviceTypeHeader: []
         LanguageHeader: []
@@ -12840,7 +12840,7 @@ paths:
       tags:
       - Admin / Analytics
       summary: Аналитика времени между событиями
-      description: `average`, `median` и `p95` для ключевых участков пользовательского и бизнес-flow.
+      description: "`average`, `median` и `p95` для ключевых участков пользовательского и бизнес-flow."
       security:
       - DeviceTypeHeader: []
         LanguageHeader: []
