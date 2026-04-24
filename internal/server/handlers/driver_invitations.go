@@ -221,7 +221,14 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 // FindDrivers returns drivers matching phone search (для диспетчера: найти водителя и пригласить по driver_id). Совпадения сверху.
 func (h *DriverInvitationsHandler) FindDrivers(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+	if err != nil || disp == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+		return
+	}
+	// Driver search is available for both manager roles in dispatcher cabinet.
+	if !isDriverManagerRole(disp.ManagerRole) && !isCargoManagerRole(disp.ManagerRole) {
+		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
 		return
 	}
 	phoneSearch := strings.TrimSpace(c.Query("phone"))

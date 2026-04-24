@@ -38,6 +38,7 @@ type CatalogFilter struct {
 	RatingMin   *float64
 	RatingMax   *float64
 	ManagerRole *string // CARGO_MANAGER | DRIVER_MANAGER — фильтр каталога
+	ExcludeID   *string // optional dispatcher id to exclude from catalog
 	Limit       int
 	Offset      int
 }
@@ -91,6 +92,9 @@ func (r *Repo) ListCatalog(ctx context.Context, f CatalogFilter) (items []Dispat
 	}
 	if f.ManagerRole != nil && *f.ManagerRole != "" {
 		add(`manager_role = $`+itoa(argN)+``, *f.ManagerRole)
+	}
+	if f.ExcludeID != nil && strings.TrimSpace(*f.ExcludeID) != "" {
+		add(`id <> $`+itoa(argN)+``, strings.TrimSpace(*f.ExcludeID))
 	}
 
 	// Add pagination args

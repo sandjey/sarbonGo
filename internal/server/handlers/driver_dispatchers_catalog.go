@@ -6,9 +6,11 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/dispatchers"
+	"sarbonNew/internal/server/mw"
 	"sarbonNew/internal/server/resp"
 )
 
@@ -40,7 +42,7 @@ func (h *DriverDispatchersCatalogHandler) ListCatalog(c *gin.Context) {
 	phoneHint := strings.TrimSpace(c.Query("phone_hint"))
 	status := strings.TrimSpace(c.Query("status"))
 	workStatus := strings.TrimSpace(c.Query("work_status"))
-	managerRole := strings.TrimSpace(c.Query("role"))
+	managerRole := dispatchers.ManagerRoleDriverManager
 
 	var statusPtr *string
 	if status != "" {
@@ -80,13 +82,25 @@ func (h *DriverDispatchersCatalogHandler) ListCatalog(c *gin.Context) {
 		ratingMaxPtr = &f
 	}
 
-	var managerRolePtr *string
-	if managerRole != "" {
-		if errKey := validateFreelanceDispatcherRole(managerRole); errKey != "" {
-			resp.ErrorLang(c, http.StatusBadRequest, errKey)
-			return
+	// Catalog must include only DRIVER_MANAGER records.
+	managerRolePtr := &managerRole
+	var excludeIDPtr *string
+	if rawID, ok := c.Get(mw.CtxDispatcherID); ok {
+		switch id := rawID.(type) {
+		case string:
+			v := strings.TrimSpace(id)
+			if v != "" {
+				excludeIDPtr = &v
+			}
+		case uuid.UUID:
+			v := id.String()
+			excludeIDPtr = &v
+		case interface{ String() string }:
+			v := strings.TrimSpace(id.String())
+			if v != "" {
+				excludeIDPtr = &v
+			}
 		}
-		managerRolePtr = &managerRole
 	}
 
 	items, total, err := h.disp.ListCatalog(c.Request.Context(), dispatchers.CatalogFilter{
@@ -98,6 +112,7 @@ func (h *DriverDispatchersCatalogHandler) ListCatalog(c *gin.Context) {
 		RatingMin:   ratingMinPtr,
 		RatingMax:   ratingMaxPtr,
 		ManagerRole: managerRolePtr,
+		ExcludeID:   excludeIDPtr,
 		Limit:       limit,
 		Offset:      offset,
 	})
