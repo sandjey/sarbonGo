@@ -164,6 +164,50 @@ LIMIT $2
 	return out, rows.Err()
 }
 
+// ListForUserWithPeerName returns calls for user with counterparty display name.
+func (r *Repo) ListForUserWithPeerName(ctx context.Context, p ListParams) ([]CallListItem, error) {
+	limit := p.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := r.pg.Query(ctx, `
+SELECT
+  c.id, c.conversation_id, c.caller_id, c.callee_id, c.status, c.created_at, c.started_at, c.ended_at, c.ended_by, c.ended_reason, c.client_request_id,
+  COALESCE(
+    NULLIF(TRIM(d.name), ''),
+    NULLIF(TRIM(fd.name), ''),
+    NULLIF(TRIM(a.name), ''),
+    d.phone,
+    fd.phone,
+    ''
+  ) AS peer_name
+FROM calls c
+LEFT JOIN drivers d ON d.id = (CASE WHEN c.caller_id = $1 THEN c.callee_id ELSE c.caller_id END)
+LEFT JOIN freelance_dispatchers fd ON fd.id = (CASE WHEN c.caller_id = $1 THEN c.callee_id ELSE c.caller_id END) AND fd.deleted_at IS NULL
+LEFT JOIN admins a ON a.id = (CASE WHEN c.caller_id = $1 THEN c.callee_id ELSE c.caller_id END)
+WHERE c.caller_id = $1 OR c.callee_id = $1
+ORDER BY c.created_at DESC
+LIMIT $2
+`, p.UserID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]CallListItem, 0, limit)
+	for rows.Next() {
+		var item CallListItem
+		if err := rows.Scan(
+			&item.ID, &item.ConversationID, &item.CallerID, &item.CalleeID, &item.Status, &item.CreatedAt, &item.StartedAt, &item.EndedAt, &item.EndedBy, &item.EndedReason, &item.ClientRequestID,
+			&item.Name,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
 // ListOngoingForUser returns current RINGING/ACTIVE calls for participant.
 func (r *Repo) ListOngoingForUser(ctx context.Context, userID uuid.UUID) ([]Call, error) {
 	rows, err := r.pg.Query(ctx, `

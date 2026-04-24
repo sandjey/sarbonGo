@@ -1899,8 +1899,10 @@ func (h *CargoHandler) ListOffers(c *gin.Context) {
 	}
 	payload := gin.H{
 		"items":           items,
-		"status":          status,
 		"counterparty_id": counterpartyID,
+	}
+	if status != "" {
+		payload["status"] = status
 	}
 	if direction != "" {
 		payload["direction"] = direction

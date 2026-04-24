@@ -33,6 +33,13 @@ type Call struct {
 	ClientRequestID *string    `json:"client_request_id,omitempty"`
 }
 
+// CallListItem is a call row enriched for list endpoints.
+// Name is the counterparty display name for current user context.
+type CallListItem struct {
+	Call
+	Name string `json:"name"`
+}
+
 type Event struct {
 	ID        uuid.UUID  `json:"id"`
 	CallID    uuid.UUID  `json:"call_id"`

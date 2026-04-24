@@ -59,14 +59,14 @@ func (h *CallsHandler) ListMyCalls(c *gin.Context) {
 		return
 	}
 	limit := getIntQuery(c, "limit", 50)
-	list, err := h.calls.ListForUser(c.Request.Context(), calls.ListParams{UserID: userID, Limit: limit})
+	list, err := h.calls.ListForUserWithPeerName(c.Request.Context(), calls.ListParams{UserID: userID, Limit: limit})
 	if err != nil {
 		h.logger.Error("calls list", zap.Error(err))
 		resp.ErrorLang(c, http.StatusInternalServerError, "failed_to_list_calls")
 		return
 	}
 	if list == nil {
-		list = []calls.Call{}
+		list = []calls.CallListItem{}
 	}
 	resp.OKLang(c, "ok", gin.H{"calls": list})
 }

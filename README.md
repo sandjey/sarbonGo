@@ -1,8 +1,10 @@
-# Sarbon (Gin + Postgres + Redis)
+﻿# Sarbon (Gin + Postgres + Redis)
 
-API для логистики и грузоперевозок (водители, диспетчеры, грузы, офферы, рейсы).
+API РґР»СЏ Р»РѕРіРёСЃС‚РёРєРё Рё РіСЂСѓР·РѕРїРµСЂРµРІРѕР·РѕРє (РІРѕРґРёС‚РµР»Рё, РґРёСЃРїРµС‚С‡РµСЂС‹, РіСЂСѓР·С‹, РѕС„С„РµСЂС‹, СЂРµР№СЃС‹).
 
 **Документация API на русском:** [docs/DOCUMENTATION-RU.md](docs/DOCUMENTATION-RU.md) — полное руководство с описанием полей и примерами. Swagger UI: `http://localhost:8080/docs` (или ваш хост + `/docs`).
+**Frontend guide по admin panel:** [docs/ADMIN-FRONTEND-RU.md](docs/ADMIN-FRONTEND-RU.md) — полный контракт для `Admin / Tools` и `Admin / Analytics`.
+
 
 go run ./cmd/admin -login admin -password "Secret123" -name "Main Admin"
 
@@ -56,6 +58,8 @@ Rules:
 - every endpoint accepts `from`, `to`, `tz`
 - every response includes `time_window` and `generated_at_utc`
 - analytics events are persisted in `analytics_events`, with session/login rollups in `sessions` and `user_login_stats`
+For frontend implementation details, use [docs/ADMIN-FRONTEND-RU.md](docs/ADMIN-FRONTEND-RU.md).
+
 
 ## Run without Docker
 
@@ -82,36 +86,36 @@ go run ./cmd/api
 API: `http://localhost:8080`  
 Swagger UI: `http://localhost:8080/docs`
 
-**PostgreSQL** (в `.env`: `DATABASE_URL=postgres://sarbon:sarbon@localhost:5432/sarbon?sslmode=disable`):
+**PostgreSQL** (РІ `.env`: `DATABASE_URL=postgres://sarbon:sarbon@localhost:5432/sarbon?sslmode=disable`):
 
 ```bash
-# Проверка: подключение к БД (пароль: sarbon)
+# РџСЂРѕРІРµСЂРєР°: РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє Р‘Р” (РїР°СЂРѕР»СЊ: sarbon)
 psql -h localhost -p 5432 -U sarbon -d sarbon -c "SELECT 1"
 ```
 
-Если БД или пользователь ещё не созданы:
+Р•СЃР»Рё Р‘Р” РёР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РµС‰С‘ РЅРµ СЃРѕР·РґР°РЅС‹:
 
 ```bash
 psql -h localhost -p 5432 -U postgres -c "CREATE USER sarbon WITH PASSWORD 'sarbon';"
 psql -h localhost -p 5432 -U postgres -c "CREATE DATABASE sarbon OWNER sarbon;"
 ```
 
-**Redis** (в `.env`: `REDIS_ADDR=localhost:6379`):
+**Redis** (РІ `.env`: `REDIS_ADDR=localhost:6379`):
 
 ```bash
-# Проверка
+# РџСЂРѕРІРµСЂРєР°
 redis-cli ping
-# Ожидается: PONG
+# РћР¶РёРґР°РµС‚СЃСЏ: PONG
 ```
 
-Дальше как с Docker: настрой `.env`, выполни миграции и запусти API:
+Р”Р°Р»СЊС€Рµ РєР°Рє СЃ Docker: РЅР°СЃС‚СЂРѕР№ `.env`, РІС‹РїРѕР»РЅРё РјРёРіСЂР°С†РёРё Рё Р·Р°РїСѓСЃС‚Рё API:
 
 ```bash
-cp .env.example .env   # и поправь DATABASE_URL / REDIS_ADDR при необходимости
-go run ./cmd/api       # миграции применятся при старте
+cp .env.example .env   # Рё РїРѕРїСЂР°РІСЊ DATABASE_URL / REDIS_ADDR РїСЂРё РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё
+go run ./cmd/api       # РјРёРіСЂР°С†РёРё РїСЂРёРјРµРЅСЏС‚СЃСЏ РїСЂРё СЃС‚Р°СЂС‚Рµ
 ```
 
-Проверка API: `curl http://localhost:8080/health` → `{"status":"ok",...}`
+РџСЂРѕРІРµСЂРєР° API: `curl http://localhost:8080/health` в†’ `{"status":"ok",...}`
 
 ## Notes
 

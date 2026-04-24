@@ -5,7 +5,7 @@
 .env.*.local
 *.env
 deploy/docker/.env
-
+.gocache
 # Текстовые файлы (заметки, дампы) — не деплоить
 *.txt
 .cursor/
@@ -57,3 +57,4 @@ api
 *firebase-adminsdk*.json
 *.service-account.json
 *.md
+!docs/ADMIN-FRONTEND-RU.md
