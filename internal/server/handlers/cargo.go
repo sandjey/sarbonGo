@@ -52,6 +52,8 @@ var (
 	errCargoPhotoBadType  = errors.New("disallowed image type")
 	// errDuplicatePendingCargoPhoto — одна и та же pending-фото дважды в photos[].
 	errDuplicatePendingCargoPhoto = errors.New("duplicate pending cargo photo reference")
+	// ready_enabled=true means ASAP mode, so ready_at must not be sent.
+	errReadyAtNotAllowedWhenReadyEnabledTrue = errors.New("ready_at not allowed when ready_enabled is true")
 )
 
 type CargoHandler struct {
@@ -235,6 +237,12 @@ func (h *CargoHandler) Create(c *gin.Context) {
 	}
 	if err := validateCargoCreate(req); err != nil {
 		h.logger.Info("cargo create validation failed", zap.Error(err))
+		if errors.Is(err, errReadyAtNotAllowedWhenReadyEnabledTrue) {
+			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
+				"fields": gin.H{"ready_at": "not_allowed_when_ready_enabled_true"},
+			})
+			return
+		}
 		resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
 			"fields": gin.H{"_": err.Error()},
 		})
@@ -3270,8 +3278,8 @@ func validateCargoCreate(req CreateCargoReq) error {
 	if req.ADREnabled && (req.ADRClass == nil || *req.ADRClass == "") {
 		return errors.New("adr_class required when adr_enabled is true")
 	}
-	if req.ReadyEnabled && (req.ReadyAt == nil || *req.ReadyAt == "") {
-		return errors.New("ready_at required when ready_enabled is true")
+	if req.ReadyEnabled && req.ReadyAt != nil && strings.TrimSpace(*req.ReadyAt) != "" {
+		return errReadyAtNotAllowedWhenReadyEnabledTrue
 	}
 	if req.ShipmentType != nil && *req.ShipmentType != "" && !reference.IsAllowed(*req.ShipmentType, reference.AllowedShipmentTypes()) {
 		return errors.New("shipment_type must be from reference GET /v1/reference/cargo → shipment_type")
@@ -3336,8 +3344,8 @@ func validateCargoUpdate(req UpdateCargoReq) error {
 	if req.ADREnabled != nil && *req.ADREnabled && (req.ADRClass == nil || *req.ADRClass == "") {
 		return errors.New("adr_class required when adr_enabled is true")
 	}
-	if req.ReadyEnabled != nil && *req.ReadyEnabled && (req.ReadyAt == nil || *req.ReadyAt == "") {
-		return errors.New("ready_at required when ready_enabled is true")
+	if req.ReadyEnabled != nil && *req.ReadyEnabled && req.ReadyAt != nil && strings.TrimSpace(*req.ReadyAt) != "" {
+		return errReadyAtNotAllowedWhenReadyEnabledTrue
 	}
 	if req.ShipmentType != nil && *req.ShipmentType != "" && !reference.IsAllowed(*req.ShipmentType, reference.AllowedShipmentTypes()) {
 		return errors.New("shipment_type must be from reference GET /v1/reference/cargo → shipment_type")
