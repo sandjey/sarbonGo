@@ -50,6 +50,20 @@ func (h *DriverInvitationsHandler) requireDriverManager(c *gin.Context, dispatch
 	return disp, true
 }
 
+// requireDriverOrCargoManager allows DRIVER_MANAGER and CARGO_MANAGER for driver directory / search endpoints.
+func (h *DriverInvitationsHandler) requireDriverOrCargoManager(c *gin.Context, dispatcherID uuid.UUID) (*dispatchers.Dispatcher, bool) {
+	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
+	if err != nil || disp == nil {
+		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
+		return nil, false
+	}
+	if !isDriverManagerRole(disp.ManagerRole) && !isCargoManagerRole(disp.ManagerRole) {
+		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+		return nil, false
+	}
+	return disp, true
+}
+
 func (h *DriverInvitationsHandler) dispatcherLinkedToDriver(c *gin.Context, dispatcherID, driverID uuid.UUID, drv *drivers.Driver) bool {
 	linked, _ := h.drv.IsLinked(c.Request.Context(), driverID, dispatcherID)
 	if linked {
@@ -230,14 +244,7 @@ func (h *DriverInvitationsHandler) CreateForFreelance(c *gin.Context) {
 // FindDrivers returns drivers matching phone search (для диспетчера: найти водителя и пригласить по driver_id). Совпадения сверху.
 func (h *DriverInvitationsHandler) FindDrivers(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	disp, err := h.disp.FindByID(c.Request.Context(), dispatcherID)
-	if err != nil || disp == nil {
-		resp.ErrorLang(c, http.StatusUnauthorized, "dispatcher_not_found")
-		return
-	}
-	// Driver search is available for both manager roles in dispatcher cabinet.
-	if !isDriverManagerRole(disp.ManagerRole) && !isCargoManagerRole(disp.ManagerRole) {
-		resp.ErrorLang(c, http.StatusForbidden, "invalid_manager_role")
+	if _, ok := h.requireDriverOrCargoManager(c, dispatcherID); !ok {
 		return
 	}
 	phoneSearch := strings.TrimSpace(c.Query("phone"))
@@ -1332,7 +1339,7 @@ func (h *DriverInvitationsHandler) ListMyDrivers(c *gin.Context) {
 // Query: phone (search), work_status, truck_type (power_plate_type), page, limit, sort (e.g. updated_at:desc, name:asc, last_online_at:desc, work_status:asc).
 func (h *DriverInvitationsHandler) ListAllDriversForFreelance(c *gin.Context) {
 	dispatcherID := c.MustGet(mw.CtxDispatcherID).(uuid.UUID)
-	if _, ok := h.requireDriverManager(c, dispatcherID); !ok {
+	if _, ok := h.requireDriverOrCargoManager(c, dispatcherID); !ok {
 		return
 	}
 	var (
