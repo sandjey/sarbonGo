@@ -18,7 +18,16 @@ func normalizedDispatcherManagerRole(role *string) string {
 	if role == nil {
 		return ""
 	}
-	return strings.ToUpper(strings.TrimSpace(*role))
+	v := strings.ToUpper(strings.TrimSpace(*role))
+	// Accept legacy/user-entered variants like "cargo manager" or
+	// "cargo-manager" and normalize them to canonical enum style.
+	v = strings.ReplaceAll(v, "-", "_")
+	v = strings.ReplaceAll(v, " ", "_")
+	for strings.Contains(v, "__") {
+		v = strings.ReplaceAll(v, "__", "_")
+	}
+	v = strings.Trim(v, "_")
+	return v
 }
 
 func isCargoManagerRole(role *string) bool {

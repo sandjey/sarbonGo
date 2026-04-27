@@ -2790,12 +2790,6 @@ paths:
     $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers~1{dispatcherId}~1rating'
   /v1/driver/trips/{id}/state:
     $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trips~1{id}~1state'
-  /v1/driver/driver-invitations:
-    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1driver-invitations'
-  /v1/driver/driver-invitations/accept:
-    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1driver-invitations~1accept'
-  /v1/driver/driver-invitations/decline:
-    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1driver-invitations~1decline'
   /v1/driver/connection-offers:
     $ref: './paths/driver.yaml#/paths/~1v1~1driver~1connection-offers'
   /v1/driver/connection-offers/accept:
@@ -2820,10 +2814,6 @@ paths:
     $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers~1catalog'
   /v1/driver/dispatchers/hint:
     $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers~1hint'
-  /v1/driver/dispatcher-invitations:
-    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatcher-invitations'
-  /v1/driver/dispatcher-invitations/{token}:
-    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatcher-invitations~1{token}'
   # dispatchers
   /v1/dispatchers/auth/refresh:
     $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1refresh'
@@ -2843,8 +2833,6 @@ paths:
     $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1registration~1complete'
   /v1/dispatchers/profile:
     $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1profile'
-  /v1/dispatchers/driver-invitations:
-    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1driver-invitations'
   /v1/dispatchers/profile/photo:
     $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1profile~1photo'
   /v1/dispatchers/profile/password:

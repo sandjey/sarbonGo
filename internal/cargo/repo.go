@@ -458,6 +458,7 @@ var ErrOfferNotFoundOrNotPending = errors.New("cargo: offer not found or not pen
 var ErrCargoNotFound = errors.New("cargo: cargo not found")
 var ErrCargoNotSearching = errors.New("cargo: cargo not searching")
 var ErrCargoSlotsFull = errors.New("cargo: cargo has no vehicles_left")
+var ErrCargoTripSlotsFull = errors.New("cargo: active trips already fill vehicles_amount")
 var ErrReadyAtNotAllowedWhenReadyEnabledTrue = errors.New("cargo: ready_at not allowed when ready_enabled is true")
 var ErrDispatcherOfferAlreadyExists = errors.New("cargo: pending dispatcher offer already exists for this cargo and driver")
 var ErrDriverOfferAlreadyExists = errors.New("cargo: driver already has a pending or accepted offer for this cargo")
@@ -1349,10 +1350,11 @@ func (r *Repo) createOffer(ctx context.Context, db offerStore, cargoID, carrierI
 	}
 	var status CargoStatus
 	var vehiclesLeft int
+	var vehiclesAmount int
 	if err := db.QueryRow(ctx, `
-SELECT status, COALESCE(vehicles_left, 0)
+SELECT status, COALESCE(vehicles_left, 0), COALESCE(vehicles_amount, 0)
 FROM cargo
-WHERE id = $1 AND deleted_at IS NULL`, cargoID).Scan(&status, &vehiclesLeft); err != nil {
+WHERE id = $1 AND deleted_at IS NULL`, cargoID).Scan(&status, &vehiclesLeft, &vehiclesAmount); err != nil {
 		if err == pgx.ErrNoRows {
 			return uuid.Nil, ErrCargoNotFound
 		}
@@ -1363,6 +1365,21 @@ WHERE id = $1 AND deleted_at IS NULL`, cargoID).Scan(&status, &vehiclesLeft); er
 	}
 	if vehiclesLeft <= 0 {
 		return uuid.Nil, ErrCargoSlotsFull
+	}
+	// Protect against over-sending offers after trips are already opened.
+	// A cargo can have at most vehicles_amount active execution trips.
+	if vehiclesAmount > 0 {
+		var activeTrips int
+		if err := db.QueryRow(ctx, `
+SELECT COUNT(*)
+FROM trips
+WHERE cargo_id = $1
+  AND status IN ('IN_PROGRESS', 'IN_TRANSIT', 'DELIVERED')`, cargoID).Scan(&activeTrips); err != nil {
+			return uuid.Nil, err
+		}
+		if activeTrips >= vehiclesAmount {
+			return uuid.Nil, ErrCargoTripSlotsFull
+		}
 	}
 	if proposedBy == OfferProposedByDriver {
 		var driverDup bool

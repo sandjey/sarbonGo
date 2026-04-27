@@ -832,6 +832,16 @@ func (h *TripsHandler) runCancelTrip(c *gin.Context, asDispatcher bool, driverRe
 			resp.ErrorLang(c, http.StatusForbidden, "not_your_cargo")
 			return
 		}
+		// Cargo Manager cannot cancel a trip after driver has already started transit.
+		// Cancellation is allowed only while trip is IN_PROGRESS.
+		if roleName, roleErr := currentDispatcherManagerRole(ctx, h.dispatchers, dispID); roleErr != nil {
+			h.logger.Error("dispatcher profile for trip cancel", zap.Error(roleErr), zap.String("dispatcher_id", dispID.String()))
+			resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
+			return
+		} else if roleName == dispatchers.ManagerRoleCargoManager && t.Status != trips.StatusInProgress {
+			resp.ErrorLang(c, http.StatusBadRequest, "trip_cancel_only_in_progress")
+			return
+		}
 	} else {
 		if t.DriverID == nil || *t.DriverID != driverID {
 			resp.ErrorLang(c, http.StatusForbidden, "trip_not_assigned_to_you")

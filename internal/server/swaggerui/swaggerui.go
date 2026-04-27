@@ -58,14 +58,6 @@ func Register(r *gin.Engine) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
 		c.String(http.StatusOK, wsTestHTML)
 	})
-	r.GET("/calls-test", func(c *gin.Context) {
-		if p, ok := findUp("docs/calls-test.html", 10); ok {
-			c.File(p)
-			return
-		}
-		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, "<html><body><h3>calls-test page not found</h3></body></html>")
-	})
 	r.GET("/calls-webrtc", func(c *gin.Context) {
 		if p, ok := findUp("docs/calls-webrtc.html", 10); ok {
 			c.File(p)
@@ -490,7 +482,6 @@ const swaggerHTML = `<!doctype html>
         <div class="sarbon-topmenu-extras" aria-label="Дополнительные страницы">
           <a class="btn" href="/docs/flow" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#0d9488;color:#fff;border-color:#0d9488">Белая доска</a>
           <a class="btn" href="/ws-test" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#0f172a;color:#fff;border-color:#0f172a">WS Test</a>
-          <a class="btn" href="/calls-test" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#7c3aed;color:#fff;border-color:#7c3aed">Calls Lab</a>
           <a class="btn" href="/calls-webrtc" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#1d4ed8;color:#fff;border-color:#1d4ed8">WebRTC</a>
           <a class="btn" href="/terminal" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;background:#065f46;color:#fff;border-color:#065f46">Terminal</a>
         </div>

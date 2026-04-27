@@ -133,7 +133,7 @@ type RoutePointReq struct {
 	IsMainLoad   bool    `json:"is_main_load"`
 	IsMainUnload bool    `json:"is_main_unload"`
 	// Date — плановая дата/время точки (RFC3339, хранится и отдаётся в UTC).
-	Date *string `json:"date" binding:"required"`
+	Date *string `json:"date"`
 }
 
 type PaymentReq struct {
@@ -235,6 +235,7 @@ func (h *CargoHandler) Create(c *gin.Context) {
 			return
 		}
 	}
+	normalizeCreateCargoReq(&req)
 	if err := validateCargoCreate(req); err != nil {
 		h.logger.Info("cargo create validation failed", zap.Error(err))
 		if errors.Is(err, errReadyAtNotAllowedWhenReadyEnabledTrue) {
@@ -248,7 +249,7 @@ func (h *CargoHandler) Create(c *gin.Context) {
 		})
 		return
 	}
-	routeInputs, err := buildRoutePointInputs(req.RoutePoints)
+	routeInputs, err := buildRoutePointInputs(req.RoutePoints, req.ReadyEnabled)
 	if err != nil {
 		h.logger.Info("cargo create route_points validation failed", zap.Error(err))
 		resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{
@@ -1032,13 +1033,19 @@ func (h *CargoHandler) Update(c *gin.Context) {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
+	normalizeUpdateCargoReq(&req)
 	if err := validateCargoUpdate(req); err != nil {
 		resp.ErrorLang(c, http.StatusBadRequest, "invalid_payload_detail")
 		return
 	}
 	params := toUpdateParams(req)
 	if len(req.RoutePoints) > 0 {
-		rps, err := buildRoutePointInputs(req.RoutePoints)
+		// For update, keep strict behavior unless ready_enabled is explicitly true.
+		readyEnabled := false
+		if req.ReadyEnabled != nil {
+			readyEnabled = *req.ReadyEnabled
+		}
+		rps, err := buildRoutePointInputs(req.RoutePoints, readyEnabled)
 		if err != nil {
 			resp.ErrorWithDataLang(c, http.StatusBadRequest, "validation_failed", gin.H{"fields": gin.H{"_": err.Error()}})
 			return
@@ -1250,6 +1257,14 @@ func (h *CargoHandler) CreateOffer(c *gin.Context) {
 				"vehicles_left":   obj.VehiclesLeft,
 				"required_left":   0,
 				"explanation_key": "cargo_slots_full",
+			})
+			return
+		}
+		if err == cargo.ErrCargoTripSlotsFull {
+			resp.ErrorWithDataLang(c, http.StatusConflict, "invalid_payload_detail", gin.H{
+				"reason":          "cargo_trip_slots_full",
+				"cargo_id":        id.String(),
+				"explanation_key": "active_trips_already_fill_vehicles_amount",
 			})
 			return
 		}
@@ -3496,16 +3511,26 @@ func parseRFC3339UTC(s string) (time.Time, error) {
 	return t.UTC(), nil
 }
 
-func buildRoutePointInputs(points []RoutePointReq) ([]cargo.RoutePointInput, error) {
+func buildRoutePointInputs(points []RoutePointReq, readyEnabled bool) ([]cargo.RoutePointInput, error) {
 	out := make([]cargo.RoutePointInput, 0, len(points))
 	for i, rp := range points {
-		if rp.Date == nil || strings.TrimSpace(*rp.Date) == "" {
-			return nil, fmt.Errorf("route_points[%d].date is required (RFC3339 UTC, e.g. 2026-03-23T10:45:30Z)", i)
+		missingDate := rp.Date == nil || strings.TrimSpace(*rp.Date) == ""
+		// Rule:
+		// - is_main_load=true -> date is optional (can be null)
+		// - otherwise when ready_enabled=false -> date is required
+		if !rp.IsMainLoad && !readyEnabled && missingDate {
+			return nil, fmt.Errorf("route_points[%d].date is required when ready_enabled is false (RFC3339 UTC, e.g. 2026-03-23T10:45:30Z)", i)
 		}
-		pt, err := parseRFC3339UTC(*rp.Date)
-		if err != nil {
-			return nil, fmt.Errorf("route_points[%d].date must be RFC3339: %w", i, err)
+
+		var pointAt *time.Time
+		if !missingDate {
+			pt, err := parseRFC3339UTC(*rp.Date)
+			if err != nil {
+				return nil, fmt.Errorf("route_points[%d].date must be RFC3339: %w", i, err)
+			}
+			pointAt = &pt
 		}
+
 		out = append(out, cargo.RoutePointInput{
 			Type:         upperStr(rp.Type),
 			CountryCode:  upperStr(rp.CountryCode),
@@ -3520,13 +3545,54 @@ func buildRoutePointInputs(points []RoutePointReq) ([]cargo.RoutePointInput, err
 			PointOrder:   rp.PointOrder,
 			IsMainLoad:   rp.IsMainLoad,
 			IsMainUnload: rp.IsMainUnload,
-			PointAt:      &pt,
+			PointAt:      pointAt,
 		})
 	}
 	return out, nil
 }
 
 func upperStr(s string) string { return strings.ToUpper(strings.TrimSpace(s)) }
+
+func normalizeNullableStringPtr(v **string) {
+	if v == nil || *v == nil {
+		return
+	}
+	s := strings.TrimSpace(**v)
+	// Accept frontend literals often used for nullable fields.
+	if s == "" || strings.EqualFold(s, "null") {
+		*v = nil
+		return
+	}
+	**v = s
+}
+
+func normalizeCreateCargoReq(req *CreateCargoReq) {
+	if req == nil {
+		return
+	}
+	normalizeNullableStringPtr(&req.ReadyAt)
+	for i := range req.RoutePoints {
+		normalizeNullableStringPtr(&req.RoutePoints[i].Date)
+	}
+	// Keep backward compatibility but avoid ready_at conflicts in ASAP mode.
+	if req.ReadyEnabled {
+		req.ReadyAt = nil
+	}
+}
+
+func normalizeUpdateCargoReq(req *UpdateCargoReq) {
+	if req == nil {
+		return
+	}
+	normalizeNullableStringPtr(&req.ReadyAt)
+	for i := range req.RoutePoints {
+		normalizeNullableStringPtr(&req.RoutePoints[i].Date)
+	}
+	if req.ReadyEnabled != nil && *req.ReadyEnabled {
+		req.ReadyAt = nil
+	}
+}
+
 func strPtrUpper(s *string) *string {
 	if s == nil || *s == "" {
 		return s

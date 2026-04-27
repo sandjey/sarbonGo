@@ -2,8 +2,12 @@ package resp
 
 import (
 	"net/http"
+	"reflect"
+	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"sarbonNew/internal/util"
 )
 
 // MsgAllLangs returns localized strings for apiMessages[key] in all five API languages (en, ru, uz, tr, zh).
@@ -29,7 +33,7 @@ func Success(c *gin.Context, httpCode int, description string, data any) {
 		Status:      "success",
 		Code:        httpCode,
 		Description: description,
-		Data:        data,
+		Data:        localizeAnyTimeToTashkent(data),
 	})
 }
 
@@ -52,8 +56,121 @@ func ErrorWithData(c *gin.Context, httpCode int, description string, data any) {
 		Status:      "error",
 		Code:        httpCode,
 		Description: description,
-		Data:        data,
+		Data:        localizeAnyTimeToTashkent(data),
 	})
+}
+
+func localizeAnyTimeToTashkent(v any) any {
+	if v == nil {
+		return nil
+	}
+	return localizeValue(reflect.ValueOf(v)).Interface()
+}
+
+func localizeValue(v reflect.Value) reflect.Value {
+	if !v.IsValid() {
+		return v
+	}
+	if !v.CanInterface() {
+		return v
+	}
+
+	// Fast-path for time.Time.
+	if v.Type() == reflect.TypeOf(time.Time{}) {
+		t := v.Interface().(time.Time)
+		return reflect.ValueOf(util.InTashkent(t))
+	}
+
+	// Fast-path for *time.Time.
+	if v.Type() == reflect.TypeOf(&time.Time{}) {
+		if v.IsNil() {
+			return v
+		}
+		t := v.Elem().Interface().(time.Time)
+		tt := util.InTashkent(t)
+		p := reflect.New(reflect.TypeOf(time.Time{}))
+		p.Elem().Set(reflect.ValueOf(tt))
+		return p
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return v
+		}
+		elem := localizeValue(v.Elem())
+		p := reflect.New(v.Type().Elem())
+		if elem.IsValid() && elem.Type().AssignableTo(v.Type().Elem()) {
+			p.Elem().Set(elem)
+		} else {
+			p.Elem().Set(v.Elem())
+		}
+		return p
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		ev := localizeValue(v.Elem())
+		return ev
+	case reflect.Struct:
+		out := reflect.New(v.Type()).Elem()
+		out.Set(v) // preserve all fields first
+		for i := 0; i < v.NumField(); i++ {
+			dst := out.Field(i)
+			if !dst.CanSet() {
+				continue
+			}
+			lv := localizeValue(v.Field(i))
+			if lv.IsValid() && lv.Type().AssignableTo(dst.Type()) {
+				dst.Set(lv)
+			}
+		}
+		return out
+	case reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		for i := 0; i < v.Len(); i++ {
+			lv := localizeValue(v.Index(i))
+			if lv.IsValid() && lv.Type().AssignableTo(v.Type().Elem()) {
+				out.Index(i).Set(lv)
+			} else {
+				out.Index(i).Set(v.Index(i))
+			}
+		}
+		return out
+	case reflect.Array:
+		out := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.Len(); i++ {
+			lv := localizeValue(v.Index(i))
+			if lv.IsValid() && lv.Type().AssignableTo(v.Type().Elem()) {
+				out.Index(i).Set(lv)
+			} else {
+				out.Index(i).Set(v.Index(i))
+			}
+		}
+		return out
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		iter := v.MapRange()
+		for iter.Next() {
+			k := iter.Key()
+			mv := iter.Value()
+			lv := localizeValue(mv)
+			if lv.IsValid() && lv.Type().AssignableTo(v.Type().Elem()) {
+				out.SetMapIndex(k, lv)
+			} else {
+				out.SetMapIndex(k, mv)
+			}
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // Lang returns X-Language from request (ru, uz, en, tr, zh). Default "en".

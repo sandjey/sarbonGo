@@ -62,6 +62,17 @@ func collectPaths(pathFile string) ([]string, error) {
 	return paths, nil
 }
 
+func includePathInRoot(path string) bool {
+	p := strings.ToLower(strings.TrimSpace(path))
+	if strings.Contains(p, "driver-invitations") {
+		return false
+	}
+	if strings.Contains(p, "dispatcher-invitations") {
+		return false
+	}
+	return true
+}
+
 func main() {
 	root, err := os.Getwd()
 	if err != nil {
@@ -96,6 +107,9 @@ func main() {
 		}
 		out = append(out, "  # "+catalog)
 		for _, p := range paths {
+			if !includePathInRoot(p) {
+				continue
+			}
 			out = append(out, "  "+p+":")
 			out = append(out, "    $ref: './paths/"+catalog+".yaml#/paths/"+toJSONPointer(p)+"'")
 		}
