@@ -1,0 +1,105 @@
+paths:
+  /v1/chat/user-finder:
+    get:
+      tags: [Chat]
+      summary: Search users for chat
+      responses:
+        '200': { description: OK }
+  /v1/chat/users/{id}/photo:
+    get:
+      tags: [Chat]
+      summary: Get peer photo
+      responses:
+        '200': { description: OK }
+  /v1/chat/conversations:
+    get:
+      tags: [Chat]
+      summary: List conversations
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Chat]
+      summary: Get or create conversation
+      responses:
+        '200': { description: OK }
+  /v1/chat/conversations/{id}/read:
+    post:
+      tags: [Chat]
+      summary: Mark conversation as read
+      responses:
+        '200': { description: OK }
+  /v1/chat/conversations/{id}/messages:
+    get:
+      tags: [Chat]
+      summary: List messages
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Chat]
+      summary: Send message
+      responses:
+        '201': { description: Created }
+  /v1/chat/conversations/{id}/messages/media:
+    post:
+      tags: [Chat]
+      summary: Send media message
+      responses:
+        '201': { description: Created }
+  /v1/chat/conversations/{id}/messages/media-ref:
+    post:
+      tags: [Chat]
+      summary: Send message by media reference
+      responses:
+        '201': { description: Created }
+  /v1/chat/files/probe:
+    post:
+      tags: [Chat]
+      summary: Probe media cache by hash
+      responses:
+        '200': { description: OK }
+  /v1/chat/messages/{id}:
+    patch:
+      tags: [Chat]
+      summary: Edit message
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Chat]
+      summary: Delete message
+      responses:
+        '200': { description: OK }
+  /v1/chat/presence/{user_id}:
+    get:
+      tags: [Chat]
+      summary: Get user presence
+      responses:
+        '200': { description: OK }
+  /v1/chat/media/{id}:
+    get:
+      tags: [Chat]
+      summary: Download media
+      responses:
+        '200': { description: OK }
+  /v1/chat/files/{id}:
+    get:
+      tags: [Chat]
+      summary: Download media (legacy alias)
+      responses:
+        '200': { description: OK }
+  /v1/chat/push-token:
+    post:
+      tags: [Chat]
+      summary: Upsert push token
+      responses:
+        '200': { description: OK }
+    delete:
+      tags: [Chat]
+      summary: Delete push token
+      responses:
+        '200': { description: OK }
+  /v1/chat/ws:
+    get:
+      tags: [Chat]
+      summary: Chat WebSocket endpoint
+      responses:
+        '101': { description: Switching Protocols }

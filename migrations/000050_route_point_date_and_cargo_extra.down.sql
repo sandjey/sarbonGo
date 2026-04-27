@@ -1,7 +1,0 @@
-ALTER TABLE route_points DROP COLUMN IF EXISTS point_at;
-ALTER TABLE route_points DROP COLUMN IF EXISTS place_id;
-
-ALTER TABLE cargo DROP COLUMN IF EXISTS photo_urls;
-ALTER TABLE cargo DROP COLUMN IF EXISTS dimensions;
-ALTER TABLE cargo DROP COLUMN IF EXISTS packaging;
-ALTER TABLE cargo DROP COLUMN IF EXISTS capacity_required;

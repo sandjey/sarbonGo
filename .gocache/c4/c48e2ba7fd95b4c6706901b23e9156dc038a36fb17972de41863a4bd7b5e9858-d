@@ -1,7 +1,0 @@
-./common.go
-./dialect.go
-./mssql.go
-./mysql.go
-./oceanbase.go
-./postgresql.go
-./sqlite.go

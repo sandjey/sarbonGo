@@ -1,7 +1,0 @@
-./errors.go
-./hub.go
-./message_types.go
-./model.go
-./presence.go
-./repo.go
-./resolve_path.go

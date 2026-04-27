@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"go.uber.org/zap"
 
 	"sarbonNew/internal/adminanalytics"
@@ -103,7 +105,11 @@ func (h *AdminAnalyticsHandler) GetUser(c *gin.Context) {
 	data, err := h.repo.GetUserDetails(c.Request.Context(), userID)
 	if err != nil {
 		h.logger.Error("admin analytics user detail", zap.Error(err), zap.String("user_id", userID.String()))
-		resp.ErrorLang(c, http.StatusNotFound, "user_not_found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			resp.ErrorLang(c, http.StatusNotFound, "user_not_found")
+			return
+		}
+		resp.ErrorLang(c, http.StatusInternalServerError, "internal_error")
 		return
 	}
 	resp.OKLang(c, "ok", withAdminAnalyticsMeta(w, data))

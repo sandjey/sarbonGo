@@ -1,6 +1,0 @@
-./admins_table.go
-./auto_tables.go
-./content.go
-./inject_css.go
-./sanitize_form.go
-./setup.go

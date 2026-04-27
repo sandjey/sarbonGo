@@ -1,0 +1,113 @@
+paths:
+  /v1/dispatchers/cargo-manager/sse/events:
+    get:
+      tags:
+      - Cargo Manager / SSE
+      summary: "Унифицированный SSE-поток для карго-менеджера."
+      description: |
+        Поток объединяет уведомления, события по офферам, изменения рейсов,
+        обновления водителей и чат-события для роли `CARGO_MANAGER`.
+        Формат события соответствует схеме
+        > [`SSEDispatcherUnifiedEvent`](../base.yaml#/components/schemas/SSEDispatcherUnifiedEvent).**
+
+        ```js
+        const url = new URL(`${API}/v1/dispatchers/cargo-manager/sse/events`);
+        url.searchParams.set("token",        jwt);
+        url.searchParams.set("device_type",  "web");
+        url.searchParams.set("language",     "ru");
+        url.searchParams.set("client_token", CLIENT_TOKEN);
+        const es = new EventSource(url.toString());
+        es.onmessage = (e) => route(JSON.parse(e.data)); // switch(evt.type)
+        ```
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - $ref: '../base.yaml#/components/parameters/SSEQueryToken'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryDeviceType'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryLanguage'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryClientToken'
+      responses:
+        '200':
+          description: |
+            Поток открыт и передает события в формате `text/event-stream`.
+            Heartbeat отправляется как `: ping`.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                connected_banner:
+                  $ref: '../base.yaml#/components/examples/SSEConnectedBanner'
+                trip_status:
+                  $ref: '../base.yaml#/components/examples/SSEFrameTripStatus'
+                trip_notification_completed:
+                  $ref: '../base.yaml#/components/examples/SSEFrameTripNotificationCompleted'
+                cargo_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCargoOfferAccepted'
+                connection_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameConnectionOfferAccepted'
+                driver_update:
+                  $ref: '../base.yaml#/components/examples/SSEFrameDriverUpdate'
+                chat_message:
+                  $ref: '../base.yaml#/components/examples/SSEFrameChatMessage'
+                call_ringing:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCallRinging'
+        '401':
+          description: 'unauthorized (`missing_user_token` / `invalid_user_token`)'
+        '403':
+          description: "Недостаточно прав (`forbidden_role`)."
+        '503':
+          description: "SSE-сервис временно недоступен."
+  /v1/dispatchers/cargo-manager/sse/notifications:
+    get:
+      tags:
+      - Cargo Manager / SSE
+      summary: "SSE уведомлений для карго-менеджера."
+      description: |
+        Поток уведомлений inbox для роли `CARGO_MANAGER`.
+        Содержит уведомления по рейсам, офферам, связям и чату.
+        > [`SSEDispatcherUnifiedEvent`](../base.yaml#/components/schemas/SSEDispatcherUnifiedEvent).**
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - $ref: '../base.yaml#/components/parameters/SSEQueryToken'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryDeviceType'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryLanguage'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryClientToken'
+      responses:
+        '200':
+          description: |
+            Поток открыт, события поступают в формате `text/event-stream`.
+            Для поддержания соединения отправляется heartbeat.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                connected_banner:
+                  $ref: '../base.yaml#/components/examples/SSEConnectedBanner'
+                trip_notification_completed:
+                  $ref: '../base.yaml#/components/examples/SSEFrameTripNotificationCompleted'
+                cargo_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCargoOfferAccepted'
+                connection_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameConnectionOfferAccepted'
+                driver_update:
+                  $ref: '../base.yaml#/components/examples/SSEFrameDriverUpdate'
+                chat_message:
+                  $ref: '../base.yaml#/components/examples/SSEFrameChatMessage'
+                call_ringing:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCallRinging'
+        '401':
+          description: 'unauthorized (`missing_user_token` / `invalid_user_token`)'
+        '403':
+          description: '`forbidden_role`'
+        '503':
+          description: "SSE-сервис временно недоступен."
+  # driver_manager

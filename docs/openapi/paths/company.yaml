@@ -1,0 +1,31 @@
+paths:
+  /v1/company-users/auth/refresh:
+    post:
+      tags:
+      - Company / Users & auth
+      summary: "Обновить токены пользователя компании."
+      description: "Выдает новую пару access/refresh токенов для company-user."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+              required:
+              - refresh_token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+        '401':
+          description: invalid refresh_token
+  # legacy_api

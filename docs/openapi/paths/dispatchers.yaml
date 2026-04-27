@@ -1,0 +1,3742 @@
+paths:
+  /v1/dispatchers/auth/refresh:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Обновить токены диспетчера."
+      description: "Выдает новую пару access/refresh токенов для диспетчера."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+              required:
+              - refresh_token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+        '401':
+          description: invalid refresh_token
+  /v1/dispatchers/auth/phone:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Запросить OTP-код для входа диспетчера."
+      description: "Отправляет одноразовый код на телефон диспетчера."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998901234567'
+              required:
+              - phone
+            example:
+              phone: '+998901234567'
+      responses:
+        '200':
+          description: "OTP-код успешно отправлен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: otp_sent
+                  ttl_seconds:
+                    type: integer
+                    example: 180
+        '400':
+          description: "Некорректный номер телефона или запрос."
+        '429':
+          description: Cooldown / rate limit
+        '502':
+          description: "Ошибка SMS-провайдера или внешнего сервиса."
+  /v1/dispatchers/auth/otp/verify:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Проверить OTP-код диспетчера."
+      description: "Подтверждает OTP и возвращает токены входа или `session_id` для регистрации."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998901234567'
+                otp:
+                  type: string
+                  example: '123456'
+              required:
+              - phone
+              - otp
+            example:
+              phone: '+998901234567'
+              otp: '123456'
+      responses:
+        '200':
+          description: "OTP-код подтвержден."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  properties:
+                    status:
+                      type: string
+                      example: login
+                    tokens:
+                      $ref: '../base.yaml#/components/schemas/Tokens'
+                - type: object
+                  properties:
+                    status:
+                      type: string
+                      example: register
+                    session_id:
+                      type: string
+                      format: uuid
+        '401':
+          description: "Неверный или просроченный OTP-код."
+        '429':
+          description: "Превышен лимит попыток проверки OTP."
+  /v1/dispatchers/auth/login/password:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Вход диспетчера по паролю."
+      description: "Авторизует диспетчера по номеру телефона и паролю."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998901234567'
+                password:
+                  type: string
+                  example: TestPass123!
+              required:
+              - phone
+              - password
+            example:
+              phone: '+998901234567'
+              password: TestPass123!
+      responses:
+        '200':
+          description: "Авторизация успешна."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: login
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+        '401':
+          description: "Неверный телефон или пароль."
+  /v1/dispatchers/auth/reset-password/request:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Запросить сброс пароля диспетчера."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998901234567'
+              required:
+              - phone
+            example:
+              phone: '+998901234567'
+      responses:
+        '200':
+          description: "OTP для сброса пароля отправлен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: otp_sent
+                  session_id:
+                    type: string
+                    format: uuid
+                  ttl_seconds:
+                    type: integer
+        '400':
+          description: "Некорректный формат телефона."
+        '404':
+          description: "Диспетчер с таким телефоном не найден."
+        '502':
+          description: "Ошибка SMS-провайдера или внешнего сервиса."
+  /v1/dispatchers/auth/reset-password/confirm:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Подтвердить сброс пароля диспетчера."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                otp:
+                  type: string
+                  example: '123456'
+                new_password:
+                  type: string
+              required:
+              - session_id
+              - otp
+              - new_password
+            example:
+              session_id: d4e5f6a7-b8c9-0123-def0-234567890123
+              otp: '123456'
+              new_password: NewPass456!
+      responses:
+        '200':
+          description: "Пароль успешно изменен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '401':
+          description: "Неверный OTP или недействительная сессия сброса."
+        '429':
+          description: "Превышен лимит попыток."
+  /v1/dispatchers/auth/logout:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Выход диспетчера из системы."
+      description: "Инвалидирует refresh token и завершает сессию диспетчера."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+                  description: "Refresh token, который нужно отозвать."
+                access_token:
+                  type: string
+                  description: "Текущий access token (опционально)."
+            example:
+              access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+      responses:
+        '200':
+          description: "Выход выполнен успешно."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: "Некорректное тело запроса."
+        '401':
+          description: "Сессия недействительна или токен невалиден."
+  /v1/dispatchers/registration/complete:
+    post:
+      tags:
+      - Dispatchers / Auth & registration
+      summary: "Завершить регистрацию диспетчера."
+      description: "Создает аккаунт диспетчера по `session_id`, роли и персональным данным."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                name:
+                  $ref: '../base.yaml#/components/schemas/DisplayName'
+                role:
+                  $ref: '../base.yaml#/components/schemas/FreelanceDispatcherRole'
+                password:
+                  type: string
+                passport_series:
+                  type: string
+                  example: AB
+                passport_number:
+                  type: string
+                  example: '1234567'
+                pinfl:
+                  type: string
+                  example: '12345678901234'
+              required:
+              - session_id
+              - name
+              - password
+              - passport_series
+              - passport_number
+              - pinfl
+            example:
+              session_id: d4e5f6a7-b8c9-0123-def0-234567890123
+              name: Dispatcher_User
+              role: CARGO_MANAGER
+              password: SecurePass123!
+              passport_series: AB
+              passport_number: '1234567'
+              pinfl: '31234567890123'
+      responses:
+        '200':
+          description: "Регистрация диспетчера завершена успешно."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: registered
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+                  dispatcher:
+                    $ref: '../base.yaml#/components/schemas/Dispatcher'
+        '400':
+          description: "Ошибка валидации данных регистрации."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: "Сессия регистрации недействительна или просрочена."
+        '409':
+          description: "Пользователь уже зарегистрирован или данные конфликтуют."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/dispatchers/profile:
+    get:
+      tags:
+      - Dispatchers / Profile
+      summary: "Получить профиль диспетчера."
+      description: "Возвращает данные профиля текущего авторизованного диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: OK, data.dispatcher
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: "Требуется авторизация диспетчера."
+    patch:
+      tags:
+      - Dispatchers / Profile
+      summary: "Обновить профиль диспетчера."
+      description: "Обновляет персональные данные диспетчера и рабочие поля профиля."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  $ref: '../base.yaml#/components/schemas/DisplayName'
+                role:
+                  $ref: '../base.yaml#/components/schemas/FreelanceDispatcherRole'
+                passport_series:
+                  type: string
+                passport_number:
+                  type: string
+                pinfl:
+                  type: string
+                photo:
+                  type: string
+                  nullable: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: "Ошибка валидации переданных полей."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: "Требуется авторизация диспетчера."
+        '409':
+          description: "Конфликт данных профиля (например, дубликаты документов)."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/dispatchers/driver-invitations:
+    post:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Отправить приглашение водителю."
+      description: "Создает приглашение на связь водителю от менеджера водителей."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+                  example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+              required:
+              - driver_id
+      responses:
+        '201':
+          description: created, data.token
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '409':
+          description: connection_limit_reached / driver_invitation_already_pending
+        '401':
+          description: "Требуется авторизация диспетчера."
+        '404':
+          description: "Водитель не найден."
+  /v1/dispatchers/profile/photo:
+    post:
+      tags:
+      - Dispatchers / Profile
+      summary: "Загрузить фото профиля диспетчера."
+      description: "Принимает изображение и назначает его текущей фотографией диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - photo
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: "Файл изображения профиля."
+      responses:
+        '200':
+          description: "Фото профиля успешно загружено."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  code:
+                    type: integer
+                    example: 200
+                  description:
+                    type: string
+                    example: Photo uploaded
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: ok
+                      event:
+                        type: string
+                        example: photo_uploaded
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: success
+                    code: 200
+                    description: Photo uploaded
+                    data:
+                      status: ok
+                      event: photo_uploaded
+                ru:
+                  summary: Русский
+                  value:
+                    status: success
+                    code: 200
+                    description: Фото загружено
+                    data:
+                      status: ok
+                      event: photo_uploaded
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: success
+                    code: 200
+                    description: Foto yuklandi
+                    data:
+                      status: ok
+                      event: photo_uploaded
+                tr:
+                  summary: Türkçe
+                  value:
+                    status: success
+                    code: 200
+                    description: Fotoğraf yüklendi
+                    data:
+                      status: ok
+                      event: photo_uploaded
+                zh:
+                  summary: 中文
+                  value:
+                    status: success
+                    code: 200
+                    description: 照片已上传
+                    data:
+                      status: ok
+                      event: photo_uploaded
+        '400':
+          description: "Некорректный файл (тип, размер, отсутствие файла)."
+        '401':
+          description: "Требуется авторизация диспетчера."
+    get:
+      tags:
+      - Dispatchers / Profile
+      summary: "Получить фото профиля диспетчера."
+      description: "Возвращает бинарное изображение текущей фотографии профиля."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Фото профиля получено."
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: "Требуется авторизация диспетчера."
+        '404':
+          description: "Фото профиля отсутствует."
+    delete:
+      tags:
+      - Dispatchers / Profile
+      summary: "Удалить фото профиля диспетчера."
+      description: "Удаляет текущую фотографию профиля диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Фото профиля удалено."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  code:
+                    type: integer
+                    example: 200
+                  description:
+                    type: string
+                    description: "Локализованное текстовое описание результата операции."
+                    example: Photo deleted
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: ok
+                      event:
+                        type: string
+                        example: photo_deleted
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: success
+                    code: 200
+                    description: Photo deleted
+                    data:
+                      status: ok
+                      event: photo_deleted
+                ru:
+                  summary: Русский
+                  value:
+                    status: success
+                    code: 200
+                    description: Фото удалено
+                    data:
+                      status: ok
+                      event: photo_deleted
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: success
+                    code: 200
+                    description: Foto o'chirildi
+                    data:
+                      status: ok
+                      event: photo_deleted
+                tr:
+                  summary: Türkçe
+                  value:
+                    status: success
+                    code: 200
+                    description: Fotoğraf silindi
+                    data:
+                      status: ok
+                      event: photo_deleted
+                zh:
+                  summary: 中文
+                  value:
+                    status: success
+                    code: 200
+                    description: 照片已删除
+                    data:
+                      status: ok
+                      event: photo_deleted
+        '401':
+          description: "Требуется авторизация диспетчера."
+  /v1/dispatchers/profile/password:
+    put:
+      tags:
+      - Dispatchers / Profile
+      summary: "Изменить пароль диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+              required:
+              - current_password
+              - new_password
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        '401':
+          description: "Текущий пароль неверен или сессия недействительна."
+  /v1/dispatchers/profile/phone-change/request:
+    post:
+      tags:
+      - Dispatchers / Profile
+      summary: "Запросить смену телефона диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                new_phone:
+                  type: string
+                  example: '+998901234567'
+              required:
+              - new_phone
+      responses:
+        '200':
+          description: "OTP для подтверждения смены телефона отправлен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: otp_sent
+                  session_id:
+                    type: string
+                    format: uuid
+                  ttl_seconds:
+                    type: integer
+        '400':
+          description: "Некорректный формат нового телефона."
+        '409':
+          description: "Новый телефон уже используется."
+        '502':
+          description: "Ошибка SMS-провайдера или внешнего сервиса."
+  /v1/dispatchers/profile/phone-change/verify:
+    post:
+      tags:
+      - Dispatchers / Profile
+      summary: "Подтвердить смену телефона диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                otp:
+                  type: string
+                  example: '123456'
+              required:
+              - session_id
+              - otp
+      responses:
+        '200':
+          description: "Телефон успешно изменен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  dispatcher:
+                    $ref: '../base.yaml#/components/schemas/Dispatcher'
+        '401':
+          description: "Неверный OTP или недействительная сессия подтверждения."
+        '409':
+          description: "Телефон уже занят другим пользователем."
+  /v1/dispatchers/connection-offers:
+    get:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Список приглашений на связь."
+      description: "Возвращает входящие/исходящие invitation-офферы на связь водителей и диспетчеров."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: direction
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - all
+          - incoming
+          - outgoing
+          default: all
+      responses:
+        '200':
+          description: data.direction, data.items[]
+        '400':
+          description: invalid direction
+    post:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Создать приглашение на связь."
+      description: "Создает invitation для привязки водителя к менеджеру водителей."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+              required:
+              - driver_id
+      responses:
+        '201':
+          description: data.token, data.expires_in_hours, data.linked
+        '400':
+          description: invalid driver_id
+        '403':
+          description: access denied
+        '404':
+          description: driver not found
+        '409':
+          description: driver already linked or invitation pending (driver_invitation_already_pending)
+  /v1/dispatchers/connection-offers/{token}:
+    delete:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Отменить приглашение по токену."
+      description: "Удаляет/отклоняет invitation с указанием причины."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+          example: a1b2c3d4e5f6789012345678abcdef0123456789abcdef0123456789
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: driver does not respond
+              required:
+              - reason
+      responses:
+        '200':
+          description: ok (invitation row deleted)
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short
+        '403':
+          description: not your invitation
+        '404':
+          description: invitation not found or expired
+  /v1/dispatchers/connection-offers/accept:
+    post:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Принять приглашение на связь."
+      description: "Принимает invitation по токену и создает связь с водителем."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+              - token
+      responses:
+        '200':
+          description: data.driver_id
+        '400':
+          description: invitation not found or expired
+        '403':
+          description: "Недостаточно прав или invitation принадлежит другому пользователю."
+  /v1/dispatchers/connection-offers/decline:
+    post:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Отклонить приглашение на связь."
+      description: "Отклоняет invitation по токену."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+              - token
+      responses:
+        '200':
+          description: data.status = declined
+        '400':
+          description: invitation not found or expired
+        '403':
+          description: invitation was sent to another phone
+  /v1/dispatchers/drivers/find:
+    get:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Найти водителя по телефону."
+      description: "Ищет водителей по номеру телефона для создания связи."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: phone
+        in: query
+        required: true
+        schema:
+          type: string
+          example: '+998901234567'
+        description: "Телефон водителя в международном формате."
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: "Результаты поиска водителей."
+  /v1/dispatchers/drivers:
+    get:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Список связанных водителей."
+      description: "Возвращает водителей, связанных с текущим менеджером водителей."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: phone
+        in: query
+        schema:
+          type: string
+        description: "Фильтр по телефону водителя."
+      - name: work_status
+        in: query
+        schema:
+          type: string
+          example: available
+        description: "Фильтр по рабочему статусу."
+      - name: truck_type
+        in: query
+        schema:
+          type: string
+          example: TENT
+        description: "Фильтр по типу кузова/транспорта."
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      - name: sort
+        in: query
+        schema:
+          type: string
+          default: updated_at:desc
+          example: updated_at:desc
+        description: "Сортировка в формате `поле:направление`."
+      responses:
+        '200':
+          description: "Список связанных водителей получен."
+  /v1/dispatchers/drivers/all:
+    get:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Расширенный поиск водителей."
+      description: "Возвращает полный список водителей с расширенными фильтрами и пагинацией."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: phone
+        in: query
+        schema:
+          type: string
+        description: "Фильтр по телефону водителя."
+      - name: name
+        in: query
+        schema:
+          type: string
+        description: "Фильтр по имени водителя."
+      - name: work_status
+        in: query
+        schema:
+          type: string
+          example: available
+        description: "Фильтр по рабочему статусу."
+      - name: truck_type
+        in: query
+        schema:
+          type: string
+          example: TENT
+        description: "Фильтр по типу кузова/транспорта."
+      - name: driver_type
+        in: query
+        schema:
+          type: string
+          example: freelancer
+        description: "Фильтр по типу водителя."
+      - name: account_status
+        in: query
+        schema:
+          type: string
+          example: active
+        description: "Фильтр по статусу аккаунта."
+      - name: has_photo
+        in: query
+        schema:
+          type: boolean
+          example: true
+        description: "Фильтр по наличию фотографии профиля."
+      - name: latitude
+        in: query
+        schema:
+          type: number
+          format: float
+          example: 41.3111
+        description: "Широта центра поиска по радиусу."
+      - name: longitude
+        in: query
+        schema:
+          type: number
+          format: float
+          example: 69.2797
+        description: "Долгота центра поиска по радиусу."
+      - name: radius_km
+        in: query
+        schema:
+          type: number
+          format: float
+          example: 25
+        description: "Радиус поиска в километрах."
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      - name: sort
+        in: query
+        schema:
+          type: string
+          default: updated_at:desc
+          example: updated_at:desc
+        description: "Сортировка в формате `поле:направление`."
+      responses:
+        '200':
+          description: "Результаты расширенного поиска водителей."
+  /v1/dispatchers/drivers/{driverId}:
+    get:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Карточка водителя по ID."
+      description: "Возвращает подробные данные конкретного водителя."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: driverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: "Данные водителя успешно получены."
+        '400':
+          description: invalid_driver_id
+        '403':
+          description: driver_not_linked
+        '404':
+          description: driver_not_found
+    patch:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Обновить данные водителя."
+      description: "Обновляет профильные и транспортные данные выбранного водителя."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: driverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                work_status:
+                  type: string
+                  example: available
+                driver_passport_series:
+                  type: string
+                driver_passport_number:
+                  type: string
+                driver_pinfl:
+                  type: string
+                driver_scan_status:
+                  type: boolean
+                driver_type:
+                  type: string
+                  example: freelancer
+                account_status:
+                  type: string
+                  example: active
+                driver_owner:
+                  type: boolean
+                kyc_status:
+                  type: string
+                  example: pending
+                registration_step:
+                  type: string
+                registration_status:
+                  type: string
+                  example: BASIC
+                power_plate_type:
+                  type: string
+                  example: TRACTOR
+                power_plate_number:
+                  type: string
+                power_tech_series:
+                  type: string
+                power_tech_number:
+                  type: string
+                power_owner_name:
+                  type: string
+                power_scan_status:
+                  type: boolean
+                trailer_plate_type:
+                  type: string
+                  example: REEFER
+                trailer_plate_number:
+                  type: string
+                trailer_tech_series:
+                  type: string
+                trailer_tech_number:
+                  type: string
+                trailer_owner_name:
+                  type: string
+                trailer_scan_status:
+                  type: boolean
+      responses:
+        '200':
+          description: "Данные водителя успешно обновлены."
+        '400':
+          description: invalid payload / validation errors
+        '403':
+          description: driver_must_accept_invitation
+        '404':
+          description: driver_not_found
+    delete:
+      tags:
+      - Driver Manager / Drivers & connections
+      summary: "Отвязать водителя от менеджера."
+      description: "Удаляет связь менеджера водителей с указанным водителем."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: driverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: data.message = unlinked
+        '403':
+          description: driver not found or not linked to you
+  /v1/dispatchers/trips:
+    get:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Список рейсов диспетчера."
+      description: "Возвращает рейсы с фильтрами по cargo/driver/status и параметрами пагинации."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: IN_PROGRESS,IN_TRANSIT
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          example: 50
+          minimum: 1
+          maximum: 100
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          example: 0
+          minimum: 0
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          example: created_at
+      - name: order
+        in: query
+        required: false
+        schema:
+          type: string
+          example: desc
+      responses:
+        '200':
+          description: data.items[], data.total, data.limit, data.offset
+        '401':
+          description: unauthorized
+  /v1/dispatchers/cargo/{id}/trips:
+    get:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Рейсы по конкретному грузу."
+      description: "Возвращает все рейсы, связанные с указанной карточкой груза."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "UUID груза."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: data.cargo_id, data.items[], data.total
+        '403':
+          description: not_your_cargo
+        '404':
+          description: cargo_not_found
+  /v1/dispatchers/trips/{id}:
+    get:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Детали рейса по ID."
+      description: "Возвращает полную информацию о рейсе по его идентификатору."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "UUID рейса."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: "Данные рейса успешно получены."
+        '403':
+          description: not_your_cargo
+        '404':
+          description: trip_not_found
+  /v1/dispatchers/trips/history:
+    get:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "История событий по рейсам."
+      description: "Возвращает ленту событий по рейсам для текущего диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: 'data.items[]: event_type, event_at, offer?/trip?'
+        '401':
+          description: unauthorized
+  /v1/dispatchers/trips/{id}/confirm-transition:
+    post:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Подтвердить переход статуса рейса."
+      description: "Подтверждает допустимый переход состояния рейса согласно бизнес-правилам."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: "Переход статуса успешно подтвержден."
+        '400':
+          description: invalid_status_transition | trip_completion_needs_driver_first | trip_completion_already_pending
+        '403':
+          description: not your cargo | trip_cargo_manager_completed_only (only CARGO_MANAGER can confirm COMPLETED; cargo manager cannot confirm intermediate steps)
+        '404':
+          description: trip not found
+  /v1/dispatchers/trips/{id}/assign-driver:
+    patch:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Назначить водителя на рейс."
+      description: "Привязывает водителя к рейсу, ожидающему назначения."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "UUID рейса."
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - driver_id
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: "Водитель успешно назначен."
+        '400':
+          description: invalid_payload_detail | freelance_cargo_assign_via_offer_or_recommendation
+        '404':
+          description: trip_not_found_or_not_pending_driver
+    post:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Назначить водителя на рейс (совместимость)."
+      description: "Альтернативный метод назначения водителя для legacy-клиентов."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "UUID рейса."
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - driver_id
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: "Водитель успешно назначен."
+        '400':
+          description: invalid_payload_detail | freelance_cargo_assign_via_offer_or_recommendation
+        '404':
+          description: trip_not_found_or_not_pending_driver
+  /v1/dispatchers/trips/{id}/cancel:
+    post:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Отменить рейс."
+      description: "Отменяет рейс и возвращает связанные сущности в согласованное состояние."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "UUID рейса."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: data.status=cancelled, data.trip_id, data.cargo_id, data.offer_id
+        '400':
+          description: trip already completed
+        '403':
+          description: not your cargo
+        '404':
+          description: trip not found
+  /v1/dispatchers/trips/{id}/state:
+    get:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Получить текущее состояние рейса."
+      description: "Возвращает состояние и служебные флаги рейса для UI."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+        '403':
+          description: not your cargo
+        '404':
+          description: trip not found
+  /v1/dispatchers/trip-notifications:
+    get:
+      tags:
+      - Dispatchers / Notifications & ratings
+      summary: "Список уведомлений по рейсам."
+      description: "Возвращает уведомления по рейсам и количество непрочитанных."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: unread_only
+        in: query
+        schema:
+          type: boolean
+          default: false
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.items[], data.unread_count
+  /v1/dispatchers/trip-notifications/read-all:
+    post:
+      tags:
+      - Dispatchers / Notifications & ratings
+      summary: "Отметить все уведомления прочитанными."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: data.updated
+  /v1/dispatchers/trip-notifications/{id}/read:
+    post:
+      tags:
+      - Dispatchers / Notifications & ratings
+      summary: "Отметить уведомление прочитанным."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: ok
+        '404':
+          description: trip_notification_not_found
+  /v1/dispatchers/sse/trip-notifications:
+    get:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "SSE-поток уведомлений по рейсам."
+      description: "Открывает event-stream с обновлениями по trip-notifications."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+        description: "JWT токен в query (для `EventSource`, если заголовок недоступен)."
+      responses:
+        '200':
+          description: "SSE-поток успешно открыт."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/dispatchers/sse/cargo-offers:
+    get:
+      tags:
+      - Cargo Manager / Offers
+      - Driver Manager / Offers
+      summary: "SSE-поток офферов."
+      description: "Открывает event-stream с событиями по офферам для диспетчера."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: "SSE-поток успешно открыт."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/dispatchers/sse/trip-status:
+    get:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "SSE-поток статусов рейсов."
+      description: "Открывает event-stream с изменениями статусов рейсов."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: "SSE-поток успешно открыт."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/dispatchers/sse/driver-updates:
+    get:
+      tags:
+      - Cargo Manager / Driver managers
+      - Driver Manager / Drivers & connections
+      summary: "SSE-поток обновлений водителей."
+      description: "Открывает event-stream с обновлениями профиля и статуса водителей."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/dispatchers/drivers/{driverId}/rating:
+    post:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Оценить водителя по рейсу."
+      description: "Создает оценку водителю в контексте завершенного рейса."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: driverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: "UUID водителя, которого оценивают."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../base.yaml#/components/schemas/ProfileTripRatingRequest'
+      responses:
+        '200':
+          description: ok
+        '400':
+          description: trip_rating_not_completed | trip_rating_invalid_stars | trip_rating_ratee_mismatch
+        '403':
+          description: not your cargo
+        '404':
+          description: trip not found
+  /v1/dispatchers/dispatchers/{dispatcherId}/rating:
+    post:
+      tags:
+      - Cargo Manager / Trips
+      - Driver Manager / Trips
+      summary: "Оценить диспетчера по рейсу."
+      description: "Создает оценку диспетчеру/менеджеру в контексте завершенного рейса."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: dispatcherId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: "UUID диспетчера, которого оценивают."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../base.yaml#/components/schemas/ProfileTripRatingRequest'
+      responses:
+        '200':
+          description: ok
+        '400':
+          description: trip_rating_not_completed | trip_rating_invalid_stars | trip_rating_ratee_mismatch
+        '403':
+          description: not_your_cargo
+        '404':
+          description: trip_not_found
+  /v1/dispatchers/offers/{id}/accept:
+    post:
+      tags:
+      - Cargo Manager / Offers
+      summary: "Принять оффер."
+      description: "Принимает оффер и запускает дальнейший сценарий (direct/via_driver_manager)."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "UUID оффера."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: cargo_id
+          offer_id: null
+          trip_id: null
+          trip_flow (direct|via_driver_manager): null
+          agreed_price: null
+          agreed_currency: null
+        '403':
+          description: not_your_cargo / only_dispatcher_accepts_driver_offer
+        '404':
+          description: offer_not_found_or_not_pending; data.reason
+        '409':
+          description: cargo_slots_full / cargo_not_searching / driver_busy; data.reason
+        '500':
+          description: failed_to_accept; data.reason
+  /v1/dispatchers/offers/{id}/accept-by-cargo-manager:
+    post:
+      tags:
+      - Cargo Manager / Offers
+      summary: "Принять оффер от имени карго-менеджера."
+      description: "Явный метод принятия оффера для роли `CARGO_MANAGER`."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: cargo_id
+          offer_id: null
+          trip_id: null
+          trip_flow (direct|via_driver_manager): null
+          agreed_price: null
+          agreed_currency: null
+        '403':
+          description: not_your_cargo / only_dispatcher_accepts_driver_offer
+        '404':
+          description: offer_not_found_or_not_pending; data.reason
+        '409':
+          description: cargo_slots_full / cargo_not_searching / driver_busy; data.reason
+        '500':
+          description: failed_to_accept; data.reason
+  /v1/dispatchers/offers/{id}/accept-by-driver-manager:
+    post:
+      tags:
+      - Driver Manager / Offers
+      summary: "Принять оффер от имени менеджера водителей."
+      description: "Явный метод принятия оффера для роли `DRIVER_MANAGER`."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: cargo_id
+          offer_id: null
+          trip_id: null
+          trip_flow (direct|via_driver_manager): null
+          agreed_price: null
+          agreed_currency: null
+        '403':
+          description: not_your_cargo / only_driver_or_manager_accepts_dispatcher_offer
+        '404':
+          description: offer_not_found_or_not_pending; data.reason
+        '409':
+          description: cargo_slots_full / cargo_not_searching / driver_busy; data.reason
+        '500':
+          description: failed_to_accept; data.reason
+  /v1/dispatchers/offers/{id}:
+    get:
+      tags:
+      - Cargo Manager / Offers
+      - Driver Manager / Offers
+      summary: "Получить оффер по ID."
+      description: "Возвращает оффер, связанную карточку груза и рейс (если уже создан)."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "UUID оффера."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: data.offer, data.cargo, data.trip|null
+        '403':
+          description: not_your_cargo
+        '404':
+          description: offer_not_found / cargo_not_found
+  /v1/dispatchers/offers/{id}/reject:
+    post:
+      tags:
+      - Cargo Manager / Offers
+      summary: "Отклонить оффер."
+      description: "Отклоняет оффер с указанием причины."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  description: "Причина отклонения оффера."
+      responses:
+        '200':
+          description: "Оффер успешно отклонен."
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending
+        '403':
+          description: not_your_cargo
+        '404':
+          description: offer_not_found
+  /v1/dispatchers/offers/{id}/reject-with-reason:
+    post:
+      tags:
+      - Cargo Manager / Offers
+      summary: "Отклонить оффер (расширенный метод)."
+      description: "Отклоняет оффер с обязательной текстовой причиной."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: "Оффер успешно отклонен."
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending
+        '403':
+          description: not_your_cargo
+        '404':
+          description: offer_not_found
+  /v1/dispatchers/offers/{id}/reject-by-driver-manager:
+    post:
+      tags:
+      - Driver Manager / Offers
+      summary: "Отклонить оффер менеджером водителей."
+      description: "Отклоняет оффер от имени роли `DRIVER_MANAGER`."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: "Оффер успешно отклонен."
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending
+        '403':
+          description: not_your_cargo
+        '404':
+          description: offer_not_found
+  /v1/dispatchers/offers/{id}/cancel-by-driver-manager:
+    post:
+      tags:
+      - Driver Manager / Offers
+      summary: "Отменить оффер менеджером водителей."
+      description: "Отменяет ранее отправленный оффер от имени `DRIVER_MANAGER`."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: "Оффер успешно отменен."
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending
+        '403':
+          description: not_your_cargo
+        '404':
+          description: offer_not_found
+  /v1/dispatchers/offers/all:
+    get:
+      tags:
+      - Cargo Manager / Offers
+      - Driver Manager / Offers
+      summary: "Полный список офферов."
+      description: "Возвращает входящие и исходящие офферы с расширенной фильтрацией."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: direction
+        in: query
+        required: false
+        description: "Направление офферов: `all`, `incoming`, `outgoing`."
+        schema:
+          type: string
+          example: all
+      - name: counterparty_id
+        in: query
+        required: false
+        description: "UUID контрагента для фильтрации."
+        schema:
+          type: string
+          format: uuid
+      - name: to_driver_id
+        in: query
+        required: false
+        description: "UUID водителя-получателя."
+        schema:
+          type: string
+          format: uuid
+      - name: from_driver_id
+        in: query
+        required: false
+        description: "UUID водителя-отправителя."
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: PENDING
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.items, data.total, data.page, data.limit, data.direction, data.counterparty_id, data.counts.incoming, data.counts.outgoing
+        '400':
+          description: invalid_payload_detail
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list_sent_offers
+  /v1/dispatchers/cargo/{id}/offers/send-by-driver-manager:
+    post:
+      tags:
+      - Driver Manager / Offers
+      summary: "Отправить оффер как менеджер водителей."
+      description: "Создает оффер по грузу от имени роли `DRIVER_MANAGER`."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../base.yaml#/components/schemas/OfferCreateRequest'
+      responses:
+        '201':
+          description: created
+        '400':
+          description: invalid_payload_detail / cargo_not_searching
+        '403':
+          description: not_your_driver_or_cargo / cargo_visible_only_to_company_drivers
+        '404':
+          description: cargo_not_found
+        '409':
+          description: dispatcher_offer_already_exists / driver_offer_already_exists / cargo_slots_full
+  /v1/dispatchers/cargo/{id}/offers/send-by-cargo-manager:
+    post:
+      tags:
+      - Cargo Manager / Offers
+      summary: "Отправить оффер как карго-менеджер."
+      description: "Создает оффер по грузу от имени роли `CARGO_MANAGER`."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../base.yaml#/components/schemas/OfferCreateRequest'
+      responses:
+        '201':
+          description: created
+        '400':
+          description: invalid_payload_detail / cargo_not_searching
+        '403':
+          description: not_your_driver_or_cargo / cargo_visible_only_to_company_drivers
+        '404':
+          description: cargo_not_found
+        '409':
+          description: dispatcher_offer_already_exists / driver_offer_already_exists / cargo_slots_full
+  /v1/dispatchers/cargo/{id}/offers/send-to-driver-manager:
+    post:
+      tags:
+      - Cargo Manager / Offers
+      summary: "Отправить оффер менеджеру водителей."
+      description: "Создает оффер по грузу с адресацией конкретному менеджеру водителей."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - driver_manager_id
+              - price
+              - currency
+              properties:
+                driver_manager_id:
+                  type: string
+                  format: uuid
+                price:
+                  type: number
+                  example: 1500
+                currency:
+                  type: string
+                  example: USD
+                comment:
+                  type: string
+      responses:
+        '201':
+          description: data.request_id, data.status=PENDING
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: not_your_cargo / invalid_manager_role
+        '404':
+          description: cargo_not_found / dispatcher_not_found
+        '500':
+          description: failed_to_create_offer
+  /v1/dispatchers/cargo/mine:
+    get:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Мои грузы диспетчера."
+      description: "Возвращает грузы, доступные текущему диспетчеру, с фильтрами и пагинацией."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      - name: sort
+        in: query
+        schema:
+          type: string
+          example: created_at:desc
+      - name: status
+        in: query
+        description: "Список статусов через запятую."
+        schema:
+          type: string
+          example: SEARCHING_ALL,COMPLETED
+      - name: truck_type
+        in: query
+        schema:
+          type: string
+          example: TENT
+      - name: weight_min
+        in: query
+        schema:
+          type: number
+      - name: weight_max
+        in: query
+        schema:
+          type: number
+      - name: created_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: created_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: with_offers
+        in: query
+        schema:
+          type: boolean
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: company_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: from_city_code
+        in: query
+        schema:
+          type: string
+          example: TAS
+      - name: to_city_code
+        in: query
+        schema:
+          type: string
+          example: SAM
+      responses:
+        '200':
+          description: data.items, data.total
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list
+  /v1/dispatchers/cargo/all:
+    get:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Все грузы диспетчера."
+      description: "Возвращает расширенный список грузов по доступному контуру роли."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      - name: sort
+        in: query
+        schema:
+          type: string
+          example: created_at:desc
+      - name: status
+        in: query
+        description: "Список статусов через запятую."
+        schema:
+          type: string
+          example: SEARCHING_ALL
+      - name: truck_type
+        in: query
+        schema:
+          type: string
+          example: TENT
+      - name: weight_min
+        in: query
+        schema:
+          type: number
+      - name: weight_max
+        in: query
+        schema:
+          type: number
+      - name: created_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: created_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: with_offers
+        in: query
+        schema:
+          type: boolean
+      - name: q
+        in: query
+        schema:
+          type: string
+      - name: company_id
+        in: query
+        schema:
+          type: string
+          format: uuid
+      - name: from_city_code
+        in: query
+        schema:
+          type: string
+          example: TAS
+      - name: to_city_code
+        in: query
+        schema:
+          type: string
+          example: SAM
+      responses:
+        '200':
+          description: data.items, data.total
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list
+  /v1/dispatchers/cargo/export.xlsx:
+    get:
+      tags:
+      - Cargo Manager / Cargo
+      - Driver Manager / Cargo
+      summary: "Экспорт грузов в Excel."
+      description: "Формирует XLSX-файл с выгрузкой грузов по заданным фильтрам."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          example: PENDING_MODERATION,SEARCHING_ALL
+        description: "Фильтр по статусам грузов (через запятую)."
+      - name: weight_min
+        in: query
+        schema:
+          type: number
+      - name: weight_max
+        in: query
+        schema:
+          type: number
+      - name: truck_type
+        in: query
+        schema:
+          type: string
+          example: TENT
+      - name: created_from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: created_to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: with_offers
+        in: query
+        schema:
+          type: boolean
+      - name: sort
+        in: query
+        schema:
+          type: string
+          example: created_at:desc
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: error
+                    code: 400
+                    description: Too many cargo rows for one export. Narrow filters or increase limit. See data.max and data.total.
+                    data:
+                      max: 20000
+                      total: 25000
+                ru:
+                  summary: "Краткое описание."
+                  value:
+                    status: error
+                    code: 400
+                    description: "Описание на русском языке."
+                    data:
+                      max: 20000
+                      total: 25000
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: error
+                    code: 400
+                    description: Bitta eksport uchun juda ko'p yuk. Filtrlarni toraytiring. data.max va data.total ga qarang.
+                    data:
+                      max: 20000
+                      total: 25000
+                tr:
+                  summary: "Краткое описание."
+                  value:
+                    status: error
+                    code: 400
+                    description: "Описание на русском языке."
+                    data:
+                      max: 20000
+                      total: 25000
+                zh:
+                  summary: "Краткое описание."
+                  value:
+                    status: error
+                    code: 400
+                    description: "Описание на русском языке."
+                    data:
+                      max: 20000
+                      total: 25000
+        '401':
+          description: "Описание на русском языке."
+        '500':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/dispatchers/favorite-drivers:
+    get:
+      deprecated: true
+      tags:
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              driver_id:
+                                type: string
+                                format: uuid
+                              created_at:
+                                type: string
+                                format: date-time
+                              driver:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                    format: uuid
+                                  phone:
+                                    type: string
+                                  name:
+                                    type: string
+                                  work_status:
+                                    type: string
+                                  driver_type:
+                                    type: string
+                                  rating:
+                                    type: number
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: success
+                    code: 200
+                    description: OK
+                    data:
+                      items:
+                      - driver_id: 11111111-2222-3333-4444-555555555555
+                        created_at: '2026-03-23T16:00:00Z'
+                        driver:
+                          id: 11111111-2222-3333-4444-555555555555
+                          phone: '+998901234567'
+                          name: John
+                          work_status: available
+                          driver_type: FREELANCER
+                          rating: 4.8
+                ru:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      items:
+                      - driver_id: 11111111-2222-3333-4444-555555555555
+                        created_at: '2026-03-23T16:00:00Z'
+                        driver:
+                          id: 11111111-2222-3333-4444-555555555555
+                          phone: '+998901234567'
+                          name: John
+                          work_status: available
+                          driver_type: FREELANCER
+                          rating: 4.8
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: success
+                    code: 200
+                    description: Muvaffaqiyatli
+                    data:
+                      items:
+                      - driver_id: 11111111-2222-3333-4444-555555555555
+                        created_at: '2026-03-23T16:00:00Z'
+                        driver:
+                          id: 11111111-2222-3333-4444-555555555555
+                          phone: '+998901234567'
+                          name: John
+                          work_status: available
+                          driver_type: FREELANCER
+                          rating: 4.8
+                tr:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      items:
+                      - driver_id: 11111111-2222-3333-4444-555555555555
+                        created_at: '2026-03-23T16:00:00Z'
+                        driver:
+                          id: 11111111-2222-3333-4444-555555555555
+                          phone: '+998901234567'
+                          name: John
+                          work_status: available
+                          driver_type: FREELANCER
+                          rating: 4.8
+                zh:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      items:
+                      - driver_id: 11111111-2222-3333-4444-555555555555
+                        created_at: '2026-03-23T16:00:00Z'
+                        driver:
+                          id: 11111111-2222-3333-4444-555555555555
+                          phone: '+998901234567'
+                          name: John
+                          work_status: available
+                          driver_type: FREELANCER
+                          rating: 4.8
+        '500':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: error
+                    code: 500
+                    description: Failed to list favorites
+                    data: null
+                ru:
+                  summary: "Краткое описание."
+                  value:
+                    status: error
+                    code: 500
+                    description: "Описание на русском языке."
+                    data: null
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: error
+                    code: 500
+                    description: Sevimlilarni olishda xato
+                    data: null
+                tr:
+                  summary: "Краткое описание."
+                  value:
+                    status: error
+                    code: 500
+                    description: Favoriler listelenemedi
+                    data: null
+                zh:
+                  summary: "Краткое описание."
+                  value:
+                    status: error
+                    code: 500
+                    description: "Описание на русском языке."
+                    data: null
+    post:
+      deprecated: true
+      tags:
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+              required:
+              - driver_id
+      responses:
+        '201':
+          description: favorite_added
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: success
+                    code: 201
+                    description: Added to favorites
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                ru:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 201
+                    description: "Описание на русском языке."
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: success
+                    code: 201
+                    description: Sevimlilarga qo'shildi
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                tr:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 201
+                    description: Favorilere eklendi
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                zh:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 201
+                    description: "Описание на русском языке."
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+        '200':
+          description: favorite_already_exists (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: success
+                    code: 200
+                    description: Already in favorites
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                ru:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: success
+                    code: 200
+                    description: Allaqachon sevimlilarda
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                tr:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: Zaten favorilerde
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                zh:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+        '400':
+          description: invalid_payload_detail
+        '404':
+          description: driver_not_found
+        '500':
+          description: "Описание на русском языке."
+  /v1/dispatchers/favorite-drivers/{driverId}:
+    delete:
+      deprecated: true
+      tags:
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: driverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: favorite_deleted
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: success
+                    code: 200
+                    description: Removed from favorites
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                ru:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: success
+                    code: 200
+                    description: Sevimlilardan olib tashlandi
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                tr:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+                zh:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      driver_id: 11111111-2222-3333-4444-555555555555
+        '404':
+          description: favorite_not_found
+        '500':
+          description: "Описание на русском языке."
+  /v1/dispatchers/cargo-likes:
+    get:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              cargo_id:
+                                type: string
+                                format: uuid
+                              created_at:
+                                type: string
+                                format: date-time
+                              cargo:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                    format: uuid
+                                  weight:
+                                    type: number
+                                  volume:
+                                    type: number
+                                  truck_type:
+                                    type: string
+                                  status:
+                                    type: string
+        '500':
+          description: failed_to_list_favorites
+    post:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - cargo_id
+              properties:
+                cargo_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: favorite_added
+        '200':
+          description: favorite_already_exists
+        '400':
+          description: invalid_payload_detail
+        '404':
+          description: cargo_not_found
+        '500':
+          description: failed_to_create_favorite
+  /v1/dispatchers/cargo-likes/{cargoId}:
+    delete:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: cargoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: favorite_deleted
+        '404':
+          description: favorite_not_found
+        '500':
+          description: failed_to_delete_favorite
+  /v1/dispatchers/favorite-cargo:
+    get:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '500':
+          description: failed_to_list_favorites
+    post:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - cargo_id
+              properties:
+                cargo_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: favorite_added
+        '200':
+          description: favorite_already_exists
+        '400':
+          description: invalid_payload_detail
+        '404':
+          description: cargo_not_found
+        '500':
+          description: failed_to_create_favorite
+  /v1/dispatchers/favorite-cargo/{cargoId}:
+    delete:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: cargoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: favorite_deleted
+        '404':
+          description: favorite_not_found
+        '500':
+          description: failed_to_delete_favorite
+  /v1/dispatchers/driver-likes:
+    get:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              driver_id:
+                                type: string
+                                format: uuid
+                              created_at:
+                                type: string
+                                format: date-time
+                              driver:
+                                type: object
+                                properties:
+                                  id:
+                                    type: string
+                                    format: uuid
+                                  phone:
+                                    type: string
+                                  name:
+                                    type: string
+                                  work_status:
+                                    type: string
+                                  driver_type:
+                                    type: string
+                                  rating:
+                                    type: number
+        '500':
+          description: failed_to_list_favorites
+    post:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - driver_id
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: favorite_added
+        '200':
+          description: favorite_already_exists
+        '400':
+          description: invalid_payload_detail
+        '404':
+          description: driver_not_found
+        '500':
+          description: failed_to_create_favorite
+  /v1/dispatchers/driver-likes/{driverId}:
+    delete:
+      tags:
+      - Cargo Manager / Likes
+      - Driver Manager / Likes
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: driverId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: favorite_deleted
+        '404':
+          description: favorite_not_found
+        '500':
+          description: failed_to_delete_favorite
+  /v1/dispatchers/dispatchers/catalog:
+    get:
+      tags:
+      - Cargo Manager / Driver managers
+      - Driver Manager / Drivers & connections
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          example: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          example: 0
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '99890'
+      - name: phone_hint
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '+99890'
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: active
+      - name: work_status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: available
+      - name: has_photo
+        in: query
+        required: false
+        schema:
+          type: boolean
+          example: true
+      - name: rating_min
+        in: query
+        required: false
+        schema:
+          type: number
+          format: float
+          example: 4.5
+      - name: rating_max
+        in: query
+        required: false
+        schema:
+          type: number
+          format: float
+          example: 5
+      - name: role
+        in: query
+        required: false
+        schema:
+          $ref: '../base.yaml#/components/schemas/FreelanceDispatcherRole'
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: data.items + data.total + limit/offset
+        '400':
+          description: "Описание на русском языке."
+        '401':
+          description: unauthorized
+  /v1/dispatchers/analytics/cargo-manager/dashboard:
+    get:
+      tags:
+      - Cargo Manager / Analytics
+      summary: Дашборд аналитики Cargo Manager
+      description: "Полная аналитика для роли CARGO_MANAGER: KPI, таймлайн, топ-маршруты и топ водителей."
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [day, week, month]
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Данные дашборда Cargo Manager
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/CMAnalyticsDashboardData'
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (роль не CARGO_MANAGER)
+        '500':
+          description: internal_error
+  /v1/dispatchers/analytics/cargo-manager/export.xlsx:
+    get:
+      tags:
+      - Cargo Manager / Analytics
+      summary: Экспорт аналитики Cargo Manager в Excel
+      description: Экспортирует ту же аналитику, что и dashboard, в XLSX.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [day, week, month]
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: sections
+        in: query
+        required: false
+        schema:
+          type: string
+          example: summary,kpi,funnel,timeline,top,contracts
+      - name: contract_scope
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [all, successful, cancelled, in_execution]
+          default: all
+      responses:
+        '200':
+          description: XLSX-файл
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (роль не CARGO_MANAGER)
+        '500':
+          description: internal_error
+  /v1/dispatchers/analytics/driver-manager/dashboard:
+    get:
+      tags:
+      - Driver Manager / Analytics
+      summary: Дашборд аналитики Driver Manager
+      description: "Полная аналитика для роли DRIVER_MANAGER: KPI по водителям, офферам, рейсам и таймлайн."
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [day, week, month]
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Данные дашборда Driver Manager
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/DMAnalyticsDashboardData'
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (роль не DRIVER_MANAGER)
+        '500':
+          description: internal_error
+  /v1/dispatchers/analytics/driver-manager/export.xlsx:
+    get:
+      tags:
+      - Driver Manager / Analytics
+      summary: Экспорт аналитики Driver Manager в Excel
+      description: Экспортирует ту же аналитику, что и dashboard, в XLSX.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: date_from
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: date_to
+        in: query
+        required: true
+        schema:
+          type: string
+          format: date
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [day, week, month]
+          default: day
+      - name: timezone
+        in: query
+        required: false
+        schema:
+          type: string
+          default: Asia/Tashkent
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: from_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to_city_code
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: cargo_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: sections
+        in: query
+        required: false
+        schema:
+          type: string
+          example: summary,kpi,funnel,timeline,top,contracts
+      - name: contract_scope
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [all, successful, cancelled, in_execution]
+          default: all
+      responses:
+        '200':
+          description: XLSX-файл
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (роль не DRIVER_MANAGER)
+        '500':
+          description: internal_error
+
+
+
+  # cargo_manager

@@ -1,4 +1,0 @@
-ALTER TABLE drivers
-  ADD COLUMN IF NOT EXISTS power_plate_type VARCHAR NULL,
-  ADD COLUMN IF NOT EXISTS trailer_plate_type VARCHAR NULL;
-

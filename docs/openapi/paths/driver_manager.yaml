@@ -1,0 +1,307 @@
+paths:
+  /v1/dispatchers/driver-managers:
+    get:
+      tags:
+      - Cargo Manager / Driver managers
+      summary: "Список менеджеров водителей."
+      description: "Возвращает менеджеров водителей для карго-менеджера с фильтрами."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '99890'
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: active
+      - name: work_status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: available
+      - name: has_photo
+        in: query
+        required: false
+        schema:
+          type: boolean
+      - name: rating_min
+        in: query
+        required: false
+        schema:
+          type: number
+          example: 3.5
+      - name: rating_max
+        in: query
+        required: false
+        schema:
+          type: number
+          example: 5.0
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.items[], data.total, data.page, data.limit
+        '403':
+          description: invalid_manager_role
+        '401':
+          description: dispatcher_not_found / unauthorized
+  /v1/dispatchers/driver-managers/{dispatcherId}/drivers:
+    get:
+      tags:
+      - Cargo Manager / Driver managers
+      summary: "Водители конкретного менеджера."
+      description: "Возвращает список водителей, связанных с указанным менеджером водителей."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: dispatcherId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: phone
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: name
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: work_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: truck_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: driver_type
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: account_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: has_photo
+        in: query
+        required: false
+        schema:
+          type: boolean
+      - name: sort
+        in: query
+        required: false
+        schema:
+          type: string
+          example: updated_at:desc
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.driver_manager, data.items[], data.total, data.page, data.limit, data.total_pages, data.has_next
+        '400':
+          description: invalid_id / invalid_manager_role / invalid_payload_detail
+        '403':
+          description: invalid_manager_role
+        '404':
+          description: dispatcher_not_found
+  /v1/dispatchers/driver-manager/sse/events:
+    get:
+      tags:
+      - Driver Manager / SSE
+      summary: "Унифицированный SSE-поток для менеджера водителей."
+      description: |
+        Поток объединяет уведомления, статусы рейсов, события по офферам,
+        обновления водителей и чат-события для роли `DRIVER_MANAGER`.
+        > [`SSEDispatcherUnifiedEvent`](../base.yaml#/components/schemas/SSEDispatcherUnifiedEvent).**
+
+        ```js
+        const url = new URL(`${API}/v1/dispatchers/driver-manager/sse/events`);
+        url.searchParams.set("token",        jwt);
+        url.searchParams.set("device_type",  "web");
+        url.searchParams.set("language",     "ru");
+        url.searchParams.set("client_token", CLIENT_TOKEN);
+        const es = new EventSource(url.toString());
+        es.onmessage = (e) => route(JSON.parse(e.data));
+        ```
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - $ref: '../base.yaml#/components/parameters/SSEQueryToken'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryDeviceType'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryLanguage'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryClientToken'
+      responses:
+        '200':
+          description: |
+            Поток открыт и передает события в формате `text/event-stream`.
+            Heartbeat отправляется как `: ping`.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                connected_banner:
+                  $ref: '../base.yaml#/components/examples/SSEConnectedBanner'
+                trip_status:
+                  $ref: '../base.yaml#/components/examples/SSEFrameTripStatus'
+                trip_notification_completed:
+                  $ref: '../base.yaml#/components/examples/SSEFrameTripNotificationCompleted'
+                cargo_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCargoOfferAccepted'
+                connection_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameConnectionOfferAccepted'
+                driver_update:
+                  $ref: '../base.yaml#/components/examples/SSEFrameDriverUpdate'
+                chat_message:
+                  $ref: '../base.yaml#/components/examples/SSEFrameChatMessage'
+                call_ringing:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCallRinging'
+        '401':
+          description: 'unauthorized'
+        '403':
+          description: "Недостаточно прав (`forbidden_role`)."
+        '503':
+          description: "SSE-сервис временно недоступен."
+  /v1/dispatchers/driver-manager/sse/notifications:
+    get:
+      tags:
+      - Driver Manager / SSE
+      summary: "SSE уведомлений для менеджера водителей."
+      description: |
+        Поток уведомлений inbox для роли `DRIVER_MANAGER`.
+        `GET /v1/dispatchers/notifications`.
+        Содержит события по связям, офферам, рейсам и чату.
+        > [`SSEDispatcherUnifiedEvent`](../base.yaml#/components/schemas/SSEDispatcherUnifiedEvent).**
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - $ref: '../base.yaml#/components/parameters/SSEQueryToken'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryDeviceType'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryLanguage'
+      - $ref: '../base.yaml#/components/parameters/SSEQueryClientToken'
+      responses:
+        '200':
+          description: |
+            Поток открыт, события поступают в формате `text/event-stream`.
+            Для поддержания соединения отправляется heartbeat.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                connected_banner:
+                  $ref: '../base.yaml#/components/examples/SSEConnectedBanner'
+                trip_notification_completed:
+                  $ref: '../base.yaml#/components/examples/SSEFrameTripNotificationCompleted'
+                cargo_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCargoOfferAccepted'
+                connection_offer_accepted:
+                  $ref: '../base.yaml#/components/examples/SSEFrameConnectionOfferAccepted'
+                driver_update:
+                  $ref: '../base.yaml#/components/examples/SSEFrameDriverUpdate'
+                chat_message:
+                  $ref: '../base.yaml#/components/examples/SSEFrameChatMessage'
+                call_ringing:
+                  $ref: '../base.yaml#/components/examples/SSEFrameCallRinging'
+        '401':
+          description: 'unauthorized'
+        '403':
+          description: '`forbidden_role`'
+        '503':
+          description: "SSE-сервис временно недоступен."
+  /v1/dispatchers/driver-manager-offers/{id}/accept:
+    post:
+      tags:
+      - Driver Manager / Offers
+      - Cargo Manager / Offers
+      summary: "Принять оффер менеджера водителей."
+      description: "Подтверждает оффер и переводит его в ожидание подтверждения водителем."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - driver_id
+              properties:
+                driver_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: data.status=waiting_driver_confirm, data.offer_id
+        '400':
+          description: invalid_payload_detail / offer_not_found_or_not_pending / invalid_manager_role
+        '403':
+          description: not_your_offer / not_your_driver_or_cargo / invalid_manager_role
+        '404':
+          description: offer_not_found / dispatcher_not_found
+        '500':
+          description: failed_to_create_offer / internal_error
+  # admin

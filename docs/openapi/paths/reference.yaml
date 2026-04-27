@@ -1,0 +1,256 @@
+paths:
+  /v1/reference/drivers:
+    get:
+      tags:
+      - Reference
+      summary: "Справочники для раздела водителей."
+      description: "Возвращает значения для фильтров и форм в драйверском контуре."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/ReferenceDriversResponse'
+  /v1/reference/cargo:
+    get:
+      tags:
+      - Reference
+      summary: "Справочники для раздела грузов."
+      description: "Возвращает справочные значения для карточек и фильтров грузов."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/ReferenceCargoResponse'
+  /v1/reference/company:
+    get:
+      tags:
+      - Reference
+      summary: "Справочники для компании."
+      description: "Возвращает типы компаний, статусы и роли пользователей компании."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/ReferenceCompanyResponse'
+  /v1/reference/admin:
+    get:
+      tags:
+      - Reference
+      summary: "Справочники для админ-раздела."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/ReferenceAdminResponse'
+  /v1/reference/dispatchers:
+    get:
+      tags:
+      - Reference
+      summary: "Справочники для диспетчеров."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/ReferenceDispatchersResponse'
+  /v1/reference/cities:
+    get:
+      tags:
+      - Reference
+      summary: "Справочник городов."
+      description: "Возвращает список городов по стране и поисковой строке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      parameters:
+      - name: country_code
+        in: query
+        schema:
+          type: string
+          example: UZ
+        description: "Код страны (например, `UZ`)."
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          example: tas
+        description: "Поисковая строка по коду или названию города."
+      responses:
+        '200':
+          description: "Список городов успешно получен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            code:
+                              type: string
+                              example: TAS
+                            name:
+                              type: string
+                              example: Ташкент
+                            country_code:
+                              type: string
+                              example: UZ
+                            lat:
+                              type: number
+                              nullable: true
+                            lng:
+                              type: number
+                              nullable: true
+  /v1/reference/cargo-types/hint:
+    get:
+      tags:
+      - Reference
+      summary: "Подсказки по типам груза."
+      description: "Возвращает подходящие типы груза по поисковой строке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          example: пшен
+        description: "Фрагмент названия или кода типа груза."
+      responses:
+        '200':
+          description: "Список подсказок по типам груза."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              id:
+                                type: string
+                                format: uuid
+                                description: "UUID типа груза."
+                              code:
+                                type: string
+                                description: "Системный код типа груза."
+                              name:
+                                type: string
+                                description: "Отображаемое название типа груза."
+  /v1/reference/countries:
+    get:
+      tags:
+      - Reference
+      summary: "Справочник стран."
+      description: "Возвращает список стран для форм маршрута и фильтров."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          example: uz
+        description: "Поиск по коду или названию страны."
+      responses:
+        '200':
+          description: "Список стран успешно получен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            code:
+                              type: string
+                              example: UZ
+                            name:
+                              type: string
+                              example: Узбекистан
+        '400':
+          description: 'invalid X-Language (allowed: ru, uz, en, tr, zh)'
+  # company

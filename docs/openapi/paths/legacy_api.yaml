@@ -1,0 +1,587 @@
+paths:
+  /api/cargo:
+    post:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Создать карточку груза."
+      description: "Создает новый груз с маршрутом, параметрами перевозки и условиями оплаты."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../base.yaml#/components/schemas/CargoCreateRequest'
+            description: "JSON-тело запроса создания груза."
+            examples:
+              freelance_dispatcher:
+                summary: "Пример для фриланс-диспетчера."
+                value:
+                  name: "Металлопрокат"
+                  packaging: "Паллеты"
+                  packaging_amount: 120
+                  dimensions: 13.6x2.45x2.7
+                  photos:
+                  - https://cdn.example.com/cargo/123-photo1.jpg
+                  - https://cdn.example.com/cargo/123-photo2.jpg
+                  weight: 20
+                  volume: 82
+                  vehicles_amount: 1
+                  power_plate_type: TRUCK
+                  trailer_plate_type: TENTED
+                  ready_enabled: true
+                  ready_at: '2026-03-15T08:00:00Z'
+                  comment: "Требуется аккуратная погрузка."
+                  adr_enabled: false
+                  adr_class: null
+                  loading_types:
+                  - TOP
+                  - SIDE
+                  unloading_types:
+                  - REAR
+                  is_two_drivers_required: false
+                  shipment_type: FTL
+                  belts_count: 6
+                  documents:
+                    TIR: true
+                    T1: false
+                    CMR: true
+                    Medbook: false
+                    GLONASS: false
+                    Seal: true
+                    Permit: false
+                  contact_name: "Иван Петров"
+                  contact_phone: '+998901234567'
+                  route_points:
+                  - type: LOAD
+                    country_code: UZ
+                    city_code: TAS
+                    address: "Ташкент, Сергелийский район, склад №5"
+                    orientir: "Рядом с КПП №2"
+                    lat: 41.311081
+                    lng: 69.240562
+                    place_id: maps-tas-warehouse-5
+                    comment: "Погрузка через боковые ворота"
+                    point_order: 1
+                    is_main_load: true
+                    is_main_unload: false
+                    date: '2026-03-23T08:00:00Z'
+                  - type: UNLOAD
+                    country_code: UZ
+                    city_code: SAM
+                    address: "Самарканд, терминал А"
+                    orientir: "Зона выгрузки 3"
+                    lat: 39.654167
+                    lng: 66.959722
+                    place_id: maps-sam-terminal-a
+                    comment: "Связаться с кладовщиком за 30 минут"
+                    point_order: 2
+                    is_main_load: false
+                    is_main_unload: true
+                    date: '2026-03-24T14:00:00Z'
+                  way_points:
+                  - type: CUSTOMS
+                    country_code: UZ
+                    city_code: TAS
+                    address: "Ташкент, таможенный терминал"
+                    lat: 41.22
+                    lng: 69.21
+                    comment: "Проверка документов"
+                  payment:
+                    is_negotiable: false
+                    price_request: false
+                    total_amount: 1500
+                    total_currency: USD
+                    with_prepayment: true
+                    prepayment_amount: 500
+                    prepayment_currency: USD
+                    prepayment_type: BANK_TRANSFER
+                    remaining_amount: 1000
+                    remaining_currency: USD
+                    remaining_type: ON_DELIVERY
+                    payment_note: "Оплата по договору"
+                    payment_terms_note: "50% предоплата, остаток после выгрузки"
+              company:
+                summary: "Пример для компании."
+                value:
+                  name: "Сборный груз FMCG"
+                  weight: 20
+                  volume: 82
+                  vehicles_amount: 1
+                  power_plate_type: TRUCK
+                  trailer_plate_type: TENTED
+                  contact_name: "Логист компании"
+                  contact_phone: '+998901234567'
+                  company_id: aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+                  route_points:
+                  - type: LOAD
+                    country_code: UZ
+                    city_code: TAS
+                    address: "Ташкент, склад компании"
+                    lat: 41.311081
+                    lng: 69.240562
+                    point_order: 1
+                    date: '2026-03-23T08:00:00Z'
+                  - type: UNLOAD
+                    country_code: UZ
+                    city_code: SAM
+                    address: "Самарканд, распределительный центр"
+                    lat: 39.654167
+                    lng: 66.959722
+                    point_order: 2
+                    date: '2026-03-24T14:00:00Z'
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - data
+              properties:
+                data:
+                  type: string
+                  description: "JSON-строка с данными CargoCreateRequest."
+                photos:
+                  type: array
+                  description: "Массив файлов фотографий груза."
+                  items:
+                    type: string
+                    format: binary
+                photo:
+                  type: string
+                  format: binary
+                  description: "Одиночный файл фотографии груза (совместимость)."
+            encoding:
+              data:
+                contentType: text/plain
+      responses:
+        '201':
+          description: "Груз успешно создан."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/CargoDetailResponse'
+                      description: "Созданная карточка груза."
+        '400':
+          description: "Ошибка валидации запроса."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '500':
+          description: "Внутренняя ошибка сервера."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+    get:
+      tags:
+      - Legacy / Deprecated
+      deprecated: true
+      summary: "Получить список грузов (устаревший метод)."
+      description: "Возвращает список грузов по фильтрам. Метод помечен как deprecated."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      parameters:
+      - name: status
+        in: query
+        schema:
+          type: string
+          example: SEARCHING_ALL,SEARCHING_COMPANY
+        description: "Фильтр по статусам грузов (через запятую)."
+      - name: weight_min
+        in: query
+        schema:
+          type: number
+          example: 10
+        description: "Минимальный вес груза для фильтрации."
+      - name: weight_max
+        in: query
+        schema:
+          type: number
+          example: 25
+        description: "Максимальный вес груза для фильтрации."
+      - name: truck_type
+        in: query
+        schema:
+          type: string
+          example: TENT
+        description: "Фильтр по типу кузова/транспорта."
+      - name: created_from
+        in: query
+        schema:
+          type: string
+          format: date
+        description: "Начальная дата создания груза (включительно)."
+      - name: created_to
+        in: query
+        schema:
+          type: string
+          format: date
+        description: "Конечная дата создания груза (включительно)."
+      - name: with_offers
+        in: query
+        schema:
+          type: boolean
+        description: "Если `true`, возвращать только грузы, по которым есть офферы."
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          example: 1
+        description: "Номер страницы (начиная с 1)."
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+          example: 20
+        description: "Количество элементов на страницу."
+      - name: sort
+        in: query
+        schema:
+          type: string
+          example: created_at:desc
+        description: "Сортировка в формате `поле:направление`, например `created_at:desc`."
+      responses:
+        '200':
+          description: 'data = { items: Cargo[], total: number }'
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/CargoListResponse'
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /api/cargo/{id}/photos:
+    post:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Загрузить фото для груза."
+      description: "Добавляет фотографию в карточку груза."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - photo
+              properties:
+                photo:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: "Фото успешно загружено."
+        '400':
+          description: photo_file_required | file_too_large | allowed_image_types
+        '404':
+          description: cargo_not_found
+        '500':
+          description: internal_error
+    get:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Получить список фото груза."
+      description: "Возвращает все фотографии, привязанные к карточке груза."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: "Список фотографий получен."
+        '404':
+          description: cargo_not_found
+        '500':
+          description: failed_to_list
+  /api/cargo/{id}/photos/{photoId}:
+    get:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Скачать фото груза."
+      description: "Возвращает бинарное содержимое конкретной фотографии."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: photoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: image/jpeg | image/png | image/webp
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        '304':
+          description: Not Modified
+        '404':
+          description: photo_not_found
+    delete:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Удалить фото груза."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: photoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: photo_deleted
+        '404':
+          description: photo_not_found
+        '500':
+          description: internal_error
+  /api/cargo/{id}/status:
+    patch:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Изменить статус груза."
+      description: "Обновляет статус карточки груза согласно допустимым переходам."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          example: b2c3d4e5-f6a7-8901-bcde-f12345678901
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../base.yaml#/components/schemas/CargoStatusRequest'
+            example:
+              status: SEARCHING_ALL
+      responses:
+        '200':
+          description: "Статус груза успешно обновлен."
+        '400':
+          description: "Некорректный статус или недопустимый переход."
+  /api/cargo/{id}/offers:
+    get:
+      tags:
+      - Cargo Manager / Offers
+      summary: "Получить офферы по грузу."
+      description: "Возвращает список предложений (офферов), связанных с указанным грузом."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          example: b2c3d4e5-f6a7-8901-bcde-f12345678901
+        description: "UUID груза."
+      - name: direction
+        in: query
+        required: false
+        description: "Направление офферов: `incoming` или `outgoing`."
+        schema:
+          type: string
+          example: outgoing
+      - name: counterparty_id
+        in: query
+        required: false
+        description: "Фильтр по UUID контрагента."
+        schema:
+          type: string
+          format: uuid
+      - name: to_driver_id
+        in: query
+        required: false
+        description: "Фильтр по UUID водителя-получателя оффера."
+        schema:
+          type: string
+          format: uuid
+      - name: from_driver_id
+        in: query
+        required: false
+        description: "Фильтр по UUID водителя-инициатора оффера."
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: PENDING
+      responses:
+        '200':
+          description: "Список офферов по выбранному грузу."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        items:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              offer:
+                                $ref: '../base.yaml#/components/schemas/Offer'
+                              cargo:
+                                type: object
+                                properties:
+                                  cargo_type_name:
+                                    type: string
+                                    nullable: true
+                                  weight:
+                                    type: number
+                                  volume:
+                                    type: number
+                              driver:
+                                type: object
+                                properties:
+                                  phone:
+                                    type: string
+                                    nullable: true
+                                  name:
+                                    type: string
+                                    nullable: true
+                        direction:
+                          type: string
+                          nullable: true
+                        status:
+                          type: string
+                        counterparty_id:
+                          type: string
+                          format: uuid
+                          nullable: true
+        '400':
+          description: invalid_payload_detail / invalid_id
+  /api/cargo/photos:
+    post:
+      tags:
+      - Cargo Manager / Cargo
+      summary: "Загрузить фотографию груза."
+      description: "Загружает файл изображения и возвращает его идентификатор и URL."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - photo
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: "Файл изображения груза."
+      responses:
+        '200':
+          description: "Фотография успешно загружена."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        url:
+                          type: string
+                          example: /api/cargo/photos/a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        '400':
+          description: "Ошибка валидации файла или запроса."
+  # other

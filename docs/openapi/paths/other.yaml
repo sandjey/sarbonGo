@@ -1,0 +1,7 @@
+paths:
+  /health:
+    get:
+      summary: "Проверка работоспособности API."
+      responses:
+        '200':
+          description: OK

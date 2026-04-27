@@ -1,5 +1,0 @@
-./condition_evaluator.go
-./remoteconfig.go
-./server_config.go
-./server_template.go
-./server_template_types.go

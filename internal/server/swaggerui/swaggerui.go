@@ -4,16 +4,36 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"sarbonNew/internal/server/resp"
 )
 
-// Minimal swagger UI without codegen, using docs/openapi.yaml.
+// Minimal swagger UI without codegen, using docs/openapi/root.yaml.
 func Register(r *gin.Engine) {
-	r.GET("/openapi.yaml", func(c *gin.Context) {
-		if p, ok := findUp("docs/openapi.yaml", 10); ok {
+	r.GET("/openapi/root.yaml", func(c *gin.Context) {
+		if p, ok := findUp("docs/openapi/root.yaml", 10); ok {
+			c.File(p)
+			return
+		}
+		resp.ErrorLang(c, http.StatusNotFound, "openapi_not_found")
+	})
+	r.GET("/openapi/base.yaml", func(c *gin.Context) {
+		if p, ok := findUp("docs/openapi/base.yaml", 10); ok {
+			c.File(p)
+			return
+		}
+		resp.ErrorLang(c, http.StatusNotFound, "openapi_not_found")
+	})
+	r.GET("/openapi/paths/*filepath", func(c *gin.Context) {
+		fp := strings.TrimPrefix(strings.TrimSpace(c.Param("filepath")), "/")
+		if fp == "" || strings.Contains(fp, "..") {
+			resp.ErrorLang(c, http.StatusNotFound, "openapi_not_found")
+			return
+		}
+		if p, ok := findUp(filepath.Join("docs", "openapi", "paths", filepath.FromSlash(fp)), 10); ok {
 			c.File(p)
 			return
 		}
@@ -749,7 +769,7 @@ const swaggerHTML = `<!doctype html>
         }
 
         window.ui = SwaggerUIBundle({
-          url: '/openapi.yaml',
+          url: '/openapi/root.yaml',
           dom_id: '#swagger-ui',
           deepLinking: true,
           persistAuthorization: true,

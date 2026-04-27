@@ -48,6 +48,8 @@ func tryLoadDotEnv(p string) bool {
 	if _, err := os.Stat(p); err != nil {
 		return false
 	}
-	_ = godotenv.Load(p)
+	if err := godotenv.Load(p); err != nil {
+		return false
+	}
 	return true
 }

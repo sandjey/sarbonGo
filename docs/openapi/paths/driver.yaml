@@ -1,0 +1,2963 @@
+paths:
+  /v1/driver/transport-options:
+    get:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Получить справочник типов транспорта."
+      description: "Возвращает доступные типы тягачей и совместимые типы прицепов."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      $ref: '../base.yaml#/components/schemas/TransportOptionsResponse'
+        '400':
+          description: "Некорректный запрос."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/auth/phone:
+    post:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Запросить OTP-код для входа водителя."
+      description: "Отправляет одноразовый код на указанный номер телефона."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998331108810'
+              required:
+              - phone
+      responses:
+        '200':
+          description: "OTP-код успешно отправлен."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: otp_sent
+                  ttl_seconds:
+                    type: integer
+                    example: 180
+                required:
+                - status
+                - ttl_seconds
+        '400':
+          description: "Некорректный номер телефона или тело запроса."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '429':
+          description: Cooldown / rate limit
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '502':
+          description: "Ошибка SMS-провайдера или внешнего сервиса."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/auth/otp/verify:
+    post:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Проверить OTP-код водителя."
+      description: "Подтверждает код и возвращает либо токены входа, либо `session_id` для регистрации."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998331108810'
+                otp:
+                  type: string
+                  example: '123456'
+              required:
+              - phone
+              - otp
+      responses:
+        '200':
+          description: "Код подтвержден."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - type: object
+                  properties:
+                    status:
+                      type: string
+                      example: login
+                    tokens:
+                      $ref: '../base.yaml#/components/schemas/Tokens'
+                  required:
+                  - status
+                  - tokens
+                - type: object
+                  properties:
+                    status:
+                      type: string
+                      example: register
+                    session_id:
+                      type: string
+                      format: uuid
+                  required:
+                  - status
+                  - session_id
+        '401':
+          description: "Неверный или просроченный OTP-код."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '429':
+          description: "Превышен лимит попыток проверки OTP."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/registration/start:
+    post:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Начать регистрацию водителя."
+      description: "Завершает стартовый шаг регистрации по `session_id` и выдает токены."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                name:
+                  $ref: '../base.yaml#/components/schemas/DisplayName'
+                oferta_accepted:
+                  type: boolean
+                  example: true
+              required:
+              - session_id
+              - name
+              - oferta_accepted
+      responses:
+        '200':
+          description: "Регистрация успешно начата, токены и профиль возвращены."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: registered
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+                  driver:
+                    $ref: '../base.yaml#/components/schemas/Driver'
+                  registration_status:
+                    type: string
+                    example: start
+                  registration_step:
+                    type: string
+                    example: name-oferta
+                required:
+                - status
+                - tokens
+        '400':
+          description: "Ошибка валидации входных данных регистрации."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: "Сессия регистрации недействительна или просрочена."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '409':
+          description: "Пользователь уже зарегистрирован."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/profile:
+    get:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Получить профиль водителя."
+      description: |
+        Возвращает текущий профиль авторизованного водителя.
+        Включает персональные данные, KYC-поля, статусы и сведения о транспорте.
+        Используется на экране профиля и в шагах регистрации.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: OK (data.driver.profile, data.driver.power_plate, data.driver.trailer_plate)
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: "Требуется авторизация водителя."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+    delete:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Удалить профиль водителя."
+      description: "Удаляет учетную запись и связанные данные профиля водителя."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: "Требуется авторизация водителя."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '404':
+          description: "Профиль водителя не найден."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/profile/driver:
+    patch:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Обновить данные водителя."
+      description: "Обновляет основные поля профиля водителя и рабочий статус."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  $ref: '../base.yaml#/components/schemas/DisplayName'
+                work_status:
+                  type: string
+                  enum:
+                  - available
+                  - loaded
+                  - busy
+                  example: available
+                driver_passport_series:
+                  type: string
+                  example: AB
+                driver_passport_number:
+                  type: string
+                  example: '1234567'
+                driver_pinfl:
+                  type: string
+                  example: '12345678901234'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: "Ошибка валидации переданных полей."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '409':
+          description: "Конфликт данных профиля (например, дубликаты документов)."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/profile/heartbeat:
+    put:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Обновить геопозицию (heartbeat)."
+      description: |
+        Принимает актуальные координаты водителя.
+        Используется для онлайн-статуса, карты и диспетчерского мониторинга.
+        Рекомендуется отправлять периодически при активной сессии.
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                latitude:
+                  type: number
+                  format: double
+                  example: 41.311081
+                longitude:
+                  type: number
+                  format: double
+                  example: 69.240562
+              required:
+              - latitude
+              - longitude
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        event:
+                          type: string
+                          example: heartbeat
+                        push_token_registered:
+                          type: boolean
+                          description: |
+                            Признак, что push-токен был передан и сохранен.
+                            Используется для диагностики доставки push-уведомлений.
+                        driver:
+                          type: object
+                          description: "Актуальные данные профиля водителя после обновления."
+  /v1/driver/profile/photo:
+    post:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Загрузить фото профиля водителя."
+      description: "Принимает изображение и назначает его текущей фотографией профиля."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - photo
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: "Файл изображения профиля."
+      responses:
+        '200':
+          description: "Фото профиля успешно загружено."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: ok
+                      event:
+                        type: string
+                        example: photo_uploaded
+        '400':
+          description: "Некорректный файл (тип, размер, отсутствие файла)."
+        '401':
+          description: "Требуется авторизация водителя."
+    get:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Получить фото профиля водителя."
+      description: "Возвращает бинарное изображение текущей фотографии профиля."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Фото профиля получено."
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        '401':
+          description: "Требуется авторизация водителя."
+        '404':
+          description: "Фото профиля отсутствует."
+    delete:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Удалить фото профиля водителя."
+      description: "Удаляет текущую фотографию профиля."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Фото профиля удалено."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: ok
+                      event:
+                        type: string
+                        example: photo_deleted
+        '401':
+          description: "Требуется авторизация водителя."
+  /v1/driver/profile/phone-change/request:
+    post:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Запросить смену номера телефона."
+      description: "Отправляет OTP-код на новый номер для подтверждения смены."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                new_phone:
+                  type: string
+                  example: '+998901234567'
+              required:
+              - new_phone
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: "Ошибка валидации нового номера телефона."
+        '502':
+          description: "Ошибка SMS-провайдера или внешнего сервиса."
+  /v1/driver/profile/phone-change/verify:
+    post:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Подтвердить смену номера телефона."
+      description: "Подтверждает OTP и применяет новый номер телефона к профилю."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                session_id:
+                  type: string
+                  format: uuid
+                otp:
+                  type: string
+                  example: '123456'
+              required:
+              - session_id
+              - otp
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/profile/power:
+    patch:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Обновить данные тягача."
+      description: "Сохраняет регистрационные и технические данные тягача водителя."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                power_plate_number:
+                  type: string
+                  example: 01A123BC
+                power_tech_series:
+                  type: string
+                  example: AA
+                power_tech_number:
+                  type: string
+                  example: '9876543'
+                power_owner_name:
+                  type: string
+                  example: Ali Valiyev
+                power_scan_status:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/profile/trailer:
+    patch:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Обновить данные прицепа."
+      description: "Сохраняет регистрационные и технические данные прицепа водителя."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                trailer_plate_number:
+                  type: string
+                  example: 01A123BC
+                trailer_tech_series:
+                  type: string
+                  example: AA
+                trailer_tech_number:
+                  type: string
+                  example: '9876543'
+                trailer_owner_name:
+                  type: string
+                  example: Ali Valiyev
+                trailer_scan_status:
+                  type: boolean
+                  example: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/registration/geo-push:
+    patch:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Сохранить геопозицию и push-токен."
+      description: "Обновляет координаты водителя и (опционально) push-токен на шаге регистрации."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                latitude:
+                  type: number
+                  format: double
+                  example: 41.311081
+                longitude:
+                  type: number
+                  format: double
+                  example: 69.240562
+                push_token:
+                  type: string
+                  example: optional-device-token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  driver:
+                    $ref: '../base.yaml#/components/schemas/Driver'
+                required:
+                - status
+                - driver
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/driver/registration/transport-type:
+    patch:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Сохранить тип транспорта водителя."
+      description: "Фиксирует тип водителя и выбранные типы тягача/прицепа."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver_type:
+                  type: string
+                  enum:
+                  - company
+                  - freelancer
+                  - driver
+                  example: driver
+                power_plate_type:
+                  type: string
+                  example: uz_private
+                trailer_plate_type:
+                  type: string
+                  example: uz_private
+                freelancer_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                company_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+              required:
+              - driver_type
+              - power_plate_type
+              - trailer_plate_type
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  driver:
+                    $ref: '../base.yaml#/components/schemas/Driver'
+                required:
+                - status
+                - driver
+  /v1/driver/kyc:
+    patch:
+      tags:
+      - Drivers / Profile & KYC
+      summary: "Отправить KYC-данные водителя."
+      description: "Принимает документы водителя и данные по тягачу/прицепу для KYC-проверки."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver_owner:
+                  type: boolean
+                  example: true
+                driver_data:
+                  type: object
+                  properties:
+                    driver_passport_series:
+                      type: string
+                      example: AB
+                    driver_passport_number:
+                      type: string
+                      example: '1234567'
+                    driver_pinfl:
+                      type: string
+                      example: '12345678901234'
+                    driver_scan_status:
+                      type: boolean
+                      example: true
+                  required:
+                  - driver_passport_series
+                  - driver_passport_number
+                  - driver_pinfl
+                  - driver_scan_status
+                power_data:
+                  type: object
+                  properties:
+                    power_plate_number:
+                      type: string
+                      example: 01A123BC
+                    power_tech_series:
+                      type: string
+                      example: AA
+                    power_tech_number:
+                      type: string
+                      example: '9876543'
+                    power_owner_name:
+                      type: string
+                      example: Ali Valiyev
+                    power_scan_status:
+                      type: boolean
+                      example: true
+                  required:
+                  - power_plate_number
+                  - power_tech_series
+                  - power_tech_number
+                  - power_owner_name
+                  - power_scan_status
+                trailer_data:
+                  type: object
+                  properties:
+                    trailer_plate_number:
+                      type: string
+                      example: 01A123BC
+                    trailer_tech_series:
+                      type: string
+                      example: AA
+                    trailer_tech_number:
+                      type: string
+                      example: '9876543'
+                    trailer_owner_name:
+                      type: string
+                      example: Ali Valiyev
+                    trailer_scan_status:
+                      type: boolean
+                      example: true
+                  required:
+                  - trailer_plate_number
+                  - trailer_tech_series
+                  - trailer_tech_number
+                  - trailer_owner_name
+                  - trailer_scan_status
+              required:
+              - driver_owner
+              - driver_data
+              - power_data
+              - trailer_data
+      responses:
+        '200':
+          description: "KYC-данные успешно сохранены."
+          content:
+            application/json:
+              schema:
+                type: object
+                description: "Ответ по результату обновления KYC."
+                properties:
+                  event:
+                    type: string
+                    example: updated
+                  is_full:
+                    type: boolean
+                    example: true
+                    description: "Признак, что профиль заполнен полностью."
+                  driver:
+                    $ref: '../base.yaml#/components/schemas/Driver'
+                required:
+                - event
+                - is_full
+                - driver
+  /v1/driver/auth/refresh:
+    post:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Обновить токены водителя."
+      description: "Выдает новую пару access/refresh токенов по действующему refresh token."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+              required:
+              - refresh_token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+        '401':
+          description: invalid refresh_token
+  /v1/driver/auth/logout:
+    post:
+      tags:
+      - Drivers / Auth & registration
+      summary: "Выход водителя из системы."
+      description: "Инвалидирует refresh token и завершает текущую авторизованную сессию."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+                  description: "Refresh token, который нужно отозвать."
+                access_token:
+                  type: string
+                  description: "Текущий access token (опционально для серверной очистки контекста)."
+      responses:
+        '200':
+          description: "Выход выполнен успешно."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                required:
+                - status
+        '400':
+          description: "Некорректное тело запроса."
+        '401':
+          description: "Сессия недействительна или токен невалиден."
+  /v1/driver/cargo-likes:
+    get:
+      tags:
+      - Drivers / Likes
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '500':
+          description: failed_to_list_favorites
+    post:
+      tags:
+      - Drivers / Likes
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - cargo_id
+              properties:
+                cargo_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: favorite_added
+        '200':
+          description: favorite_already_exists
+        '400':
+          description: invalid_payload_detail
+        '404':
+          description: cargo_not_found
+        '500':
+          description: failed_to_create_favorite
+  /v1/driver/cargo-likes/{cargoId}:
+    delete:
+      tags:
+      - Drivers / Likes
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: cargoId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: favorite_deleted
+        '404':
+          description: favorite_not_found
+        '500':
+          description: failed_to_delete_favorite
+  /v1/driver/dispatcher-likes:
+    get:
+      tags:
+      - Drivers / Likes
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '500':
+          description: failed_to_list_favorites
+    post:
+      tags:
+      - Drivers / Likes
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - dispatcher_id
+              properties:
+                dispatcher_id:
+                  type: string
+                  format: uuid
+      responses:
+        '201':
+          description: favorite_added
+        '200':
+          description: favorite_already_exists
+        '400':
+          description: invalid_payload_detail
+        '404':
+          description: dispatcher_not_found
+        '500':
+          description: failed_to_create_favorite
+  /v1/driver/dispatcher-likes/{dispatcherId}:
+    delete:
+      tags:
+      - Drivers / Likes
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: dispatcherId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: favorite_deleted
+        '404':
+          description: favorite_not_found
+        '500':
+          description: failed_to_delete_favorite
+  /v1/driver/offers/all:
+    get:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: direction
+        in: query
+        required: false
+        schema:
+          type: string
+          example: all
+      - name: counterparty_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: to_dispatcher_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: from_dispatcher_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: PENDING
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.items, data.total, data.page, data.limit, data.direction, data.counterparty_id, data.counts.incoming, data.counts.outgoing
+        '400':
+          description: invalid_payload_detail
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list_cargo_offers
+  /v1/driver/cargo-offers:
+    get:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: bucket
+        in: query
+        required: false
+        schema:
+          type: string
+          example: sent
+          enum:
+          - sent
+          - accepted
+          - completed
+          - rejected
+          - canceled
+          - cancelled
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+          minimum: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.items, data.total, data.page, data.limit, data.bucket; message cargo_offers_listed
+        '400':
+          description: invalid_cargo_offer_bucket
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list_cargo_offers
+  /v1/driver/cargo/{id}/offers:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - price
+              - currency
+              properties:
+                price:
+                  type: number
+                  example: 1800
+                currency:
+                  type: string
+                  example: USD
+                comment:
+                  type: string
+      responses:
+        '201':
+          description: data.id, data.proposed_by=DRIVER
+        '400':
+          description: cargo_not_searching / validation
+        '409':
+          description: cargo_slots_full | driver_offer_already_exists
+        '401':
+          description: unauthorized
+        '403':
+          description: "Описание на русском языке."
+  /v1/driver/cargo/{id}/offers/send:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - price
+              - currency
+              properties:
+                price:
+                  type: number
+                  example: 1800
+                currency:
+                  type: string
+                  example: USD
+                comment:
+                  type: string
+      responses:
+        '201':
+          description: data.id, data.proposed_by=DRIVER
+        '400':
+          description: cargo_not_searching / validation
+        '409':
+          description: cargo_slots_full | driver_offer_already_exists
+        '401':
+          description: unauthorized
+        '403':
+          description: "Описание на русском языке."
+  /v1/driver/offers/{id}/accept:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "Описание на русском языке."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: trip_id, cargo_payment_sync
+        '403':
+          description: only_driver_accepts_dispatcher_offer / not_your_offer
+        '404':
+          description: offer_not_found_or_not_pending; data.reason
+        '409':
+          description: cargo_slots_full / cargo_not_searching / driver_busy; data.reason
+        '500':
+          description: failed_to_accept; data.reason
+  /v1/driver/offers/{id}/accept-from-dispatcher:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: trip_id, cargo_payment_sync
+        '403':
+          description: only_driver_accepts_dispatcher_offer / not_your_offer
+        '404':
+          description: offer_not_found_or_not_pending; data.reason
+        '409':
+          description: cargo_slots_full / cargo_not_searching / driver_busy; data.reason
+        '500':
+          description: failed_to_accept; data.reason
+  /v1/driver/offers/{id}/confirm:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "Описание на русском языке."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 'trip_id, status: accepted, trip_flow (via_driver_manager)'
+        '400':
+          description: "Описание на русском языке."
+        '401':
+          description: user_not_identified
+        '403':
+          description: not_your_offer
+        '404':
+          description: offer_not_found / offer_not_found_or_not_pending
+        '409':
+          description: "Описание на русском языке."
+
+        '500':
+          description: "Описание на русском языке."
+  /v1/driver/offers/{id}/confirm-driver-manager-flow:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: 'trip_id, status: accepted, trip_flow'
+        '400':
+          description: Same response codes as POST /v1/driver/offers/{id}/confirm (see that operation).
+        '401':
+          description: user_not_identified
+        '403':
+          description: not_your_offer
+        '404':
+          description: offer_not_found / offer_not_found_or_not_pending
+        '409':
+          description: Same as POST /v1/driver/offers/{id}/confirm.
+        '500':
+          description: Same as POST /v1/driver/offers/{id}/confirm.
+  /v1/driver/offers/{id}:
+    get:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "Описание на русском языке."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: data.offer, data.cargo, data.trip|null
+        '403':
+          description: not_your_offer
+        '404':
+          description: offer_not_found / cargo_not_found
+  /v1/driver/offers/{id}/reject:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+                  description: "Описание на русском языке."
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending
+        '403':
+          description: not_your_offer
+        '404':
+          description: offer_not_found
+  /v1/driver/offers/{id}/reject-with-reason:
+    post:
+      tags:
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - reason
+              properties:
+                reason:
+                  type: string
+                  minLength: 3
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short / offer_not_found_or_not_pending
+        '403':
+          description: not_your_offer
+        '404':
+          description: offer_not_found
+  /v1/driver/active-cargo:
+    get:
+      tags:
+      - Legacy / Deprecated
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+              examples:
+                en:
+                  summary: English
+                  value:
+                    status: success
+                    code: 200
+                    description: OK
+                    data:
+                      active: true
+                      cargo:
+                        id: ebc30874-161a-4c29-b284-139e4e7d9120
+                        vehicles_amount: 3
+                        vehicles_left: 2
+                        status: SEARCHING_ALL
+                ru:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      active: true
+                      cargo:
+                        id: ebc30874-161a-4c29-b284-139e4e7d9120
+                        vehicles_amount: 3
+                        vehicles_left: 2
+                        status: SEARCHING_ALL
+                uz:
+                  summary: O'zbek
+                  value:
+                    status: success
+                    code: 200
+                    description: Muvaffaqiyatli
+                    data:
+                      active: true
+                      cargo:
+                        id: ebc30874-161a-4c29-b284-139e4e7d9120
+                        vehicles_amount: 3
+                        vehicles_left: 2
+                        status: SEARCHING_ALL
+                tr:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      active: true
+                      cargo:
+                        id: ebc30874-161a-4c29-b284-139e4e7d9120
+                        vehicles_amount: 3
+                        vehicles_left: 2
+                        status: SEARCHING_ALL
+                zh:
+                  summary: "Краткое описание."
+                  value:
+                    status: success
+                    code: 200
+                    description: "Описание на русском языке."
+                    data:
+                      active: true
+                      cargo:
+                        id: ebc30874-161a-4c29-b284-139e4e7d9120
+                        vehicles_amount: 3
+                        vehicles_left: 2
+                        status: SEARCHING_ALL
+  /v1/driver/cargo/active:
+    post:
+      tags:
+      - Drivers / Cargo
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - lat
+              - lng
+              properties:
+                lat:
+                  type: number
+                  format: double
+                  example: 41.311
+                lng:
+                  type: number
+                  format: double
+                  example: 69.279
+                radius_km:
+                  type: number
+                  format: double
+                  example: 150
+                page:
+                  type: integer
+                  default: 1
+                  minimum: 1
+                limit:
+                  type: integer
+                  default: 20
+                  minimum: 1
+                  maximum: 100
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_payload_detail / invalid_lat / invalid_lng
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list
+  /v1/driver/matching-cargo:
+    get:
+      tags:
+      - Drivers / Cargo
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: page
+        in: query
+        schema:
+          type: integer
+          default: 1
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 20
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '401':
+          description: unauthorized
+        '404':
+          description: driver not found
+  /v1/driver/trips/history:
+    get:
+      tags:
+      - Drivers / Trips
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: 'data.items[]: event_type, event_at, offer?/trip?'
+        '401':
+          description: unauthorized
+  /v1/driver/trips/me:
+    get:
+      tags:
+      - Drivers / Trips
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '../base.yaml#/components/schemas/Envelope'
+                - type: object
+                  properties:
+                    data:
+                      type: object
+                      properties:
+                        trip:
+                          nullable: true
+                          allOf:
+                          - $ref: '../base.yaml#/components/schemas/Trip'
+                          properties:
+                            driver_manager_id:
+                              type: string
+                              format: uuid
+                              nullable: true
+                              description: "Описание на русском языке."
+                            cargo_manager_id:
+                              type: string
+                              format: uuid
+                              nullable: true
+                              description: "Описание на русском языке."
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list
+  /v1/driver/trips/{id}/confirm:
+    post:
+      tags:
+      - Drivers / Trips
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: invalid_status_transition | trip_completion_already_pending
+        '403':
+          description: trip not assigned to you
+        '404':
+          description: trip not found
+  /v1/driver/trips/{id}/reject:
+    post:
+      tags:
+      - Drivers / Trips
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: trip_already_completed
+        '403':
+          description: trip not assigned to you
+        '404':
+          description: trip not found
+  /v1/driver/trips/{id}/cancel:
+    post:
+      tags:
+      - Drivers / Trips
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        description: "Описание на русском языке."
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: data.status=cancelled, data.trip_id, data.cargo_id, data.offer_id
+        '400':
+          description: "Описание на русском языке."
+        '403':
+          description: trip not assigned to you
+        '404':
+          description: trip not found
+  /v1/driver/notifications:
+    get:
+      tags:
+      - Drivers / Notifications
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: unread_only
+        in: query
+        schema:
+          type: boolean
+          default: false
+        description: "Описание на русском языке."
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.items[], data.unread_count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '../base.yaml#/components/schemas/NotificationItem'
+                  unread_count:
+                    type: integer
+        '401':
+          description: unauthorized
+  /v1/driver/notifications/read-all:
+    post:
+      tags:
+      - Drivers / Notifications
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated:
+                    type: integer
+  /v1/driver/notifications/{id}:
+    patch:
+      tags:
+      - Drivers / Notifications
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: data.id, data.read=true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  read:
+                    type: boolean
+                    example: true
+        '400':
+          description: invalid_id
+        '401':
+          description: unauthorized
+        '404':
+          description: trip_notification_not_found
+  /v1/driver/trip-notifications:
+    get:
+      tags:
+      - Drivers / Notifications
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: unread_only
+        in: query
+        schema:
+          type: boolean
+          default: false
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 100
+      responses:
+        '200':
+          description: data.items[], data.unread_count
+        '401':
+          description: unauthorized
+  /v1/driver/trip-notifications/read-all:
+    post:
+      tags:
+      - Drivers / Notifications
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Описание на русском языке."
+  /v1/driver/trip-notifications/{id}/read:
+    post:
+      tags:
+      - Drivers / Notifications
+      summary: "Краткое описание."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: ok
+        '404':
+          description: trip_notification_not_found
+  /v1/driver/sse/realtime:
+    get:
+      tags:
+      - Drivers / SSE
+      - Drivers / Trips
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/driver/sse/trip-notifications:
+    get:
+      tags:
+      - Drivers / SSE
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: "data: {\"kind\":\"trip_notification\",\"notification_id\":\"...\",\"trip_id\":\"...\",\"event_kind\":\"IN_TRANSIT\",\"created_at\":\"2026-04-10T12:00:00Z\"}"
+        '401':
+          description: unauthorized
+  /v1/driver/sse/cargo-offers:
+    get:
+      tags:
+      - Drivers / SSE
+      - Drivers / Offers
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/driver/sse/connections:
+    get:
+      tags:
+      - Drivers / SSE
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/driver/sse/trip-status:
+    get:
+      tags:
+      - Drivers / SSE
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: query
+        required: false
+        schema:
+          type: string
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401':
+          description: unauthorized
+  /v1/driver/dispatchers/{dispatcherId}/rating:
+    post:
+      tags:
+      - Drivers / Notifications
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: dispatcherId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: "Описание на русском языке."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '../base.yaml#/components/schemas/ProfileTripRatingRequest'
+      responses:
+        '200':
+          description: ok
+        '400':
+          description: trip_rating_not_completed | trip_rating_invalid_stars | trip_rating_cargo_manager_unknown | trip_rating_ratee_mismatch
+        '403':
+          description: trip not assigned to you
+        '404':
+          description: trip not found
+  /v1/driver/trips/{id}/state:
+    get:
+      tags:
+      - Drivers / Trips
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: OK
+        '403':
+          description: trip not assigned to you
+        '404':
+          description: trip not found
+  /v1/driver/driver-invitations:
+    get:
+      tags:
+      - Drivers / Relations
+      - Driver Manager / Drivers & connections
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            token:
+                              type: string
+                            type:
+                              type: string
+                              enum:
+                              - company
+                              - freelance
+                              - unknown
+                            company_id:
+                              type: string
+                              format: uuid
+                            dispatcher_id:
+                              type: string
+                              format: uuid
+                            phone:
+                              type: string
+                            invited_by:
+                              type: string
+                              format: uuid
+                              description: "Описание на русском языке."
+                            status:
+                              type: string
+                              enum:
+                              - pending
+                              - accepted
+                              - declined
+                              - cancelled
+                              - expired
+                            expires_at:
+                              type: string
+                              format: date-time
+                            created_at:
+                              type: string
+                              format: date-time
+                            responded_at:
+                              type: string
+                              format: date-time
+                              nullable: true
+  /v1/driver/driver-invitations/accept:
+    post:
+      tags:
+      - Drivers / Relations
+      - Driver Manager / Drivers & connections
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+              - token
+            example:
+              token: a1b2c3d4e5f6789012345678abcdef0123456789abcdef0123456789
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: invitation not found or expired
+        '403':
+          description: "Описание на русском языке."
+  /v1/driver/driver-invitations/decline:
+    post:
+      tags:
+      - Drivers / Relations
+      - Driver Manager / Drivers & connections
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+              - token
+      responses:
+        '200':
+          description: data.status = declined
+        '400':
+          description: invitation not found or expired
+        '403':
+          description: invitation was sent to another phone
+  /v1/driver/connection-offers:
+    get:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: direction
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - all
+          - incoming
+          - outgoing
+          default: all
+      - name: exclude_accepted
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: data.direction, data.items[]
+        '400':
+          description: invalid direction
+    post:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998901234567'
+              required:
+              - phone
+      responses:
+        '201':
+          description: data.token, data.expires_in_hours
+        '400':
+          description: phone required
+          invalid payload: null
+        '409':
+          description: driver_invitation_already_pending / already linked to this dispatcher
+  /v1/driver/connection-offers/accept:
+    post:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+              - token
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: invitation not found or expired
+        '403':
+          description: invitation was sent to another phone
+  /v1/driver/connection-offers/decline:
+    post:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required:
+              - token
+      responses:
+        '200':
+          description: data.status = declined
+        '400':
+          description: invitation not found or expired
+        '403':
+          description: invitation was sent to another phone
+  /v1/driver/connection-offers/{token}:
+    delete:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: dispatcher not available
+              required:
+              - reason
+      responses:
+        '200':
+          description: ok (invitation row deleted)
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short
+        '403':
+          description: not your invitation
+        '404':
+          description: invitation not found or expired
+  /v1/driver/connection-offers/dispatchers:
+    get:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 10000
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: phone_hint
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: work_status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: has_photo
+        in: query
+        required: false
+        schema:
+          type: boolean
+      - name: rating_min
+        in: query
+        required: false
+        schema:
+          type: number
+          format: float
+      - name: rating_max
+        in: query
+        required: false
+        schema:
+          type: number
+          format: float
+      - name: role
+        in: query
+        required: false
+        schema:
+          $ref: '../base.yaml#/components/schemas/FreelanceDispatcherRole'
+      responses:
+        '200':
+          description: data.items + data.total + limit/offset
+        '400':
+          description: invalid payload
+        '401':
+          description: unauthorized
+  /v1/driver/connection-offers/dispatchers/hint:
+    get:
+      tags:
+      - Drivers / Relations
+      summary: Hint search by driver manager phone (aliased)
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: phone
+        in: query
+        required: true
+        schema:
+          type: string
+          example: '+99890'
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 50
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: phone required / invalid payload
+        '401':
+          description: unauthorized
+  /v1/driver/dispatchers:
+    get:
+      tags:
+      - Legacy / Deprecated
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Описание на русском языке."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            name:
+                              type: string
+                            phone:
+                              type: string
+                              description: "Описание на русском языке."
+                            work_status:
+                              type: string
+                            has_photo:
+                              type: boolean
+                            type:
+                              type: string
+                              enum:
+                              - freelance
+                              - company
+                            role:
+                              allOf:
+                              - $ref: '../base.yaml#/components/schemas/FreelanceDispatcherRole'
+                              nullable: true
+                              description: "Описание на русском языке."
+                            company_role:
+                              type: string
+                              description: "Описание на русском языке."
+        '401':
+          description: driver not found
+  /v1/driver/my-driver-managers:
+    get:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: 'data.items[]: id, name, phone, work_status, has_photo, type, role/company_role'
+        '401':
+          description: driver not found
+  /v1/driver/my-driver-managers/{dispatcherId}:
+    get:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: dispatcherId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: invalid dispatcher id
+        '401':
+          description: driver not found
+        '403':
+          description: dispatcher not linked to this driver
+    delete:
+      tags:
+      - Drivers / Relations
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: dispatcherId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: data.status = unlinked
+        '400':
+          description: invalid dispatcher id
+        '403':
+          description: dispatcher not linked to this driver
+  /v1/driver/dispatchers/{dispatcherId}:
+    delete:
+      tags:
+      - Legacy / Deprecated
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: dispatcherId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: data.status = unlinked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: string
+                        example: unlinked
+        '400':
+          description: invalid dispatcher id
+        '403':
+          description: this dispatcher is not linked to you
+  /v1/driver/dispatchers/catalog:
+    get:
+      tags:
+      - Legacy / Deprecated
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          example: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          example: 0
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '99890'
+      - name: phone_hint
+        in: query
+        required: false
+        schema:
+          type: string
+          example: '+99890'
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: active
+      - name: work_status
+        in: query
+        required: false
+        schema:
+          type: string
+          example: available
+      - name: has_photo
+        in: query
+        required: false
+        schema:
+          type: boolean
+          example: true
+      - name: rating_min
+        in: query
+        required: false
+        schema:
+          type: number
+          format: float
+          example: 4.5
+      - name: rating_max
+        in: query
+        required: false
+        schema:
+          type: number
+          format: float
+          example: 5
+      - name: role
+        in: query
+        required: false
+        schema:
+          $ref: '../base.yaml#/components/schemas/FreelanceDispatcherRole'
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: data.items + data.total + limit/offset
+        '400':
+          description: "Описание на русском языке."
+        '401':
+          description: unauthorized
+  /v1/driver/dispatchers/hint:
+    get:
+      tags:
+      - Legacy / Deprecated
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: phone
+        in: query
+        required: true
+        schema:
+          type: string
+          example: '+99890'
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          example: 10
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '400':
+          description: phone required / invalid payload
+        '401':
+          description: unauthorized
+  /v1/driver/dispatcher-invitations:
+    get:
+      tags:
+      - Drivers / Relations
+      - Driver Manager / Drivers & connections
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      responses:
+        '200':
+          description: "Описание на русском языке."
+        '401':
+          description: driver not found
+    post:
+      tags:
+      - Drivers / Relations
+      - Driver Manager / Drivers & connections
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                  example: '+998901234567'
+              required:
+              - phone
+      responses:
+        '201':
+          description: data.token, data.expires_in_hours
+        '400':
+          description: phone required
+          invalid payload: null
+        '403':
+          description: "Описание на русском языке."
+        '409':
+          description: driver_invitation_already_pending / already linked to this dispatcher
+  /v1/driver/dispatcher-invitations/{token}:
+    delete:
+      tags:
+      - Legacy / Deprecated
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: token
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  example: no longer needed
+              required:
+              - reason
+      responses:
+        '200':
+          description: ok (invitation row deleted)
+        '400':
+          description: rejection_reason_required / rejection_reason_too_short
+        '403':
+          description: not your invitation
+        '404':
+          description: invitation not found or expired
+  # dispatchers

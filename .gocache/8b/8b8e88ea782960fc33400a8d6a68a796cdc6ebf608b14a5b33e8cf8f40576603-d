@@ -1,7 +1,0 @@
-./cargo_ref.go
-./cities.go
-./countries.go
-./countrycodes.go
-./i18n.go
-./supplement.go
-./cities_test.go

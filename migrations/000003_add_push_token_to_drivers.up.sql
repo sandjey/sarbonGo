@@ -1,3 +1,0 @@
-ALTER TABLE drivers
-  ADD COLUMN IF NOT EXISTS push_token VARCHAR NULL;
-

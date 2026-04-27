@@ -1,5 +1,0 @@
-# test log
-getenv TEST_DATABASE_URL
-getenv DATABASE_URL
-getenv TEST_DATABASE_URL
-getenv DATABASE_URL

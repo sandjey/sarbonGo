@@ -1,0 +1,1275 @@
+paths:
+  /v1/admin/auth/refresh:
+    post:
+      tags:
+      - Admin / Auth
+      summary: "Обновить токены администратора."
+      description: "Выдает новую пару access/refresh токенов для администратора."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+              required:
+              - refresh_token
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+        '401':
+          description: invalid refresh_token
+  /v1/admin/auth/login/password:
+    post:
+      tags:
+      - Admin / Auth
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                login:
+                  type: string
+                  example: admin
+                password:
+                  type: string
+                  example: secret123
+              required:
+              - login
+              - password
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  tokens:
+                    $ref: '../base.yaml#/components/schemas/Tokens'
+                  admin:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      login:
+                        type: string
+                      name:
+                        type: string
+                      status:
+                        type: string
+                        example: active
+                      type:
+                        type: string
+                        example: creator
+        '400':
+          description: invalid payload
+        '401':
+          description: invalid login or password
+  /v1/admin/companies:
+    post:
+      tags:
+      - Admin / Companies
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: My Logistics LLC
+                company_type:
+                  type: string
+                  enum:
+                  - CARGO_OWNER
+                  - CARRIER
+                  - EXPEDITOR
+                  nullable: true
+                  description: "Описание на русском языке."
+                inn:
+                  type: string
+                  nullable: true
+                address:
+                  type: string
+                  nullable: true
+                phone:
+                  type: string
+                  nullable: true
+                email:
+                  type: string
+                  nullable: true
+                website:
+                  type: string
+                  nullable: true
+                license_number:
+                  type: string
+                  nullable: true
+                status:
+                  type: string
+                  nullable: true
+                  example: pending
+                max_vehicles:
+                  type: integer
+                  example: 10
+                max_drivers:
+                  type: integer
+                  example: 50
+                max_cargo:
+                  type: integer
+                  example: 0
+                max_dispatchers:
+                  type: integer
+                  example: 5
+                max_managers:
+                  type: integer
+                  example: 5
+                max_top_dispatchers:
+                  type: integer
+                  example: 1
+                max_top_managers:
+                  type: integer
+                  example: 1
+              required:
+              - name
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  company_id:
+                    type: string
+                    format: uuid
+        '400':
+          description: invalid payload
+        '401':
+          description: unauthorized
+  /v1/admin/companies/{id}/owner:
+    patch:
+      tags:
+      - Admin / Companies
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+        description: "Описание на русском языке."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - owner_id
+              properties:
+                owner_id:
+                  type: string
+                  format: uuid
+                  description: "Описание на русском языке."
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  message:
+                    type: string
+                    example: owner set, status set to active
+        '400':
+          description: invalid company id, invalid owner_id, or owner_id is not a user with role 'owner'
+        '401':
+          description: unauthorized
+  /v1/admin/company-users/owners/search:
+    get:
+      tags:
+      - Admin / Companies
+      summary: "Краткое описание."
+      description: "Описание на русском языке."
+      security:
+      - DeviceTypeHeader: []
+      - LanguageHeader: []
+      - ClientTokenHeader: []
+      - UserTokenHeader: []
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+        description: "Описание на русском языке."
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  code:
+                    type: integer
+                  description:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          format: uuid
+                        phone:
+                          type: string
+                        first_name:
+                          type: string
+                          nullable: true
+                        last_name:
+                          type: string
+                          nullable: true
+                        company_id:
+                          type: string
+                          format: uuid
+                          nullable: true
+                        role:
+                          type: string
+                          nullable: true
+                        created_at:
+                          type: string
+                          format: date-time
+                        updated_at:
+                          type: string
+                          format: date-time
+        '401':
+          description: unauthorized
+  /v1/admin/cargo/moderation:
+    get:
+      tags:
+      - Admin / Tools
+      summary: Список грузов на модерации
+      description: Возвращает грузы со статусом `PENDING_MODERATION` для очереди административной модерации.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+          minimum: 0
+      responses:
+        '200':
+          description: Список грузов на модерации
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: unauthorized
+        '500':
+          description: failed_to_list
+  /v1/admin/cargo/{id}/moderation/accept:
+    post:
+      tags:
+      - Admin / Tools
+      summary: Принять груз на модерации
+      description: Переводит груз из `PENDING_MODERATION` в `SEARCHING_ALL` или `SEARCHING_COMPANY`.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                search_visibility:
+                  type: string
+                  enum: [all, company]
+                  description: "`all` -> `SEARCHING_ALL`, `company` -> `SEARCHING_COMPANY`"
+      responses:
+        '200':
+          description: Груз принят на модерации
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_id или cargo_not_pending_moderation
+        '404':
+          description: cargo_not_found
+  /v1/admin/cargo/{id}/moderation/reject:
+    post:
+      tags:
+      - Admin / Tools
+      summary: Отклонить груз на модерации
+      description: Отклоняет груз на модерации. Причина отклонения обязательна.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Груз отклонён
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_id, moderation_rejection_reason_required или cargo_not_pending_moderation
+  /v1/admin/push/status:
+    get:
+      tags:
+      - Admin / Tools
+      summary: Статус push-инфраструктуры
+      description: Диагностика конфигурации Firebase и текущего состояния push-сервиса.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      responses:
+        '200':
+          description: Статус push-инфраструктуры
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '401':
+          description: unauthorized
+  /v1/admin/push/send:
+    post:
+      tags:
+      - Admin / Tools
+      summary: Тестовая отправка push по FCM token
+      description: Отправляет push на конкретный `FCM token`. Можно дополнительно сохранить токен за пользователем.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [push_token]
+              properties:
+                push_token:
+                  type: string
+                title:
+                  type: string
+                body:
+                  type: string
+                data:
+                  type: object
+                  additionalProperties:
+                    type: string
+                recipient_kind:
+                  type: string
+                  enum: [driver, dispatcher]
+                recipient_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Push отправлен
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_payload_detail
+        '502':
+          description: firebase error
+        '503':
+          description: push_not_enabled
+  /v1/admin/push/recipient-status:
+    get:
+      tags:
+      - Admin / Tools
+      summary: Проверить push token пользователя
+      description: Показывает, зарегистрирован ли `FCM token` за указанным `driver` или `dispatcher`.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: kind
+        in: query
+        required: true
+        schema:
+          type: string
+          enum: [driver, dispatcher]
+      - name: id
+        in: query
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Результат проверки token
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_payload_detail или invalid_id
+        '503':
+          description: push_not_enabled
+  /v1/admin/push/send-by-recipient:
+    post:
+      tags:
+      - Admin / Tools
+      summary: Отправить push по виду получателя и id
+      description: Отправляет push через обычный серверный путь по `kind` и `recipient id`, без ручной передачи `FCM token`.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, id]
+              properties:
+                kind:
+                  type: string
+                  enum: [driver, dispatcher]
+                id:
+                  type: string
+                  format: uuid
+                title:
+                  type: string
+                body:
+                  type: string
+                data:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        '200':
+          description: Push отправлен
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_payload_detail или invalid_id
+        '502':
+          description: firebase error
+        '503':
+          description: push_not_enabled
+  /v1/admin/dashboard:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Главный дашборд аналитики администратора
+      description: "Сводный экран аналитики для creator-admin: KPI, конверсии, рост, география, алерты и ключевые проблемы."
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Начало окна в формате RFC3339 или YYYY-MM-DD.
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+        description: Конец окна в формате RFC3339 или YYYY-MM-DD.
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      responses:
+        '200':
+          description: Данные дашборда
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_payload_detail
+        '401':
+          description: invalid_user_token
+        '403':
+          description: forbidden (доступ только для admin creator)
+  /v1/admin/metrics:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Универсальные аналитические метрики
+      description: Универсальный метод получения метрик с группировкой по времени, роли или пользователю.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: metrics
+        in: query
+        required: false
+        schema:
+          type: string
+          example: cargo_count,offer_count,trip_count,completed_trip_count
+      - name: group_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [time, role, user]
+          default: time
+      - name: interval
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [hour, day, week, month]
+          default: day
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Данные метрик
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_payload_detail
+        '403':
+          description: forbidden (доступ только для admin creator)
+  /v1/admin/users:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Список пользователей для аналитики
+      description: Единый список пользователей с фильтрами, поиском, сортировкой и пагинацией.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: sort_by
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [registered_at, last_seen_at, display_name, role]
+          default: registered_at
+      - name: sort_dir
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [asc, desc]
+          default: desc
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Страница пользователей
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '403':
+          description: forbidden (доступ только для admin creator)
+  /v1/admin/users/{id}:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Профиль аналитики пользователя
+      description: Детальная аналитика по одному пользователю с бизнес-метриками и историей входов.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Профиль аналитики пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_id
+        '404':
+          description: user_not_found
+  /v1/admin/users/{id}/logins:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Список логинов пользователя
+      description: История сессий конкретного пользователя с пагинацией.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Сессии входа пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_id
+  /v1/admin/funnels:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Аналитика воронки
+      description: Воронка `Cargo -> Offer -> Trip -> Completed` с конверсиями и drop-off по этапам.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Данные воронки
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/dropoff:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Аналитика drop-off
+      description: Потери между основными этапами бизнес-цепочки.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Данные drop-off
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/retention:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Аналитика retention
+      description: Когортный retention на основе активности после регистрации или первой сессии.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Данные retention
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/flows/time:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Аналитика времени между событиями
+      description: "`average`, `median` и `p95` для ключевых участков пользовательского и бизнес-flow."
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Данные по времени flow
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/flows/conversion:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Аналитика конверсий flow
+      description: Процентные конверсии между ключевыми этапами жизненного цикла сделки.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      responses:
+        '200':
+          description: Данные конверсий flow
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/chats:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Список чатов для мониторинга
+      description: Список диалогов с фильтрацией по пользователю и поиском по участникам или последнему сообщению.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: search
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Страница чатов
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/chats/{chat_id}/messages:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Сообщения чата для мониторинга
+      description: Сообщения конкретного диалога с пагинацией.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: chat_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Страница сообщений чата
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_id
+  /v1/admin/calls:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Список звонков для мониторинга
+      description: Список звонков с фильтрацией по статусу и пользователю.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          type: string
+          format: uuid
+      - name: status
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: offset
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 0
+      responses:
+        '200':
+          description: Страница звонков
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/calls/{id}:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Детали звонка
+      description: Один звонок с длительностью, причиной завершения и хронологией событий.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: Детали звонка
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+        '400':
+          description: invalid_id
+        '404':
+          description: call_not_found
+  /v1/admin/geo:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Гео-аналитика
+      description: Агрегированная активность по городам и ролям на основе `analytics_events`.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      parameters:
+      - name: role
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [driver, cargo_manager, driver_manager, admin]
+      - name: from
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: to
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: tz
+        in: query
+        required: false
+        schema:
+          type: string
+          default: UTC
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      responses:
+        '200':
+          description: Данные гео-аналитики
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  /v1/admin/geo/realtime:
+    get:
+      tags:
+      - Admin / Analytics
+      summary: Гео-аналитика в реальном времени
+      description: Онлайн-пользователи по ролям и последнему известному городу за последнее окно активности.
+      security:
+      - DeviceTypeHeader: []
+        LanguageHeader: []
+        ClientTokenHeader: []
+        UserTokenHeader: []
+      responses:
+        '200':
+          description: Данные гео в реальном времени
+          content:
+            application/json:
+              schema:
+                $ref: '../base.yaml#/components/schemas/Envelope'
+  # reference

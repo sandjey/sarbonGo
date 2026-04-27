@@ -1,0 +1,3116 @@
+﻿openapi: 3.0.3
+info:
+  title: "Sarbon API — документация и руководство"
+  version: 0.1.0
+  description: "OpenAPI-спецификация логистической платформы Sarbon."
+servers:
+- url: /
+security:
+- DeviceTypeHeader: []
+  LanguageHeader: []
+  ClientTokenHeader: []
+tags:
+- name: Водители / Авторизация и регистрация
+- name: Водители / Профиль и KYC
+- name: Водители / Грузы
+- name: Водители / Офферы
+- name: Водители / Рейсы
+- name: Водители / Избранное
+- name: Водители / Связи
+- name: Водители / Уведомления
+- name: Водители / SSE
+- name: Диспетчеры / Авторизация и регистрация
+- name: Диспетчеры / Профиль
+- name: Диспетчеры / Уведомления и рейтинги
+- name: Карго-менеджер / Грузы
+- name: Карго-менеджер / Офферы
+- name: Карго-менеджер / Рейсы
+- name: Карго-менеджер / Избранное
+- name: Карго-менеджер / Менеджеры водителей
+- name: Карго-менеджер / SSE
+  description: "SSE-каналы карго-менеджера. Доступны только пользователям с manager_role=CARGO_MANAGER."
+- name: Менеджер водителей / Водители и связи
+- name: Менеджер водителей / Офферы
+- name: Менеджер водителей / Рейсы
+- name: Менеджер водителей / Грузы
+- name: Менеджер водителей / Избранное
+- name: Менеджер водителей / SSE
+  description: "SSE-каналы менеджера водителей. Доступны только пользователям с manager_role=DRIVER_MANAGER."
+- name: Админ / Авторизация
+- name: Админ / Компании
+- name: Админ / Инструменты
+  description: "Инструменты администратора: модерация грузов, проверка push-инфраструктуры и сервисные операции."
+- name: Справочник
+- name: Chat
+- name: Chat / Voice
+- name: Компания / Пользователи и авторизация
+- name: Компания
+- name: Легаси / Устаревшее
+- name: Карго-менеджер / Аналитика
+  description: "Аналитика для роли CARGO_MANAGER: KPI, таймлайн, воронка, топ-маршруты и топ водителей."
+- name: Менеджер водителей / Аналитика
+  description: "Аналитика для роли DRIVER_MANAGER: KPI по водителям, офферам, рейсам и таймлайн."
+- name: Админ / Аналитика
+  description: "Системная аналитика для creator-admin: KPI, воронки, retention, коммуникации, география и drill-down по пользователям."
+components:
+  securitySchemes:
+    DeviceTypeHeader:
+      type: apiKey
+      in: header
+      name: X-Device-Type
+      description: 'Тип клиента. Допустимые значения: `web`, `ios`, `android`.'
+    LanguageHeader:
+      type: apiKey
+      in: header
+      name: X-Language
+      description: 'Язык ответа. Допустимые значения: `ru`, `uz`, `en`, `tr`, `zh`.'
+    ClientTokenHeader:
+      type: apiKey
+      in: header
+      name: X-Client-Token
+      description: 'Токен приложения или клиента. Используется сервером для дополнительных проверок доступа.'
+    UserTokenHeader:
+      type: apiKey
+      in: header
+      name: X-User-Token
+      description: 'JWT access token текущего пользователя. Для admin-методов токен должен содержать `role=admin`.'
+    UserIDHeader:
+      type: apiKey
+      in: header
+      name: X-User-ID
+      description: 'Служебный идентификатор пользователя для тестов и отладки в Swagger. Обычно в runtime не используется.'
+  parameters:
+    SSEQueryToken:
+      name: token
+      in: query
+      required: false
+      schema:
+        type: string
+      description: |
+        JWT access token для SSE-подключений через query-параметр.
+        Используется в сценариях, где нельзя передать `X-User-Token` в header, например в `EventSource`.
+    SSEQueryDeviceType:
+      name: device_type
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [web, ios, android]
+      description: Копия `X-Device-Type` для SSE-подключений через `EventSource`.
+    SSEQueryLanguage:
+      name: language
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [ru, uz, en, tr, zh]
+      description: Копия `X-Language` для SSE-подключений через `EventSource`.
+    SSEQueryClientToken:
+      name: client_token
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Копия `X-Client-Token` для SSE-подключений через `EventSource`.
+  examples:
+    SSEFrameTripStatus:
+      summary: "`type=trip_status` — событие изменения статуса рейса (поток `/events`)"
+      value: |
+        data: {"type":"trip_status","id":"e3111111-2222-3333-4444-555555555555","event_kind":"IN_TRANSIT","stream_kind":"trip_status","recipient_kind":"dispatcher","recipient_id":"11111111-1111-1111-1111-111111111111","dispatcher_role":"CARGO_MANAGER","at":"2026-04-20T12:00:00Z","data":{"kind":"trip_status","trip_id":"e3111111-2222-3333-4444-555555555555","cargo_id":"c1...","offer_id":"of...","driver_id":"d1...","status":"IN_TRANSIT","agreed_price":15000000,"agreed_currency":"UZS","completion_awaiting_dispatcher_confirm":false,"updated_at":"2026-04-20T12:00:00Z","created_at":"2026-04-20T09:00:00Z"}}
+    SSEFrameTripNotificationCompleted:
+      summary: "`type=trip_notification`, `event_kind=COMPLETED` — уведомление в inbox"
+      value: |
+        data: {"type":"trip_notification","id":"n0111111-1111-1111-1111-111111111111","event_kind":"COMPLETED","stream_kind":"notifications","recipient_kind":"dispatcher","recipient_id":"11111111-1111-1111-1111-111111111111","dispatcher_role":"DRIVER_MANAGER","at":"2026-04-20T15:30:00Z","data":{"kind":"trip_notification","notification_id":"n0111111-1111-1111-1111-111111111111","trip_id":"e3111111-2222-3333-4444-555555555555","event_kind":"COMPLETED","from_status":"DELIVERED","to_status":"COMPLETED","rate_driver_id":"d1...","rate_cargo_manager_id":"cm...","created_at":"2026-04-20T15:30:00.123Z"}}
+    SSEFrameCargoOfferAccepted:
+      summary: "`type=cargo_offer`, `event_kind=accepted`"
+      value: |
+        data: {"type":"cargo_offer","id":"of222222-2222-2222-2222-222222222222","event_kind":"accepted","stream_kind":"notifications","recipient_kind":"dispatcher","recipient_id":"11111111-1111-1111-1111-111111111111","dispatcher_role":"CARGO_MANAGER","at":"2026-04-20T12:05:00Z","data":{"kind":"cargo_offer","offer_id":"of222222-2222-2222-2222-222222222222","cargo_id":"c1111111-1111-1111-1111-111111111111","event":"accepted","proposed_by":"DRIVER","proposed_by_id":"d1..."}}
+    SSEFrameConnectionOfferAccepted:
+      summary: "`type=connection_offer`, `event_kind=accepted`"
+      value: |
+        data: {"type":"connection_offer","id":"inv33333-3333-3333-3333-333333333333","event_kind":"accepted","stream_kind":"notifications","recipient_kind":"dispatcher","recipient_id":"11111111-1111-1111-1111-111111111111","dispatcher_role":"DRIVER_MANAGER","at":"2026-04-20T12:10:00Z","data":{"kind":"connection_offer","invitation_id":"inv33333-3333-3333-3333-333333333333","token":"tok_abc","event":"accepted","from_user_id":"d1...","to_user_id":"11111111-1111-1111-1111-111111111111"}}
+    SSEFrameDriverUpdate:
+      summary: "`type=driver_update` — событие обновления профиля или статуса водителя"
+      value: |
+        data: {"type":"driver_update","id":"d1444444-4444-4444-4444-444444444444","event_kind":"profile_updated","stream_kind":"driver_updates","recipient_kind":"dispatcher","recipient_id":"11111111-1111-1111-1111-111111111111","dispatcher_role":"DRIVER_MANAGER","at":"2026-04-20T12:15:00Z","data":{"kind":"driver_update","driver_id":"d1444444-4444-4444-4444-444444444444","action":"profile_updated"}}
+    SSEFrameChatMessage:
+      summary: "`type=message` — входящее сообщение чата (SSE/WS)"
+      value: |
+        data: {"type":"message","id":"m0555555-5555-5555-5555-555555555555","event_kind":"message","stream_kind":"chat","recipient_kind":"dispatcher","recipient_id":"11111111-1111-1111-1111-111111111111","dispatcher_role":"CARGO_MANAGER","at":"2026-04-20T12:20:00Z","data":{"type":"message","data":{"message_id":"m0555555-5555-5555-5555-555555555555","conversation_id":"cv...","from_user_id":"d1...","text":"Новое сообщение","created_at":"2026-04-20T12:20:00Z"}}}
+    SSEFrameCallRinging:
+      summary: "`type=call`, `event_kind=call.ringing`"
+      value: |
+        data: {"type":"call","id":"cl666666-6666-6666-6666-666666666666","event_kind":"call.ringing","stream_kind":"chat","recipient_kind":"dispatcher","recipient_id":"11111111-1111-1111-1111-111111111111","dispatcher_role":"CARGO_MANAGER","at":"2026-04-20T12:25:00Z","data":{"type":"call.ringing","data":{"call_id":"cl666666-6666-6666-6666-666666666666","caller_id":"d1...","callee_id":"11111111-1111-1111-1111-111111111111","status":"RINGING"}}}
+    SSEConnectedBanner:
+      summary: "Служебные строки подключения `: sse connected` и heartbeat `: ping`"
+      value: |
+        : sse connected
+
+        : ping
+  schemas:
+    NotificationItem:
+      type: object
+      description: |
+        Элемент уведомления для мобильного приложения и веб-клиента.
+        Используется в списках уведомлений водителя и диспетчера.
+        Содержит тип события, человекочитаемый текст, состояние прочтения,
+        а также дополнительный payload для deep-link и карточек в интерфейсе.
+        Поля `trip_id`, `from_status`, `to_status` и `payload` могут быть `null`
+        в зависимости от типа уведомления.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: UUID уведомления.
+        trip_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID рейса, если уведомление относится к рейсу.
+        event_kind:
+          type: string
+          description: |
+            Код бизнес-события уведомления.
+            Примеры: `IN_TRANSIT`, `DELIVERED`, `COMPLETED`, `CANCELLED`,
+            `cargo_offer_created`, `connection_offer_created`, `message.new`, `call.invite`.
+            (`cargo_offer_created`, `connection_offer_created`, `message.new`, `call.invite`,
+            `driver.profile.patch`, ...).
+        type:
+          type: string
+          enum:
+          - connection_offer
+          - cargo_offer
+          - message
+          - call
+          - driver_profile_edit
+          - trip_notification
+          description: Тип уведомления для маршрутизации в клиенте.
+        step:
+          type: string
+          description: Логический шаг/подтип в рамках выбранного `type`.
+        from_status:
+          type: string
+          nullable: true
+        to_status:
+          type: string
+          nullable: true
+        message:
+          type: string
+          description: Локализованный текст уведомления для отображения пользователю.
+        payload:
+          nullable: true
+          description: |
+            Дополнительные данные уведомления в JSON-формате.
+            Структура зависит от типа уведомления и может быть объектом или массивом.
+          oneOf:
+          - type: object
+            additionalProperties: true
+          - type: array
+            items: {}
+        read:
+          type: boolean
+          description: Флаг, что уведомление уже прочитано пользователем.
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+      - id
+      - event_kind
+      - type
+      - step
+      - message
+      - read
+      - created_at
+    Envelope:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - success
+          - error
+        code:
+          type: integer
+          example: 200
+        description:
+          type: string
+          example: ok
+        data:
+          nullable: true
+      required:
+      - status
+      - code
+      - description
+      - data
+    ChatMessage:
+      type: object
+      description: Сообщение чата в диалоге между пользователями.
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+        sender_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum:
+          - text
+          - img
+          - audio
+          - video
+          - video_note
+          - location
+          - TEXT
+          - PHOTO
+          - VOICE
+          - VIDEO
+          - VIDEO_NOTE
+          - LOCATION
+        body:
+          type: string
+          nullable: true
+          description: Текст сообщения для типа `text`.
+        payload:
+          type: object
+          nullable: true
+          description: Структурированные данные сообщения (медиа, геолокация и т.д.).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Время доставки сообщения получателю (если подтверждено сервером).
+            Для недоставленных сообщений может быть `null`.
+              - Описание
+              - Описание
+              - Описание
+        read_by_me:
+          type: boolean
+          description: Признак, что текущее сообщение прочитано текущим пользователем.
+        read_by_peer:
+          type: boolean
+          description: Признак, что сообщение прочитано собеседником.
+      required:
+      - id
+      - conversation_id
+      - sender_id
+      - type
+      - created_at
+      - updated_at
+    ChatMediaPayload:
+      type: object
+      description: Payload медиа-сообщения (изображение, аудио, видео, видеокружок).
+      properties:
+        attachment_id:
+          type: string
+          format: uuid
+        link:
+          type: string
+          description: Относительная ссылка на скачивание медиа-файла через API.
+          example: /v1/chat/media/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+        url:
+          type: string
+          example: /v1/chat/media/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+        links:
+          type: object
+          description: Набор ссылок на оригинал и миниатюру.
+          properties:
+            media:
+              type: string
+            thumb:
+              type: string
+              nullable: true
+        thumb_url:
+          type: string
+          nullable: true
+          description: Ссылка на миниатюру медиа-файла (если доступна).
+        mime:
+          type: string
+          example: video/mp4
+        size_bytes:
+          type: integer
+          format: int64
+        duration_ms:
+          type: integer
+          nullable: true
+          description: Длительность медиа в миллисекундах (для аудио/видео).
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+      required:
+      - attachment_id
+      - url
+      - mime
+      - size_bytes
+    ChatLocationPayload:
+      type: object
+      description: Payload сообщения с геолокацией.
+      properties:
+        lat:
+          type: number
+          format: double
+          example: 41.311081
+        lng:
+          type: number
+          format: double
+          example: 69.240562
+        address:
+          type: string
+          nullable: true
+        place_id:
+          type: string
+          nullable: true
+      required:
+      - lat
+      - lng
+    ChatPresence:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        online:
+          type: boolean
+        last_seen:
+          type: integer
+          nullable: true
+          description: Unix seconds
+        typing:
+          type: boolean
+          nullable: true
+      required:
+      - user_id
+      - online
+    Call:
+      type: object
+      description: Данные о звонке между двумя пользователями.
+      properties:
+        id:
+          type: string
+          format: uuid
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+        caller_id:
+          type: string
+          format: uuid
+        callee_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - RINGING
+          - ACTIVE
+          - ENDED
+          - DECLINED
+          - MISSED
+          - CANCELLED
+          - FAILED
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_by:
+          type: string
+          format: uuid
+          nullable: true
+        ended_reason:
+          type: string
+          nullable: true
+        client_request_id:
+          type: string
+          nullable: true
+          description: Идемпотентный ключ запроса создания звонка от клиента.
+      required:
+      - id
+      - caller_id
+      - callee_id
+      - status
+      - created_at
+    CallCreateRequest:
+      type: object
+      properties:
+        peer_id:
+          type: string
+          format: uuid
+          description: UUID пользователя, которому совершается звонок.
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID диалога чата, если звонок инициирован из конкретного чата.
+        client_request_id:
+          type: string
+          nullable: true
+          description: Идемпотентный ключ создания звонка для повторных попыток.
+      required:
+      - peer_id
+    CallDeclineRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          nullable: true
+          example: busy
+    CallEndRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          nullable: true
+          example: hangup
+    Tokens:
+      type: object
+      description: Набор access/refresh токенов и сроков их действия.
+      properties:
+        access_token:
+          type: string
+          example: eyJhbGciOi...
+        refresh_token:
+          type: string
+          example: eyJhbGciOi...
+        expires_in:
+          type: integer
+          example: 900
+          description: Время жизни access token в секундах.
+        expires_at:
+          type: integer
+          example: 1741600800000
+          description: UNIX timestamp (ms) истечения access token.
+        refresh_expires_in:
+          type: integer
+          example: 604800
+          description: Время жизни refresh token в секундах.
+        refresh_expires_at:
+          type: integer
+          example: 1742205600000
+          description: UNIX timestamp (ms) истечения refresh token.
+      required:
+      - access_token
+      - refresh_token
+      - expires_in
+      - expires_at
+    DisplayName:
+      type: string
+      minLength: 2
+      maxLength: 64
+      pattern: ^[A-Za-z_]{2,64}$
+      description: Отображаемое имя пользователя (латиница и `_`, 2..64 символа).
+      example: John_Doe
+    Driver:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone:
+          type: string
+          example: '+998331108810'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_online_at:
+          type: string
+          format: date-time
+          nullable: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+          example: 41.311081
+        longitude:
+          type: number
+          format: double
+          nullable: true
+          example: 69.240562
+        push_token:
+          type: string
+          nullable: true
+          example: optional-device-token
+        registration_step:
+          type: string
+          nullable: true
+          enum:
+          - name-oferta
+          - geo-push
+          - transport-type
+          - completed
+          description: Шаг регистрации водителя в onboarding-процессе.
+        registration_status:
+          type: string
+          nullable: true
+          enum:
+          - start
+          - basic
+          - full
+        name:
+          type: string
+          nullable: true
+          example: Ali Valiyev
+        driver_type:
+          type: string
+          nullable: true
+          enum:
+          - company
+          - freelancer
+          - driver
+        rating:
+          type: number
+          format: double
+          nullable: true
+        work_status:
+          type: string
+          nullable: true
+          enum:
+          - available
+          - loaded
+          - busy
+          example: available
+        freelancer_id:
+          type: string
+          format: uuid
+          nullable: true
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+        account_status:
+          type: string
+          nullable: true
+        driver_passport_series:
+          type: string
+          nullable: true
+          example: AB
+        driver_passport_number:
+          type: string
+          nullable: true
+          example: '1234567'
+        driver_pinfl:
+          type: string
+          nullable: true
+          example: '12345678901234'
+        driver_scan_status:
+          type: boolean
+          nullable: true
+          example: true
+        power_plate_type:
+          type: string
+          nullable: true
+          example: TRUCK
+          description: Тип тягача/силовой установки (например, `TRUCK`, `TRACTOR`).
+        power_plate_number:
+          type: string
+          nullable: true
+          example: 01A123BC
+        power_tech_series:
+          type: string
+          nullable: true
+        power_tech_number:
+          type: string
+          nullable: true
+        power_owner_name:
+          type: string
+          nullable: true
+          example: Ali Valiyev
+        power_scan_status:
+          type: boolean
+          nullable: true
+        trailer_plate_type:
+          type: string
+          nullable: true
+          example: TENTED
+          description: Тип прицепа (например, `TENTED`, `REFRIGERATOR`, `FLATBED`).
+        trailer_plate_number:
+          type: string
+          nullable: true
+        trailer_tech_series:
+          type: string
+          nullable: true
+        trailer_tech_number:
+          type: string
+          nullable: true
+        trailer_owner_name:
+          type: string
+          nullable: true
+          example: Ali Valiyev
+        trailer_scan_status:
+          type: boolean
+          nullable: true
+        driver_owner:
+          type: boolean
+          nullable: true
+          example: true
+        kyc_status:
+          type: string
+          nullable: true
+          enum:
+          - pending
+          - approved
+          description: Статус KYC-проверки водителя.
+          example: pending
+        has_trips:
+          type: boolean
+          description: Признак, что у водителя есть завершенные или активные рейсы.
+        has_photo:
+          type: boolean
+          description: Признак, что у водителя загружена фотография профиля.
+      required:
+      - id
+      - phone
+      - created_at
+      - updated_at
+    Dispatcher:
+      type: object
+      description: Профиль фриланс-диспетчера.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          nullable: true
+          example: Dispetcher Name
+        phone:
+          type: string
+          example: '+998331108810'
+        passport_series:
+          type: string
+          nullable: true
+          example: AB
+        passport_number:
+          type: string
+          nullable: true
+          example: '1234567'
+        pinfl:
+          type: string
+          nullable: true
+          example: '12345678901234'
+        cargo_id:
+          type: string
+          format: uuid
+          nullable: true
+        driver_id:
+          type: string
+          format: uuid
+          nullable: true
+        rating:
+          type: number
+          format: double
+          nullable: true
+        work_status:
+          type: string
+          nullable: true
+          example: available
+        status:
+          type: string
+          nullable: true
+          example: active
+        role:
+          allOf:
+          - $ref: '#/components/schemas/FreelanceDispatcherRole'
+          nullable: true
+          description: Роль диспетчера в системе (`CARGO_MANAGER` или `DRIVER_MANAGER`).
+        photo:
+          type: string
+          nullable: true
+          description: URL фотографии диспетчера.
+        has_photo:
+          type: boolean
+          description: Признак наличия фотографии профиля.
+        last_online_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - id
+      - phone
+      - created_at
+      - updated_at
+    PowerPlateOption:
+      type: object
+      properties:
+        code:
+          type: string
+          example: TRUCK
+        label:
+          type: string
+          example: Грузовик
+      required:
+      - code
+      - label
+    TrailerPlateOption:
+      type: object
+      properties:
+        code:
+          type: string
+          example: FLATBED
+        label:
+          type: string
+          example: Тент
+      required:
+      - code
+      - label
+    TransportOptionsResponse:
+      type: object
+      description: Справочник доступных типов тягача и прицепов.
+      properties:
+        power_plate_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/PowerPlateOption'
+        trailer_plate_types_by_power:
+          type: object
+          description: "Карта: тип тягача -> список допустимых типов прицепа."
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/TrailerPlateOption'
+      required:
+      - power_plate_types
+      - trailer_plate_types_by_power
+    ItemWithLabel:
+      type: object
+      description: Универсальная пара `value/label` для справочников.
+      properties:
+        value:
+          type: string
+        label:
+          type: string
+    ItemWithLabelAndDescription:
+      type: object
+      description: Элемент справочника с кодом, названием и расширенным описанием.
+      properties:
+        value:
+          type: string
+          description: Код значения.
+        label:
+          type: string
+          description: Короткое название для UI.
+        description:
+          type: string
+          description: Подробное описание значения для подсказок.
+    RoleRef:
+      type: object
+      description: Краткая информация о роли с id, названием и описанием.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+    ReferenceDriversResponse:
+      type: object
+      properties:
+        registration_step:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        registration_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        driver_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        work_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        power_plate_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        trailer_plate_types_by_power:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/ItemWithLabel'
+    ReferenceCargoResponse:
+      type: object
+      description: Справочники для фильтров и форм по Cargo-сущностям.
+      properties:
+        cargo_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabelAndDescription'
+        route_point_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        offer_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        created_by_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        truck_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        trip_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        shipment_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Доступные типы отгрузки (например, FTL/LTL).
+        currency:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Справочник валют для ставок и платежей.
+        prepayment_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Варианты типа предоплаты.
+        remaining_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Варианты типа остаточного платежа.
+        loading_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Варианты типа погрузки.
+        packaging_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Варианты типа упаковки.
+    ReferenceCompanyResponse:
+      type: object
+      properties:
+        company_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Справочник типов компании.
+        company_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: ACTIVE, INACTIVE, BLOCKED, PENDING
+        company_user_roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Роли пользователей компании.
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoleRef'
+          description: Список ролей с расширенным описанием.
+    ReferenceAdminResponse:
+      type: object
+      properties:
+        admin_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        admin_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+    ReferenceDispatchersResponse:
+      type: object
+      properties:
+        work_status:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+        manager_roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Роли менеджеров-диспетчеров.
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/ItemWithLabel'
+          description: Роли, используемые в разделах диспетчера.
+    FreelanceDispatcherRole:
+      type: string
+      enum:
+      - CARGO_MANAGER
+      - DRIVER_MANAGER
+      description: Роль фриланс-диспетчера в текущей бизнес-модели.
+      example: CARGO_MANAGER
+    Cargo:
+      type: object
+      description: Карточка груза с параметрами перевозки, оплаты и маршрута.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: ebc30874-161a-4c29-b284-139e4e7d9120
+          description: UUID карточки груза.
+        name:
+          type: string
+          nullable: true
+          example: Металлопрокат
+          description: Название или краткое наименование груза.
+        weight:
+          type: number
+          example: 20
+          description: Масса груза (обычно в тоннах).
+        volume:
+          type: number
+          example: 82
+          description: Объем груза (обычно в кубических метрах).
+        vehicles_amount:
+          type: integer
+          example: 1
+          description: Общее количество требуемых транспортных единиц.
+        vehicles_left:
+          type: integer
+          example: 1
+          description: Количество свободных транспортных слотов.
+        packaging:
+          type: string
+          nullable: true
+          example: Паллеты
+          description: Тип упаковки груза.
+        packaging_amount:
+          type: integer
+          nullable: true
+          example: 120
+          description: Количество единиц упаковки.
+        dimensions:
+          type: string
+          nullable: true
+          example: 13.6x2.45x2.7
+          description: Габариты груза в формате ДxШxВ.
+        photos:
+          type: array
+          items:
+            type: string
+          nullable: true
+          example:
+          - https://cdn.example.com/cargo/photo1.jpg
+          - /api/cargo/photos/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+          description: Ссылки на фотографии груза.
+        way_points:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/WayPointInput'
+          description: Промежуточные или дополнительные точки маршрута.
+        ready_enabled:
+          type: boolean
+          example: true
+          description: Признак включенного режима точного времени готовности.
+        ready_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-03-25T08:00:00Z'
+          description: Плановая дата и время готовности груза к отгрузке.
+        comment:
+          type: string
+          nullable: true
+          example: Нужна боковая погрузка, аккуратно
+          description: Комментарий заказчика по перевозке.
+        truck_type:
+          type: string
+          example: TENT
+          description: Тип кузова/техники (например, `TENT`, `REFRIGERATOR`).
+        power_plate_type:
+          type: string
+          example: TRUCK
+          description: Требуемый тип тягача.
+        trailer_plate_type:
+          type: string
+          example: TENTED
+          description: Требуемый тип прицепа.
+        temp_min:
+          type: number
+          nullable: true
+          example: null
+          description: Минимально допустимая температура перевозки.
+        temp_max:
+          type: number
+          nullable: true
+          example: null
+          description: Максимально допустимая температура перевозки.
+        adr_enabled:
+          type: boolean
+          example: false
+          description: Признак, что груз относится к ADR/опасным.
+        adr_class:
+          type: string
+          nullable: true
+          example: null
+          description: Класс ADR (если применимо).
+        loading_types:
+          type: array
+          items:
+            type: string
+          example:
+          - TOP
+          - SIDE
+          description: Допустимые способы погрузки.
+        unloading_types:
+          type: array
+          items:
+            type: string
+          example:
+          - REAR
+          - SIDE
+          description: Допустимые способы выгрузки.
+        is_two_drivers_required:
+          type: boolean
+          example: false
+          description: Признак, что требуются два водителя.
+        shipment_type:
+          type: string
+          nullable: true
+          example: FTL
+          description: Тип отправки груза (например, FTL/LTL).
+        belts_count:
+          type: integer
+          nullable: true
+          example: 6
+          description: Требуемое количество крепежных ремней.
+        documents:
+          type: object
+          nullable: true
+          description: Требуемые документы и разрешения для перевозки.
+          example:
+            TIR: true
+            T1: false
+            CMR: true
+            Medbook: false
+            GLONASS: false
+            Seal: true
+            Permit: false
+        contact_name:
+          type: string
+          nullable: true
+          example: ООО "Logistic Trade"
+          description: Контактное имя для связи по конкретному грузу.
+        contact_phone:
+          type: string
+          nullable: true
+          example: '+998901234567'
+          description: Контактный телефон ответственного лица по грузу.
+        status:
+          type: string
+          enum:
+          - PENDING_MODERATION
+          - SEARCHING_ALL
+          - SEARCHING_COMPANY
+          - PROCESSING
+          - COMPLETED
+          - CANCELLED
+          example: SEARCHING_ALL
+          description: |
+            Текущий статус карточки груза.
+            `PENDING_MODERATION` — ожидает модерации.
+            `SEARCHING_ALL` / `SEARCHING_COMPANY` — открыт для поиска перевозчика.
+            `PROCESSING` — идет обработка и распределение слотов.
+            `COMPLETED` — перевозка завершена.
+            `CANCELLED` — груз отменен.
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-03-23T15:51:33Z'
+          description: Дата и время создания карточки груза.
+        updated_at:
+          type: string
+          format: date-time
+          example: '2026-03-23T15:51:33Z'
+          description: Дата и время последнего обновления карточки.
+        created_by_type:
+          type: string
+          enum:
+          - ADMIN
+          - DISPATCHER
+          - COMPANY
+          nullable: true
+          example: DISPATCHER
+          description: Тип пользователя, создавшего груз.
+        created_by_id:
+          type: string
+          format: uuid
+          nullable: true
+          example: 774e18eb-e4ef-488a-ba3a-e01cb1b41192
+          description: UUID пользователя, создавшего груз.
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+          description: UUID компании-владельца груза (если применимо).
+        cargo_type:
+          type: object
+          nullable: true
+          description: Классификатор типа груза.
+          properties:
+            id:
+              type: string
+              format: uuid
+              example: d4e5f6a7-b8c9-0123-4567-890abcdef012
+              description: UUID типа груза из справочника.
+            code:
+              type: string
+              example: PSHENITSA
+              description: Системный код типа груза.
+            name_ru:
+              type: string
+              example: Пшеница
+              description: Название типа груза на русском языке.
+            name_uz:
+              type: string
+              example: Bug'doy
+              description: Название типа груза на узбекском языке.
+            name_en:
+              type: string
+              example: PSHENITSA
+              description: Название типа груза на английском языке.
+            name_tr:
+              type: string
+              example: PSHENITSA
+              description: Название типа груза на турецком языке.
+            name_zh:
+              type: string
+              example: PSHENITSA
+              description: Название типа груза на китайском языке.
+        moderation_rejection_reason:
+          type: string
+          nullable: true
+          example: null
+          description: Причина отклонения при модерации (если есть).
+        is_liked:
+          type: boolean
+          description: Признак, что груз добавлен в избранное текущим пользователем.
+          example: false
+    RoutePoint:
+      type: object
+      description: Точка маршрута для погрузки/разгрузки/транзита/таможни.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: af8be3f7-a8a4-4485-96ad-b6a96f58d015
+          description: UUID точки маршрута.
+        cargo_id:
+          type: string
+          format: uuid
+          example: ebc30874-161a-4c29-b284-139e4e7d9120
+          description: UUID карточки груза, к которой относится точка.
+        type:
+          type: string
+          enum:
+          - LOAD
+          - UNLOAD
+          - CUSTOMS
+          - TRANSIT
+          example: LOAD
+          description: Тип точки маршрута.
+        country_code:
+          type: string
+          example: UZ
+          description: Код страны точки.
+        city_code:
+          type: string
+          example: TAS
+          description: Код города точки.
+        region_code:
+          type: string
+          example: ''
+          description: Код региона точки.
+        address:
+          type: string
+          example: г. Ташкент, Сергелийский район, склад 5
+          description: Полный адрес точки.
+        orientir:
+          type: string
+          example: Рядом с терминалом А
+          description: Ориентир/подсказка для водителя.
+        lat:
+          type: number
+          example: 41.311081
+          description: Широта точки.
+        lng:
+          type: number
+          example: 69.240562
+          description: Долгота точки.
+        place_id:
+          type: string
+          nullable: true
+          example: maps-tas-warehouse-5
+          description: Идентификатор места внешнего геосервиса (если есть).
+        date:
+          type: string
+          format: date-time
+          nullable: true
+          example: '2026-03-23T08:00:00Z'
+          description: Плановая дата и время операции в этой точке.
+        comment:
+          type: string
+          nullable: true
+          example: Заезд через северные ворота
+          description: Комментарий к точке маршрута.
+        point_order:
+          type: integer
+          example: 1
+          description: Порядковый номер точки в маршруте.
+        is_main_load:
+          type: boolean
+          example: true
+          description: Признак основной точки погрузки.
+        is_main_unload:
+          type: boolean
+          example: false
+          description: Признак основной точки выгрузки.
+    Payment:
+      type: object
+      description: Платежные условия по карточке груза.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: 697fbbb1-1b34-41ff-9180-41f3698985e0
+          description: UUID записи оплаты.
+        cargo_id:
+          type: string
+          format: uuid
+          example: ebc30874-161a-4c29-b284-139e4e7d9120
+          description: UUID карточки груза, к которой относятся условия оплаты.
+        is_negotiable:
+          type: boolean
+          example: false
+          description: Признак, что сумма может быть предметом торга.
+        price_request:
+          type: boolean
+          example: false
+          description: Признак, что цена предоставляется по запросу.
+        total_amount:
+          type: number
+          nullable: true
+          example: 1500
+          description: Общая сумма оплаты.
+        total_currency:
+          type: string
+          nullable: true
+          example: USD
+          description: Валюта общей суммы.
+        with_prepayment:
+          type: boolean
+          example: true
+          description: Признак наличия предоплаты.
+        prepayment_amount:
+          type: number
+          nullable: true
+          example: 500
+          description: Сумма предоплаты.
+        prepayment_currency:
+          type: string
+          nullable: true
+          example: USD
+          description: Валюта предоплаты.
+        prepayment_type:
+          type: string
+          nullable: true
+          example: BANK_TRANSFER
+          description: Способ предоплаты.
+        remaining_amount:
+          type: number
+          nullable: true
+          example: 1000
+          description: Сумма остаточного платежа.
+        remaining_currency:
+          type: string
+          nullable: true
+          example: USD
+          description: Валюта остаточного платежа.
+        remaining_type:
+          type: string
+          nullable: true
+          example: ON_DELIVERY
+          description: Способ оплаты остатка.
+        payment_note:
+          type: string
+          nullable: true
+          maxLength: 500
+          example: Оплата в течение 3 банковских дней
+          description: Краткая заметка по условиям оплаты.
+        payment_terms_note:
+          type: string
+          nullable: true
+          example: Безналичный расчет, закрывающие документы обязательны
+          description: Подробные условия и правила оплаты.
+    Offer:
+      type: object
+      description: Коммерческое предложение по грузу от водителя/диспетчера/менеджера.
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: f1a2b3c4-d5e6-7890-abcd-ef1234567890
+          description: UUID оффера.
+        cargo_id:
+          type: string
+          format: uuid
+          example: ebc30874-161a-4c29-b284-139e4e7d9120
+          description: UUID груза, к которому относится оффер.
+        carrier_id:
+          type: string
+          format: uuid
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+          description: UUID перевозчика/контрагента.
+        proposed_by:
+          type: string
+          enum:
+          - DRIVER
+          - DISPATCHER
+          - DRIVER_MANAGER
+          example: DRIVER
+          description: Кто инициировал предложение цены.
+        proposed_by_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID пользователя, который создал оффер.
+        negotiation_dispatcher_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID диспетчера, ведущего переговоры (если применимо).
+        price:
+          type: number
+          example: 1500
+          description: Предложенная стоимость перевозки.
+        currency:
+          type: string
+          example: USD
+          description: Валюта предложения.
+        comment:
+          type: string
+          nullable: true
+          example: Готов выехать сегодня
+          description: Комментарий к офферу.
+        status:
+          type: string
+          enum:
+          - PENDING
+          - ACCEPTED
+          - REJECTED
+          - CANCELED
+          - WAITING_DRIVER_CONFIRM
+          example: PENDING
+          description: Статус оффера в процессе переговоров.
+        created_at:
+          type: string
+          format: date-time
+          example: '2026-03-23T16:00:00Z'
+    CargoListResponse:
+      type: object
+      description: Ответ списка грузов с пагинацией.
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CargoDetailResponse'
+          description: Список карточек грузов.
+        total:
+          type: integer
+          description: Общее количество грузов по текущему фильтру.
+      required:
+      - items
+      - total
+    CargoCreateRequest:
+      type: object
+      description: Тело запроса создания новой карточки груза.
+      properties:
+        name:
+          type: string
+          nullable: true
+          description: Наименование груза.
+        weight:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Масса груза (должна быть больше нуля).
+        volume:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Объем груза (должен быть больше нуля).
+        vehicles_amount:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Требуемое количество машин.
+          example: 1
+        packaging:
+          type: string
+          nullable: true
+          description: Тип упаковки.
+        packaging_amount:
+          type: integer
+          nullable: true
+          description: Количество упаковочных единиц.
+        dimensions:
+          type: string
+          nullable: true
+          description: Габариты груза.
+        photos:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Массив ссылок на фотографии груза.
+        way_points:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/WayPointInput'
+          description: Дополнительные точки маршрута.
+        ready_enabled:
+          type: boolean
+          default: false
+          description: Включен ли режим строгой даты готовности.
+        ready_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Дата/время готовности груза.
+        comment:
+          type: string
+          nullable: true
+          description: Комментарий к грузу.
+        power_plate_type:
+          type: string
+          description: Требуемый тип тягача.
+          example: TRUCK
+        trailer_plate_type:
+          type: string
+          description: Требуемый тип прицепа.
+          example: TENTED
+        temp_min:
+          type: number
+          nullable: true
+          description: Минимальная температура перевозки.
+        temp_max:
+          type: number
+          nullable: true
+          description: Максимальная температура перевозки.
+        adr_enabled:
+          type: boolean
+          default: false
+          description: Признак опасного (ADR) груза.
+        adr_class:
+          type: string
+          nullable: true
+          description: Класс ADR, если груз опасный.
+        loading_types:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Допустимые типы погрузки.
+        unloading_types:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Допустимые типы выгрузки.
+        is_two_drivers_required:
+          type: boolean
+          default: false
+          description: Требуются ли два водителя.
+        shipment_type:
+          type: string
+          nullable: true
+          example: FTL
+          description: Тип отправки (FTL/LTL и др.).
+        belts_count:
+          type: integer
+          nullable: true
+          description: Количество требуемых крепежных ремней.
+        documents:
+          type: object
+          nullable: true
+          description: Требуемые документы и разрешения.
+        contact_name:
+          type: string
+          nullable: true
+          description: Контактное лицо по грузу.
+        contact_phone:
+          type: string
+          nullable: true
+          description: Контактный телефон по грузу.
+        cargo_type_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID типа груза из справочника.
+        company_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID компании, от имени которой создается груз.
+        route_points:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/RoutePointInput'
+          description: Точки основного маршрута (минимум погрузка и выгрузка).
+        payment:
+          $ref: '#/components/schemas/PaymentInput'
+          nullable: true
+          description: Параметры оплаты перевозки.
+      required:
+      - weight
+      - volume
+      - vehicles_amount
+      - power_plate_type
+      - trailer_plate_type
+      - route_points
+    CargoUpdateRequest:
+      type: object
+      description: Тело запроса частичного/полного обновления карточки груза.
+      properties:
+        name:
+          type: string
+          nullable: true
+          description: Наименование груза.
+        weight:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Масса груза (должна быть больше нуля).
+        volume:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          description: Объем груза (должен быть больше нуля).
+        packaging:
+          type: string
+          nullable: true
+          description: Тип упаковки.
+        packaging_amount:
+          type: integer
+          nullable: true
+          description: Количество упаковочных единиц.
+        dimensions:
+          type: string
+          nullable: true
+          description: Габариты груза в формате ДxШxВ.
+        photos:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Ссылки на фотографии груза.
+        way_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/WayPointInput'
+          nullable: true
+        ready_enabled:
+          type: boolean
+        ready_at:
+          type: string
+          format: date-time
+          nullable: true
+        comment:
+          type: string
+          nullable: true
+        truck_type:
+          type: string
+        temp_min:
+          type: number
+          nullable: true
+        temp_max:
+          type: number
+          nullable: true
+        adr_enabled:
+          type: boolean
+        adr_class:
+          type: string
+          nullable: true
+        loading_types:
+          type: array
+          items:
+            type: string
+        unloading_types:
+          type: array
+          items:
+            type: string
+        is_two_drivers_required:
+          type: boolean
+          nullable: true
+        shipment_type:
+          type: string
+          nullable: true
+        belts_count:
+          type: integer
+          nullable: true
+        documents:
+          type: object
+          nullable: true
+        contact_name:
+          type: string
+          nullable: true
+        contact_phone:
+          type: string
+          nullable: true
+        route_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/RoutePointInput'
+        payment:
+          $ref: '#/components/schemas/PaymentInput'
+          nullable: true
+    RoutePointInput:
+      type: object
+      description: Точка маршрута в запросах создания/обновления груза.
+      properties:
+        type:
+          type: string
+          enum:
+          - LOAD
+          - UNLOAD
+          - CUSTOMS
+          - TRANSIT
+          description: Тип точки маршрута.
+        country_code:
+          type: string
+          description: ISO-код страны.
+          example: UZ
+        city_code:
+          type: string
+          description: Код города.
+          example: TAS
+        region_code:
+          type: string
+          nullable: true
+          description: Код региона (если применимо).
+        address:
+          type: string
+          description: Полный адрес точки.
+        orientir:
+          type: string
+          description: Ориентир/дополнительные указания.
+          example: Рядом с терминалом №2
+        lat:
+          type: number
+          description: Широта точки.
+        lng:
+          type: number
+          description: Долгота точки.
+        place_id:
+          type: string
+          nullable: true
+          description: Идентификатор места во внешнем геосервисе.
+        comment:
+          type: string
+          nullable: true
+          description: Комментарий к точке.
+        point_order:
+          type: integer
+          description: Порядковый номер точки в маршруте.
+        is_main_load:
+          type: boolean
+          default: false
+          description: Признак основной точки погрузки.
+        is_main_unload:
+          type: boolean
+          default: false
+          description: Признак основной точки выгрузки.
+        date:
+          type: string
+          format: date-time
+          description: Плановая дата/время операции в этой точке.
+          example: '2026-03-23T10:45:30Z'
+      required:
+      - type
+      - country_code
+      - city_code
+      - address
+      - lat
+      - lng
+      - point_order
+      - date
+    PaymentInput:
+      type: object
+      description: Параметры оплаты в запросах создания/обновления груза.
+      properties:
+        is_negotiable:
+          type: boolean
+          default: false
+          description: Разрешен ли торг по цене.
+        price_request:
+          type: boolean
+          default: false
+          description: Признак, что цена предоставляется по запросу.
+        total_amount:
+          type: number
+          nullable: true
+          description: Общая сумма оплаты.
+        total_currency:
+          type: string
+          nullable: true
+          example: USD
+          description: Валюта общей суммы.
+        with_prepayment:
+          type: boolean
+          default: false
+          description: Признак наличия предоплаты.
+        prepayment_amount:
+          type: number
+          nullable: true
+          description: Сумма предоплаты.
+        prepayment_currency:
+          type: string
+          nullable: true
+          description: Валюта предоплаты.
+        prepayment_type:
+          type: string
+          nullable: true
+          description: Способ предоплаты.
+        remaining_amount:
+          type: number
+          nullable: true
+          description: Сумма остаточного платежа.
+        remaining_currency:
+          type: string
+          nullable: true
+          description: Валюта остаточного платежа.
+        remaining_type:
+          type: string
+          nullable: true
+          description: Способ оплаты остатка.
+        payment_note:
+          type: string
+          nullable: true
+          maxLength: 500
+          description: Короткий комментарий к оплате.
+        payment_terms_note:
+          type: string
+          nullable: true
+          description: Подробные условия оплаты.
+    WayPointInput:
+      type: object
+      description: Дополнительная промежуточная точка маршрута (транзит/таможня).
+      properties:
+        type:
+          type: string
+          enum:
+          - TRANSIT
+          - CUSTOMS
+          description: Тип промежуточной точки.
+        country_code:
+          type: string
+          nullable: true
+          example: KZ
+        city_code:
+          type: string
+          nullable: true
+          example: SHY
+        region_code:
+          type: string
+          nullable: true
+          example: SHYMKENT
+        address:
+          type: string
+          nullable: true
+          example: Таможенный терминал Шымкент
+        orientir:
+          type: string
+          nullable: true
+          example: Склад временного хранения
+        lat:
+          type: number
+          nullable: true
+          example: 42.341
+        lng:
+          type: number
+          nullable: true
+          example: 69.589
+        place_id:
+          type: string
+          nullable: true
+          example: maps-customs-2
+        comment:
+          type: string
+          nullable: true
+          example: Проверка документов и пломб
+    CargoStatusRequest:
+      type: object
+      description: |
+        Запрос изменения статуса груза.
+        Разрешены только статусы:
+        - `SEARCHING_ALL`
+        - `SEARCHING_COMPANY`
+        - `CANCELLED`
+        Используется для ручного управления жизненным циклом карточки.
+      properties:
+        status:
+          type: string
+          enum:
+          - SEARCHING_ALL
+          - SEARCHING_COMPANY
+          - CANCELLED
+          example: CANCELLED
+      required:
+      - status
+    OfferCreateRequest:
+      type: object
+      description: Тело запроса на создание оффера по грузу.
+      properties:
+        carrier_id:
+          type: string
+          format: uuid
+          description: UUID перевозчика или контрагента, которому отправляется оффер.
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        price:
+          type: number
+          description: Предложенная цена перевозки.
+          example: 1500
+        currency:
+          type: string
+          example: USD
+        comment:
+          type: string
+          nullable: true
+          example: Готов взять груз в ближайшие 2 часа
+      required:
+      - carrier_id
+      - price
+      - currency
+    CargoDetailResponse:
+      type: object
+      description: Расширенная карточка груза с маршрутами, оплатой и статистикой.
+      allOf:
+      - $ref: '#/components/schemas/Cargo'
+      - type: object
+        properties:
+          route_points:
+            type: array
+            items:
+              $ref: '#/components/schemas/RoutePoint'
+          payment:
+            $ref: '#/components/schemas/Payment'
+            nullable: true
+          offer_invitation_stats:
+            type: object
+            nullable: true
+            description: Статистика входящих/исходящих приглашений и офферов по грузу.
+            properties:
+              from_drivers_total:
+                type: integer
+                example: 3
+              from_drivers_pending:
+                type: integer
+                example: 1
+              to_drivers_total:
+                type: integer
+                example: 2
+              to_drivers_pending:
+                type: integer
+                example: 0
+    Trip:
+      type: object
+      description: Сущность рейса, созданного по принятому офферу.
+      properties:
+        id:
+          type: string
+          format: uuid
+        cargo_id:
+          type: string
+          format: uuid
+        offer_id:
+          type: string
+          format: uuid
+        driver_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum:
+          - IN_PROGRESS
+          - IN_TRANSIT
+          - DELIVERED
+          - COMPLETED
+          - CANCELLED
+        agreed_price:
+          type: number
+        agreed_currency:
+          type: string
+        rating_from_driver:
+          type: number
+          format: double
+          nullable: true
+          minimum: 1
+          maximum: 5
+          multipleOf: 0.5
+          description: Оценка водителя, выставленная диспетчеру/грузовой стороне.
+        rating_from_dispatcher:
+          type: number
+          format: double
+          nullable: true
+          minimum: 1
+          maximum: 5
+          multipleOf: 0.5
+          description: Оценка диспетчера, выставленная водителю.
+        next_status:
+          type: string
+          nullable: true
+          description: Следующий допустимый статус рейса.
+        completion_awaiting_dispatcher_confirm:
+          type: boolean
+          description: Требуется подтверждение завершения со стороны диспетчера.
+        pending_confirm_to:
+          type: string
+          nullable: true
+          description: Кому адресовано ожидающее подтверждение (`COMPLETED` и т.д.).
+        driver_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        dispatcher_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        driver_manager_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID менеджера водителей, участвующего в рейсе.
+        cargo_manager_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID карго-менеджера, участвующего в рейсе.
+    SSEDispatcherUnifiedEvent:
+      type: object
+      description: |
+        Унифицированное событие диспетчерского SSE-потока.
+        Используется в потоках:
+        - `GET /v1/dispatchers/cargo-manager/sse/events`
+        - `GET /v1/dispatchers/driver-manager/sse/events`
+        - `GET /v1/dispatchers/driver-manager/sse/notifications`
+
+        Событие содержит служебные поля (`type`, `id`, `event_kind`, `stream_kind`, `recipient_id`, `at`)
+        и типизированный payload в `data`.
+        Клиент должен маршрутизировать обработку по полю `type`.
+
+        Поддерживаемые типы:
+        - `trip_status`
+        - `trip_notification`
+        - `cargo_offer`
+        - `connection_offer`
+        - `driver_update`
+        - `message`
+        - `call`
+
+        Ниже приведен пример подключения и минимальной обработки.
+        ```js
+        const BASE         = "https://api.sarbon.example";
+        const CLIENT_TOKEN = localStorage.getItem("client_token");
+        const jwt          = localStorage.getItem("access_token");
+
+        // Для браузера токен можно передавать query-параметром.
+        const url = new URL(`${BASE}/v1/dispatchers/driver-manager/sse/events`);
+        url.searchParams.set("token",        jwt);
+        url.searchParams.set("device_type",  "web");
+        url.searchParams.set("language",     "ru");
+        url.searchParams.set("client_token", CLIENT_TOKEN);
+
+        const es = new EventSource(url.toString());
+
+        es.onopen = () => console.log("SSE connected");
+        es.onmessage = (e) => {
+          const evt = JSON.parse(e.data);
+          // Маршрутизация события в зависимости от типа.
+          switch (evt.type) {
+            case "trip_status":       onTripSnapshot(evt.id, evt.data); break;
+            case "trip_notification": onTripEvent(evt.id, evt.event_kind, evt.data); break;
+            case "cargo_offer":       onCargoOffer(evt.id, evt.event_kind, evt.data); break;
+            case "connection_offer":  onConnOffer(evt.id, evt.event_kind, evt.data); break;
+            case "driver_update":     onDriverUpdate(evt.id, evt.event_kind, evt.data); break;
+            case "message":           onChatMessage(evt.id, evt.data); break;
+            case "call":              onCallSignal(evt.event_kind, evt.id, evt.data); break;
+          }
+        };
+
+        // На обрыв/401 делайте refresh токена и переподключение.
+        es.onerror = () => {
+          if (es.readyState === EventSource.CLOSED) refreshTokenAndReopen();
+        };
+        ```
+
+        Пример подключения через curl:
+
+        ```bash
+        curl -N \
+          -H "X-Device-Type: web" \
+          -H "X-Language: ru" \
+          -H "X-Client-Token: $CLIENT_TOKEN" \
+          -H "X-User-Token: $JWT" \
+          "$BASE/v1/dispatchers/driver-manager/sse/events"
+        ```
+
+        Служебные строки потока:
+
+        ```
+        : sse connected
+        data: {"type":"trip_notification","event_kind":"COMPLETED", ...}
+        : ping
+        ```
+
+        Базовая структура полезного события:
+
+        ```json
+        {
+          "type":            "trip_notification|cargo_offer|connection_offer|driver_update|trip_status|message|call",
+          "id":              "entity-uuid",
+          "event_kind":      "COMPLETED|accepted|message|call.ringing",
+          "stream_kind":     "notifications|trip_status|driver_updates|chat",
+          "recipient_kind":  "dispatcher",
+          "recipient_id":    "dispatcher-uuid",
+          "dispatcher_role": "CARGO_MANAGER|DRIVER_MANAGER",
+          "at":              "2026-04-20T12:00:00Z",
+          "data":            { "kind": "trip_notification", "...": "..." }
+        }
+        ```
+
+        Дополнительно:
+        - `id` интерпретируется в зависимости от `type`.
+        - `event_kind` описывает конкретный подтип события.
+        - `stream_kind` показывает логический канал.
+        - `data` содержит типизированную нагрузку.
+
+        - `id` = `trip_id`
+        - `event_kind` = текущий статус или бизнес-событие по рейсу
+        - `data` = снимок состояния рейса
+
+        ### 4.2 `trip_notification` (inbox, `stream_kind=notifications`)
+        Уведомление по рейсу для inbox диспетчера.
+
+        - `id` = `notification_id` (fallback: `trip_id`)
+        - `event_kind` = событие по рейсу (`IN_TRANSIT`, `DELIVERED`, `COMPLETED`, ...)
+        - `data` = `#/components/schemas/SSETripNotificationEvent` (kind, notification_id, trip_id, event_kind, from_status, to_status, rate_driver_id, rate_cargo_manager_id, created_at)
+
+        ### 4.3 `cargo_offer` (inbox)
+        - `id` = `offer_id`
+        - `event_kind` = `created|accepted|rejected|cancelled`
+        - `data` = детали оффера и связанного груза
+
+        ### 4.4 `connection_offer` (inbox)
+        Приглашение/событие по связи водитель <-> диспетчер.
+        - `id` = `invitation_id`
+        - `event_kind` = `created|accepted|rejected|cancelled`
+        - `data` = данные приглашения и участников
+
+        - `id` = `driver_id`
+        - `event_kind` = изменение профиля/статуса водителя
+        - `data` = payload обновления водителя
+
+        - `id` = `message_id`
+        - `event_kind` = `message`
+        - `data` = объект сообщения чата
+
+        ### 4.7 `call` (`stream_kind=chat`)
+        Сигнальные события звонка в канале чата.
+        - `id` = `call_id`
+        - `event_kind` = `call.ringing|call.accepted|call.ended|...`
+        - `data` = payload с идентификаторами и состоянием звонка
+
+        Обработка должна быть идемпотентной: дубликаты событий допустимы.
+
+        ---
+
+        ## 5. Heartbeat & reconnect
+
+        - Сервер периодически отправляет `: ping` для поддержания соединения.
+        - При `401`/`403` обновите токен и откройте новый SSE.
+        - При сетевой ошибке используйте backoff для переподключения.
+        - Обрабатывайте события только после успешного `JSON.parse`.
+
+        ---
+
+        Дополнительные заметки по совместимости со старыми клиентами.
+
+        Примеры сопоставления каналов:
+        |---|---|---|
+        | `cargo-manager/sse/events`         | `CARGO_MANAGER`  | notifications + trip_status + driver_updates + chat |
+        | `driver-manager/sse/events`        | `DRIVER_MANAGER` | notifications + trip_status + driver_updates + chat |
+        | `driver-manager/sse/notifications` | `DRIVER_MANAGER` | notifications + driver_updates + chat |
+
+        ---
+
+        Гарантии доставки и порядок обработки:
+
+        - порядок событий в одном соединении сохраняется;
+        - допускаются повторы, обработка должна быть идемпотентной;
+        - неизвестные `type`/`event_kind` нужно логировать и безопасно пропускать.
+      required:
+      - type
+      - stream_kind
+      - recipient_kind
+      - recipient_id
+      - dispatcher_role
+      - at
+      properties:
+        type:
+          type: string
+          description: Тип события верхнего уровня для роутинга в клиенте.
+          enum:
+          - trip_notification
+          - cargo_offer
+          - connection_offer
+          - driver_update
+          - trip_status
+          - message
+          - call
+        id:
+          type: string
+          description: |
+            Идентификатор сущности события.
+            В зависимости от `type` это может быть:
+            - `trip_id` для `trip_status`,
+            - `notification_id` для `trip_notification`,
+            - `offer_id` для `cargo_offer`,
+            - `invitation_id` для `connection_offer`,
+            - `driver_id` для `driver_update`,
+            - `message_id` для `message`,
+            - `call_id` для `call`.
+        event_kind:
+          type: string
+          description: |
+            Подтип события внутри `type`.
+            Примеры:
+            - `IN_TRANSIT`, `DELIVERED`, `COMPLETED` для рейсов,
+            - `created`, `accepted`, `rejected`, `cancelled` для офферов,
+            - `message` для чата,
+            - `call.ringing`, `call.accepted`, `call.ended` для звонков.
+        stream_kind:
+          type: string
+          description: Логический канал доставки события.
+          enum:
+          - notifications
+          - trip_status
+          - driver_updates
+          - chat
+        recipient_kind:
+          type: string
+          enum:
+          - dispatcher
+        recipient_id:
+          type: string
+          format: uuid
+          description: UUID получателя события (диспетчера).
+        dispatcher_role:
+          type: string
+          enum:
+          - CARGO_MANAGER
+          - DRIVER_MANAGER
+          description: Роль диспетчера-получателя события.
+        at:
+          type: string
+          format: date-time
+          description: Время генерации события в UTC.
+        data:
+          description: |
+            Типизированный payload события.
+            Конкретная структура зависит от `type` и `event_kind`.
+            Для большинства событий это объект JSON, для отдельных кейсов допускается массив.
+          oneOf:
+          - type: object
+            additionalProperties: true
+          - type: array
+            items: {}
+    SSETripNotificationEvent:
+      type: object
+      description: Payload события `trip_notification`.
+      required:
+      - kind
+      - notification_id
+      - trip_id
+      - event_kind
+      - created_at
+      properties:
+        kind:
+          type: string
+          enum:
+          - trip_notification
+        notification_id:
+          type: string
+          format: uuid
+        trip_id:
+          type: string
+          format: uuid
+        event_kind:
+          type: string
+          description: Код события по рейсу (например, `COMPLETED`).
+        from_status:
+          type: string
+          nullable: true
+        to_status:
+          type: string
+          nullable: true
+        rate_driver_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID водителя, которого нужно оценить (если применимо).
+        rate_cargo_manager_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID карго-менеджера, которого нужно оценить (если применимо).
+        created_at:
+          type: string
+          description: Время создания уведомления.
+    SSETripStatusEvent:
+      type: object
+      description: Payload снимка текущего состояния рейса (`trip_status`).
+      required:
+      - kind
+      - trip_id
+      - cargo_id
+      - offer_id
+      - status
+      - agreed_price
+      - agreed_currency
+      - updated_at
+      - created_at
+      properties:
+        kind:
+          type: string
+          enum:
+          - trip_status
+        trip_id:
+          type: string
+          format: uuid
+        cargo_id:
+          type: string
+          format: uuid
+        offer_id:
+          type: string
+          format: uuid
+        driver_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum:
+          - IN_PROGRESS
+          - IN_TRANSIT
+          - DELIVERED
+          - COMPLETED
+          - CANCELLED
+        agreed_price:
+          type: number
+        agreed_currency:
+          type: string
+        pending_confirm_to:
+          type: string
+          nullable: true
+        completion_awaiting_dispatcher_confirm:
+          type: boolean
+          nullable: true
+        updated_at:
+          type: string
+        created_at:
+          type: string
+    ProfileTripRatingRequest:
+      type: object
+      required:
+      - trip_id
+      - stars
+      properties:
+        trip_id:
+          type: string
+          format: uuid
+          description: "Описание на русском языке."
+        stars:
+          type: number
+          format: double
+          minimum: 1
+          maximum: 5
+          multipleOf: 0.5
+          description: "Описание на русском языке."
+    AnalyticsFilters:
+      type: object
+      properties:
+        date_from:
+          type: string
+          format: date
+        date_to:
+          type: string
+          format: date
+        group_by:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+        timezone:
+          type: string
+          example: Asia/Tashkent
+        truck_type:
+          type: array
+          items:
+            type: string
+        status:
+          type: array
+          items:
+            type: string
+        from_city_code:
+          type: string
+          nullable: true
+        to_city_code:
+          type: string
+          nullable: true
+        driver_id:
+          type: string
+          format: uuid
+          nullable: true
+        cargo_id:
+          type: string
+          format: uuid
+          nullable: true
+    CMAnalyticsKPI:
+      type: object
+      properties:
+        cargos_total:
+          type: integer
+        cargos_active:
+          type: integer
+        cargos_completed:
+          type: integer
+        cargos_cancelled:
+          type: integer
+        offers_incoming_total:
+          type: integer
+        offers_outgoing_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        offers_rejected:
+          type: integer
+        offers_canceled:
+          type: integer
+        offer_accept_rate_pct:
+          type: number
+        trips_total:
+          type: integer
+        trips_in_progress:
+          type: integer
+        trips_in_transit:
+          type: integer
+        trips_delivered:
+          type: integer
+        trips_completed:
+          type: integer
+        trips_cancelled:
+          type: integer
+        trip_completion_rate:
+          type: number
+        revenue_completed:
+          type: number
+        cargo_total:
+          type: integer
+        contracts_total:
+          type: integer
+          description: Accepted deals/contracts in period
+        contracts_successful:
+          type: integer
+          description: Completed deals (by trips completed)
+        contracts_cancelled:
+          type: integer
+          description: Cancelled deals (by trips cancelled)
+        contracts_in_execution:
+          type: integer
+          description: Deals currently in execution (IN_PROGRESS/IN_TRANSIT/DELIVERED)
+        trips_in_execution:
+          type: integer
+    DMAnalyticsKPI:
+      type: object
+      properties:
+        drivers_total:
+          type: integer
+        drivers_available:
+          type: integer
+        drivers_busy:
+          type: integer
+        driver_utilization_pct:
+          type: number
+        offers_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        offers_rejected:
+          type: integer
+        offers_canceled:
+          type: integer
+        offers_waiting_driver_confirm:
+          type: integer
+        offer_accept_rate_pct:
+          type: number
+        trips_total:
+          type: integer
+        trips_in_progress:
+          type: integer
+        trips_in_transit:
+          type: integer
+        trips_delivered:
+          type: integer
+        trips_completed:
+          type: integer
+        trips_cancelled:
+          type: integer
+        trip_completion_rate_pct:
+          type: number
+        completed_value:
+          type: number
+        cargo_total:
+          type: integer
+        cargos_total:
+          type: integer
+        cargos_completed_by_my_drivers:
+          type: integer
+        contracts_total:
+          type: integer
+          description: Accepted deals/contracts in period
+        contracts_successful:
+          type: integer
+          description: Completed deals (by trips completed)
+        contracts_cancelled:
+          type: integer
+          description: Cancelled deals (by trips cancelled)
+        contracts_in_execution:
+          type: integer
+          description: Deals currently in execution (IN_PROGRESS/IN_TRANSIT/DELIVERED)
+        trips_in_execution:
+          type: integer
+    CMAnalyticsTimelineItem:
+      type: object
+      properties:
+        period_start:
+          type: string
+          format: date-time
+        cargo_created:
+          type: integer
+        offers_incoming:
+          type: integer
+        offers_outgoing:
+          type: integer
+        trips_started:
+          type: integer
+        trips_completed:
+          type: integer
+    DMAnalyticsTimelineItem:
+      type: object
+      properties:
+        period_start:
+          type: string
+          format: date-time
+        offers_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        trips_total:
+          type: integer
+        trips_completed:
+          type: integer
+    CMAnalyticsTopRouteItem:
+      type: object
+      properties:
+        from_city_code:
+          type: string
+        to_city_code:
+          type: string
+        trips_count:
+          type: integer
+        total_price:
+          type: number
+    CMAnalyticsTopDriverItem:
+      type: object
+      properties:
+        driver_id:
+          type: string
+          format: uuid
+        trips_count:
+          type: integer
+        trips_completed:
+          type: integer
+        avg_agreed_price:
+          type: number
+    DMAnalyticsTopDriverItem:
+      type: object
+      properties:
+        driver_id:
+          type: string
+          format: uuid
+        driver_name:
+          type: string
+        work_status:
+          type: string
+        trips_total:
+          type: integer
+        trips_completed:
+          type: integer
+    CMAnalyticsDashboardData:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/AnalyticsFilters'
+        kpi:
+          $ref: '#/components/schemas/CMAnalyticsKPI'
+        timeline:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/CMAnalyticsTimelineItem'
+        top:
+          type: object
+          properties:
+            routes:
+              type: array
+              items:
+                $ref: '#/components/schemas/CMAnalyticsTopRouteItem'
+            drivers:
+              type: array
+              items:
+                $ref: '#/components/schemas/CMAnalyticsTopDriverItem'
+        funnel:
+          $ref: '#/components/schemas/AnalyticsFunnel'
+    DMAnalyticsDashboardData:
+      type: object
+      properties:
+        filters:
+          $ref: '#/components/schemas/AnalyticsFilters'
+        kpi:
+          $ref: '#/components/schemas/DMAnalyticsKPI'
+        timeline:
+          type: object
+          properties:
+            items:
+              type: array
+              items:
+                $ref: '#/components/schemas/DMAnalyticsTimelineItem'
+        top:
+          type: object
+          properties:
+            drivers:
+              type: array
+              items:
+                $ref: '#/components/schemas/DMAnalyticsTopDriverItem'
+        funnel:
+          $ref: '#/components/schemas/AnalyticsFunnel'
+    AnalyticsFunnel:
+      type: object
+      properties:
+        offers_total:
+          type: integer
+        offers_accepted:
+          type: integer
+        trips_in_execution:
+          type: integer
+        trips_completed:
+          type: integer
+        trips_cancelled:
+          type: integer
+        conversion_offer_to_completed_pct:
+          type: number
+paths:
+  # driver
+  /v1/driver/transport-options:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1transport-options'
+  /v1/driver/auth/phone:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1auth~1phone'
+  /v1/driver/auth/otp/verify:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1auth~1otp~1verify'
+  /v1/driver/registration/start:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1registration~1start'
+  /v1/driver/profile:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile'
+  /v1/driver/profile/driver:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile~1driver'
+  /v1/driver/profile/heartbeat:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile~1heartbeat'
+  /v1/driver/profile/photo:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile~1photo'
+  /v1/driver/profile/phone-change/request:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile~1phone-change~1request'
+  /v1/driver/profile/phone-change/verify:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile~1phone-change~1verify'
+  /v1/driver/profile/power:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile~1power'
+  /v1/driver/profile/trailer:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1profile~1trailer'
+  /v1/driver/registration/geo-push:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1registration~1geo-push'
+  /v1/driver/registration/transport-type:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1registration~1transport-type'
+  /v1/driver/kyc:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1kyc'
+  /v1/driver/auth/refresh:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1auth~1refresh'
+  /v1/driver/auth/logout:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1auth~1logout'
+  /v1/driver/cargo-likes:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1cargo-likes'
+  /v1/driver/cargo-likes/{cargoId}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1cargo-likes~1{cargoId}'
+  /v1/driver/dispatcher-likes:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatcher-likes'
+  /v1/driver/dispatcher-likes/{dispatcherId}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatcher-likes~1{dispatcherId}'
+  /v1/driver/offers/all:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1all'
+  /v1/driver/cargo-offers:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1cargo-offers'
+  /v1/driver/cargo/{id}/offers:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1cargo~1{id}~1offers'
+  /v1/driver/cargo/{id}/offers/send:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1cargo~1{id}~1offers~1send'
+  /v1/driver/offers/{id}/accept:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1{id}~1accept'
+  /v1/driver/offers/{id}/accept-from-dispatcher:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1{id}~1accept-from-dispatcher'
+  /v1/driver/offers/{id}/confirm:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1{id}~1confirm'
+  /v1/driver/offers/{id}/confirm-driver-manager-flow:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1{id}~1confirm-driver-manager-flow'
+  /v1/driver/offers/{id}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1{id}'
+  /v1/driver/offers/{id}/reject:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1{id}~1reject'
+  /v1/driver/offers/{id}/reject-with-reason:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1offers~1{id}~1reject-with-reason'
+  /v1/driver/active-cargo:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1active-cargo'
+  /v1/driver/cargo/active:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1cargo~1active'
+  /v1/driver/matching-cargo:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1matching-cargo'
+  /v1/driver/trips/history:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trips~1history'
+  /v1/driver/trips/me:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trips~1me'
+  /v1/driver/trips/{id}/confirm:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trips~1{id}~1confirm'
+  /v1/driver/trips/{id}/reject:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trips~1{id}~1reject'
+  /v1/driver/trips/{id}/cancel:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trips~1{id}~1cancel'
+  /v1/driver/notifications:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1notifications'
+  /v1/driver/notifications/read-all:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1notifications~1read-all'
+  /v1/driver/notifications/{id}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1notifications~1{id}'
+  /v1/driver/trip-notifications:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trip-notifications'
+  /v1/driver/trip-notifications/read-all:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trip-notifications~1read-all'
+  /v1/driver/trip-notifications/{id}/read:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trip-notifications~1{id}~1read'
+  /v1/driver/sse/realtime:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1sse~1realtime'
+  /v1/driver/sse/trip-notifications:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1sse~1trip-notifications'
+  /v1/driver/sse/cargo-offers:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1sse~1cargo-offers'
+  /v1/driver/sse/connections:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1sse~1connections'
+  /v1/driver/sse/trip-status:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1sse~1trip-status'
+  /v1/driver/dispatchers/{dispatcherId}/rating:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers~1{dispatcherId}~1rating'
+  /v1/driver/trips/{id}/state:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1trips~1{id}~1state'
+  /v1/driver/driver-invitations:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1driver-invitations'
+  /v1/driver/driver-invitations/accept:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1driver-invitations~1accept'
+  /v1/driver/driver-invitations/decline:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1driver-invitations~1decline'
+  /v1/driver/connection-offers:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1connection-offers'
+  /v1/driver/connection-offers/accept:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1connection-offers~1accept'
+  /v1/driver/connection-offers/decline:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1connection-offers~1decline'
+  /v1/driver/connection-offers/{token}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1connection-offers~1{token}'
+  /v1/driver/connection-offers/dispatchers:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1connection-offers~1dispatchers'
+  /v1/driver/connection-offers/dispatchers/hint:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1connection-offers~1dispatchers~1hint'
+  /v1/driver/dispatchers:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers'
+  /v1/driver/my-driver-managers:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1my-driver-managers'
+  /v1/driver/my-driver-managers/{dispatcherId}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1my-driver-managers~1{dispatcherId}'
+  /v1/driver/dispatchers/{dispatcherId}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers~1{dispatcherId}'
+  /v1/driver/dispatchers/catalog:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers~1catalog'
+  /v1/driver/dispatchers/hint:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatchers~1hint'
+  /v1/driver/dispatcher-invitations:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatcher-invitations'
+  /v1/driver/dispatcher-invitations/{token}:
+    $ref: './paths/driver.yaml#/paths/~1v1~1driver~1dispatcher-invitations~1{token}'
+  # dispatchers
+  /v1/dispatchers/auth/refresh:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1refresh'
+  /v1/dispatchers/auth/phone:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1phone'
+  /v1/dispatchers/auth/otp/verify:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1otp~1verify'
+  /v1/dispatchers/auth/login/password:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1login~1password'
+  /v1/dispatchers/auth/reset-password/request:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1reset-password~1request'
+  /v1/dispatchers/auth/reset-password/confirm:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1reset-password~1confirm'
+  /v1/dispatchers/auth/logout:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1auth~1logout'
+  /v1/dispatchers/registration/complete:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1registration~1complete'
+  /v1/dispatchers/profile:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1profile'
+  /v1/dispatchers/driver-invitations:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1driver-invitations'
+  /v1/dispatchers/profile/photo:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1profile~1photo'
+  /v1/dispatchers/profile/password:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1profile~1password'
+  /v1/dispatchers/profile/phone-change/request:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1profile~1phone-change~1request'
+  /v1/dispatchers/profile/phone-change/verify:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1profile~1phone-change~1verify'
+  /v1/dispatchers/connection-offers:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1connection-offers'
+  /v1/dispatchers/connection-offers/{token}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1connection-offers~1{token}'
+  /v1/dispatchers/connection-offers/accept:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1connection-offers~1accept'
+  /v1/dispatchers/connection-offers/decline:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1connection-offers~1decline'
+  /v1/dispatchers/drivers/find:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1drivers~1find'
+  /v1/dispatchers/drivers:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1drivers'
+  /v1/dispatchers/drivers/all:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1drivers~1all'
+  /v1/dispatchers/drivers/{driverId}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1drivers~1{driverId}'
+  /v1/dispatchers/trips:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trips'
+  /v1/dispatchers/cargo/{id}/trips:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo~1{id}~1trips'
+  /v1/dispatchers/trips/{id}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trips~1{id}'
+  /v1/dispatchers/trips/history:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trips~1history'
+  /v1/dispatchers/trips/{id}/confirm-transition:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trips~1{id}~1confirm-transition'
+  /v1/dispatchers/trips/{id}/assign-driver:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trips~1{id}~1assign-driver'
+  /v1/dispatchers/trips/{id}/cancel:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trips~1{id}~1cancel'
+  /v1/dispatchers/trips/{id}/state:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trips~1{id}~1state'
+  /v1/dispatchers/trip-notifications:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trip-notifications'
+  /v1/dispatchers/trip-notifications/read-all:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trip-notifications~1read-all'
+  /v1/dispatchers/trip-notifications/{id}/read:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1trip-notifications~1{id}~1read'
+  /v1/dispatchers/sse/trip-notifications:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1sse~1trip-notifications'
+  /v1/dispatchers/sse/cargo-offers:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1sse~1cargo-offers'
+  /v1/dispatchers/sse/trip-status:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1sse~1trip-status'
+  /v1/dispatchers/sse/driver-updates:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1sse~1driver-updates'
+  /v1/dispatchers/drivers/{driverId}/rating:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1drivers~1{driverId}~1rating'
+  /v1/dispatchers/dispatchers/{dispatcherId}/rating:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1dispatchers~1{dispatcherId}~1rating'
+  /v1/dispatchers/offers/{id}/accept:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}~1accept'
+  /v1/dispatchers/offers/{id}/accept-by-cargo-manager:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}~1accept-by-cargo-manager'
+  /v1/dispatchers/offers/{id}/accept-by-driver-manager:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}~1accept-by-driver-manager'
+  /v1/dispatchers/offers/{id}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}'
+  /v1/dispatchers/offers/{id}/reject:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}~1reject'
+  /v1/dispatchers/offers/{id}/reject-with-reason:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}~1reject-with-reason'
+  /v1/dispatchers/offers/{id}/reject-by-driver-manager:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}~1reject-by-driver-manager'
+  /v1/dispatchers/offers/{id}/cancel-by-driver-manager:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1{id}~1cancel-by-driver-manager'
+  /v1/dispatchers/offers/all:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1offers~1all'
+  /v1/dispatchers/cargo/{id}/offers/send-by-driver-manager:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo~1{id}~1offers~1send-by-driver-manager'
+  /v1/dispatchers/cargo/{id}/offers/send-by-cargo-manager:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo~1{id}~1offers~1send-by-cargo-manager'
+  /v1/dispatchers/cargo/{id}/offers/send-to-driver-manager:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo~1{id}~1offers~1send-to-driver-manager'
+  /v1/dispatchers/cargo/mine:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo~1mine'
+  /v1/dispatchers/cargo/all:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo~1all'
+  /v1/dispatchers/cargo/export.xlsx:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo~1export.xlsx'
+  /v1/dispatchers/favorite-drivers:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1favorite-drivers'
+  /v1/dispatchers/favorite-drivers/{driverId}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1favorite-drivers~1{driverId}'
+  /v1/dispatchers/cargo-likes:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo-likes'
+  /v1/dispatchers/cargo-likes/{cargoId}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1cargo-likes~1{cargoId}'
+  /v1/dispatchers/favorite-cargo:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1favorite-cargo'
+  /v1/dispatchers/favorite-cargo/{cargoId}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1favorite-cargo~1{cargoId}'
+  /v1/dispatchers/driver-likes:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1driver-likes'
+  /v1/dispatchers/driver-likes/{driverId}:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1driver-likes~1{driverId}'
+  /v1/dispatchers/dispatchers/catalog:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1dispatchers~1catalog'
+  /v1/dispatchers/analytics/cargo-manager/dashboard:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1analytics~1cargo-manager~1dashboard'
+  /v1/dispatchers/analytics/cargo-manager/export.xlsx:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1analytics~1cargo-manager~1export.xlsx'
+  /v1/dispatchers/analytics/driver-manager/dashboard:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1analytics~1driver-manager~1dashboard'
+  /v1/dispatchers/analytics/driver-manager/export.xlsx:
+    $ref: './paths/dispatchers.yaml#/paths/~1v1~1dispatchers~1analytics~1driver-manager~1export.xlsx'
+  # cargo_manager
+  /v1/dispatchers/cargo-manager/sse/events:
+    $ref: './paths/cargo_manager.yaml#/paths/~1v1~1dispatchers~1cargo-manager~1sse~1events'
+  /v1/dispatchers/cargo-manager/sse/notifications:
+    $ref: './paths/cargo_manager.yaml#/paths/~1v1~1dispatchers~1cargo-manager~1sse~1notifications'
+  # driver_manager
+  /v1/dispatchers/driver-managers:
+    $ref: './paths/driver_manager.yaml#/paths/~1v1~1dispatchers~1driver-managers'
+  /v1/dispatchers/driver-managers/{dispatcherId}/drivers:
+    $ref: './paths/driver_manager.yaml#/paths/~1v1~1dispatchers~1driver-managers~1{dispatcherId}~1drivers'
+  /v1/dispatchers/driver-manager/sse/events:
+    $ref: './paths/driver_manager.yaml#/paths/~1v1~1dispatchers~1driver-manager~1sse~1events'
+  /v1/dispatchers/driver-manager/sse/notifications:
+    $ref: './paths/driver_manager.yaml#/paths/~1v1~1dispatchers~1driver-manager~1sse~1notifications'
+  /v1/dispatchers/driver-manager-offers/{id}/accept:
+    $ref: './paths/driver_manager.yaml#/paths/~1v1~1dispatchers~1driver-manager-offers~1{id}~1accept'
+  # admin
+  /v1/admin/auth/refresh:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1auth~1refresh'
+  /v1/admin/auth/login/password:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1auth~1login~1password'
+  /v1/admin/companies:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1companies'
+  /v1/admin/companies/{id}/owner:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1companies~1{id}~1owner'
+  /v1/admin/company-users/owners/search:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1company-users~1owners~1search'
+  /v1/admin/cargo/moderation:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1cargo~1moderation'
+  /v1/admin/cargo/{id}/moderation/accept:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1cargo~1{id}~1moderation~1accept'
+  /v1/admin/cargo/{id}/moderation/reject:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1cargo~1{id}~1moderation~1reject'
+  /v1/admin/push/status:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1push~1status'
+  /v1/admin/push/send:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1push~1send'
+  /v1/admin/push/recipient-status:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1push~1recipient-status'
+  /v1/admin/push/send-by-recipient:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1push~1send-by-recipient'
+  /v1/admin/dashboard:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1dashboard'
+  /v1/admin/metrics:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1metrics'
+  /v1/admin/users:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1users'
+  /v1/admin/users/{id}:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1users~1{id}'
+  /v1/admin/users/{id}/logins:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1users~1{id}~1logins'
+  /v1/admin/funnels:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1funnels'
+  /v1/admin/dropoff:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1dropoff'
+  /v1/admin/retention:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1retention'
+  /v1/admin/flows/time:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1flows~1time'
+  /v1/admin/flows/conversion:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1flows~1conversion'
+  /v1/admin/chats:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1chats'
+  /v1/admin/chats/{chat_id}/messages:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1chats~1{chat_id}~1messages'
+  /v1/admin/calls:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1calls'
+  /v1/admin/calls/{id}:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1calls~1{id}'
+  /v1/admin/geo:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1geo'
+  /v1/admin/geo/realtime:
+    $ref: './paths/admin.yaml#/paths/~1v1~1admin~1geo~1realtime'
+  # reference
+  /v1/reference/drivers:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1drivers'
+  /v1/reference/cargo:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1cargo'
+  /v1/reference/company:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1company'
+  /v1/reference/admin:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1admin'
+  /v1/reference/dispatchers:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1dispatchers'
+  /v1/reference/cities:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1cities'
+  /v1/reference/cargo-types/hint:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1cargo-types~1hint'
+  /v1/reference/countries:
+    $ref: './paths/reference.yaml#/paths/~1v1~1reference~1countries'
+  # chat
+  /v1/chat/user-finder:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1user-finder'
+  /v1/chat/users/{id}/photo:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1users~1{id}~1photo'
+  /v1/chat/conversations:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1conversations'
+  /v1/chat/conversations/{id}/read:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1conversations~1{id}~1read'
+  /v1/chat/conversations/{id}/messages:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1conversations~1{id}~1messages'
+  /v1/chat/conversations/{id}/messages/media:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1conversations~1{id}~1messages~1media'
+  /v1/chat/conversations/{id}/messages/media-ref:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1conversations~1{id}~1messages~1media-ref'
+  /v1/chat/files/probe:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1files~1probe'
+  /v1/chat/messages/{id}:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1messages~1{id}'
+  /v1/chat/presence/{user_id}:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1presence~1{user_id}'
+  /v1/chat/media/{id}:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1media~1{id}'
+  /v1/chat/files/{id}:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1files~1{id}'
+  /v1/chat/push-token:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1push-token'
+  /v1/chat/ws:
+    $ref: './paths/chat.yaml#/paths/~1v1~1chat~1ws'
+  # calls
+  /v1/calls:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls'
+  /v1/calls/ice-servers:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls~1ice-servers'
+  /v1/calls/test/bootstrap:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls~1test~1bootstrap'
+  /v1/calls/{id}:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls~1{id}'
+  /v1/calls/{id}/accept:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls~1{id}~1accept'
+  /v1/calls/{id}/decline:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls~1{id}~1decline'
+  /v1/calls/{id}/cancel:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls~1{id}~1cancel'
+  /v1/calls/{id}/end:
+    $ref: './paths/calls.yaml#/paths/~1v1~1calls~1{id}~1end'
+  # company
+  /v1/company-users/auth/refresh:
+    $ref: './paths/company.yaml#/paths/~1v1~1company-users~1auth~1refresh'
+  # legacy_api
+  /api/cargo:
+    $ref: './paths/legacy_api.yaml#/paths/~1api~1cargo'
+  /api/cargo/{id}/photos:
+    $ref: './paths/legacy_api.yaml#/paths/~1api~1cargo~1{id}~1photos'
+  /api/cargo/{id}/photos/{photoId}:
+    $ref: './paths/legacy_api.yaml#/paths/~1api~1cargo~1{id}~1photos~1{photoId}'
+  /api/cargo/{id}/status:
+    $ref: './paths/legacy_api.yaml#/paths/~1api~1cargo~1{id}~1status'
+  /api/cargo/{id}/offers:
+    $ref: './paths/legacy_api.yaml#/paths/~1api~1cargo~1{id}~1offers'
+  /api/cargo/photos:
+    $ref: './paths/legacy_api.yaml#/paths/~1api~1cargo~1photos'
+  # other
+  /health:
+    $ref: './paths/other.yaml#/paths/~1health'

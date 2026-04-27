@@ -1,0 +1,54 @@
+paths:
+  /v1/calls:
+    get:
+      tags: [Chat / Voice]
+      summary: List my calls
+      responses:
+        '200': { description: OK }
+    post:
+      tags: [Chat / Voice]
+      summary: Create call
+      responses:
+        '201': { description: Created }
+  /v1/calls/ice-servers:
+    get:
+      tags: [Chat / Voice]
+      summary: Get ICE servers
+      responses:
+        '200': { description: OK }
+  /v1/calls/test/bootstrap:
+    get:
+      tags: [Chat / Voice]
+      summary: Get bootstrap data for call tests
+      responses:
+        '200': { description: OK }
+  /v1/calls/{id}:
+    get:
+      tags: [Chat / Voice]
+      summary: Get call by id
+      responses:
+        '200': { description: OK }
+  /v1/calls/{id}/accept:
+    post:
+      tags: [Chat / Voice]
+      summary: Accept call
+      responses:
+        '200': { description: OK }
+  /v1/calls/{id}/decline:
+    post:
+      tags: [Chat / Voice]
+      summary: Decline call
+      responses:
+        '200': { description: OK }
+  /v1/calls/{id}/cancel:
+    post:
+      tags: [Chat / Voice]
+      summary: Cancel call
+      responses:
+        '200': { description: OK }
+  /v1/calls/{id}/end:
+    post:
+      tags: [Chat / Voice]
+      summary: End call
+      responses:
+        '200': { description: OK }
