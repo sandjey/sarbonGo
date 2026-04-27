@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS public.geo_stats CASCADE;
