@@ -39,4 +39,10 @@ type Dispatcher struct {
 	UpdatedAt    time.Time  `json:"updated_at"`
 	LastOnlineAt *time.Time `json:"last_online_at"`
 	DeletedAt    *time.Time `json:"deleted_at"`
+
+	// Catalog counters (used by /v1/dispatchers/dispatchers/catalog and driver catalog).
+	// For roles where metric is not applicable, backend returns 0.
+	CargoCount int64 `json:"cargo_count"`
+	OfferCount int64 `json:"offer_count"`
+	TripCount  int64 `json:"trip_count"`
 }

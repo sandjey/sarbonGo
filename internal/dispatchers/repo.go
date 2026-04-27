@@ -109,6 +109,44 @@ SELECT
   manager_role,
   photo_path AS photo,
   (photo_data IS NOT NULL) AS has_photo,
+  CASE
+    WHEN manager_role = 'CARGO_MANAGER' THEN (
+      SELECT COUNT(*)
+      FROM cargo c
+      WHERE c.created_by_id = freelance_dispatchers.id
+        AND UPPER(COALESCE(c.created_by_type, '')) = 'DISPATCHER'
+    )
+    ELSE 0
+  END AS cargo_count,
+  CASE
+    WHEN manager_role = 'CARGO_MANAGER' THEN (
+      SELECT COUNT(*)
+      FROM offers o
+      WHERE o.proposed_by = 'DISPATCHER'
+        AND o.proposed_by_id = freelance_dispatchers.id
+    )
+    ELSE (
+      SELECT COUNT(*)
+      FROM offers o
+      WHERE o.proposed_by = 'DRIVER_MANAGER'
+        AND o.proposed_by_id = freelance_dispatchers.id
+    )
+  END AS offer_count,
+  CASE
+    WHEN manager_role = 'CARGO_MANAGER' THEN (
+      SELECT COUNT(*)
+      FROM trips t
+      JOIN cargo c ON c.id = t.cargo_id
+      WHERE c.created_by_id = freelance_dispatchers.id
+    )
+    ELSE (
+      SELECT COUNT(*)
+      FROM trips t
+      JOIN offers o ON o.id = t.offer_id
+      WHERE o.proposed_by_id = freelance_dispatchers.id
+         OR o.negotiation_dispatcher_id = freelance_dispatchers.id
+    )
+  END AS trip_count,
   created_at, updated_at, last_online_at, deleted_at,
   COUNT(*) OVER() AS total
 FROM freelance_dispatchers
@@ -139,6 +177,7 @@ LIMIT $%d OFFSET $%d`
 			&d.ManagerRole,
 			&d.Photo,
 			&d.HasPhoto,
+			&d.CargoCount, &d.OfferCount, &d.TripCount,
 			&d.CreatedAt, &d.UpdatedAt, &d.LastOnlineAt, &d.DeletedAt,
 			&tot,
 		); err != nil {

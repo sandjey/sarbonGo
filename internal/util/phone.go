@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
-
-	"github.com/nyaruka/phonenumbers"
 )
 
 // NormalizeE164 does a strict-ish normalization to E.164: +<digits>.
@@ -50,12 +48,5 @@ func NormalizeE164StrictPlus(raw string) (string, error) {
 	if !strings.HasPrefix(s, "+") {
 		return "", fmt.Errorf("phone must start with +")
 	}
-	num, err := phonenumbers.Parse(s, "ZZ")
-	if err != nil {
-		return "", fmt.Errorf("phone must be in E.164 format")
-	}
-	if !phonenumbers.IsValidNumber(num) {
-		return "", fmt.Errorf("phone must be in E.164 format")
-	}
-	return phonenumbers.Format(num, phonenumbers.E164), nil
+	return NormalizeE164(s)
 }

@@ -39,6 +39,13 @@ const driverSelectCols = `
       AND tr.status NOT IN ('COMPLETED', 'CANCELLED')
     LIMIT 1
   ) AS has_trips,
+  EXISTS (
+    SELECT 1
+    FROM trips tr
+    WHERE tr.driver_id = d.id
+      AND tr.status = 'IN_TRANSIT'
+    LIMIT 1
+  ) AS has_in_transit_trip,
   (d.photo_data IS NOT NULL) AS has_photo`
 
 const driverJoinTables = `
@@ -91,6 +98,7 @@ func (r *Repo) FindByID(ctx context.Context, id uuid.UUID) (*Driver, error) {
 
 func scanDriver(row pgx.Row) (*Driver, error) {
 	var d Driver
+	var hasInTransitTrip bool
 	err := row.Scan(
 		&d.ID, &d.Phone, &d.CreatedAt, &d.UpdatedAt, &d.LastOnlineAt, &d.Latitude, &d.Longitude, &d.PushToken,
 		&d.RegistrationStep, &d.RegistrationStatus, &d.Name, &d.DriverType, &d.Rating, &d.WorkStatus,
@@ -100,6 +108,7 @@ func scanDriver(row pgx.Row) (*Driver, error) {
 		&d.TrailerPlateType, &d.TrailerPlateNumber, &d.TrailerTechSeries, &d.TrailerTechNumber, &d.TrailerOwnerName, &d.TrailerScanStatus,
 		&d.DriverOwner, &d.KYCStatus,
 		&d.HasTrips,
+		&hasInTransitTrip,
 		&d.HasPhoto,
 	)
 	if err != nil {
@@ -114,6 +123,10 @@ func scanDriver(row pgx.Row) (*Driver, error) {
 	if d.LastOnlineAt != nil {
 		v := util.InTashkent(*d.LastOnlineAt)
 		d.LastOnlineAt = &v
+	}
+	if hasInTransitTrip {
+		loaded := "loaded"
+		d.WorkStatus = &loaded
 	}
 
 	return &d, nil
