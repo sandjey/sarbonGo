@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict Ra5KjmdxVu5ZUdTqNe1gx6DtRUb5bO35WhS21OULm2qG548dOcDporEaPfg2qIE
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -78,5 +77,4 @@ ALTER TABLE ONLY public.trip_ratings
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Ra5KjmdxVu5ZUdTqNe1gx6DtRUb5bO35WhS21OULm2qG548dOcDporEaPfg2qIE
 

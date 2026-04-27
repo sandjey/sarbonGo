@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict rHuSDdliGITozsBPahcGcyI3lKkH3xozddWhLdpMoIc8MEEsBdEPcZdmcijWGow
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -85,5 +84,4 @@ CREATE INDEX goadmin_operation_log_user_id_idx ON public.goadmin_operation_log U
 -- PostgreSQL database dump complete
 --
 
-\unrestrict rHuSDdliGITozsBPahcGcyI3lKkH3xozddWhLdpMoIc8MEEsBdEPcZdmcijWGow
 

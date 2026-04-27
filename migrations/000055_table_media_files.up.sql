@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict T44UENxZD4X4AfSwlMi1fztQZOlNogXfvT924UQOoinsm4PVY1YjMHwAfAVraXi
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -65,5 +64,4 @@ CREATE INDEX idx_media_files_kind_created ON public.media_files USING btree (kin
 -- PostgreSQL database dump complete
 --
 
-\unrestrict T44UENxZD4X4AfSwlMi1fztQZOlNogXfvT924UQOoinsm4PVY1YjMHwAfAVraXi
 

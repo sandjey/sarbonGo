@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict Qbx9bQub8DUDXZbkcXuEr66mP7U9jE2b1qk38vWkwmUIjNdM4zkPQ49PcaazlY6
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -54,5 +53,4 @@ ALTER TABLE ONLY public.app_roles
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Qbx9bQub8DUDXZbkcXuEr66mP7U9jE2b1qk38vWkwmUIjNdM4zkPQ49PcaazlY6
 

@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict AotJbegimwPEDGHNtCJsPQm2ey9HgItKnrkkoF7bcys1QrdBX3u3cOKihPpYd7F
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -64,5 +63,4 @@ ALTER TABLE ONLY public.call_events
 -- PostgreSQL database dump complete
 --
 
-\unrestrict AotJbegimwPEDGHNtCJsPQm2ey9HgItKnrkkoF7bcys1QrdBX3u3cOKihPpYd7F
 

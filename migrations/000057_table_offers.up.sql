@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict klqJ4QY3urgbTwo7H07hz4H3w0dIZVeP9tx55c3LtFk0XdLL7fc95k4h7wIm93Y
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -79,5 +78,4 @@ ALTER TABLE ONLY public.offers
 -- PostgreSQL database dump complete
 --
 
-\unrestrict klqJ4QY3urgbTwo7H07hz4H3w0dIZVeP9tx55c3LtFk0XdLL7fc95k4h7wIm93Y
 

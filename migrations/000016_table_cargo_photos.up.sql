@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict xyDb5SbafZni5Hfps0t9zYbUa7Whbmdu5YgWFmaRfkA3KaPEVhqMLsmK5wLxg1W
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -65,5 +64,4 @@ ALTER TABLE ONLY public.cargo_photos
 -- PostgreSQL database dump complete
 --
 
-\unrestrict xyDb5SbafZni5Hfps0t9zYbUa7Whbmdu5YgWFmaRfkA3KaPEVhqMLsmK5wLxg1W
 

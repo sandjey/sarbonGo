@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict ZU4qou2A2rZGV9yfIZt6tV5GEX4ltCs9fjHb8xoMiLMAAtZqwin2buSCWVTPZEa
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -79,5 +78,4 @@ ALTER TABLE ONLY public.dispatcher_company_roles
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ZU4qou2A2rZGV9yfIZt6tV5GEX4ltCs9fjHb8xoMiLMAAtZqwin2buSCWVTPZEa
 

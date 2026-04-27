@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict gkIccfE5r2EfzKpfelhvm0DQFf8YSQ6jzevHVcYmMLw4A2fKEQb3Wd3HAhkcdic
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -120,5 +119,4 @@ ALTER TABLE ONLY public.driver_invitations
 -- PostgreSQL database dump complete
 --
 
-\unrestrict gkIccfE5r2EfzKpfelhvm0DQFf8YSQ6jzevHVcYmMLw4A2fKEQb3Wd3HAhkcdic
 

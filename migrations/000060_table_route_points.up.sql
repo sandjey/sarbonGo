@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict M0nz6uk0g11WT9v3jNJIVb4Shkhrgc6dA4ckySdc8WbWYzLiajHuygnzU0aVJSL
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -82,5 +81,4 @@ ALTER TABLE ONLY public.route_points
 -- PostgreSQL database dump complete
 --
 
-\unrestrict M0nz6uk0g11WT9v3jNJIVb4Shkhrgc6dA4ckySdc8WbWYzLiajHuygnzU0aVJSL
 

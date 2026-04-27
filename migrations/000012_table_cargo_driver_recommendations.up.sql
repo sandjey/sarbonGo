@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict mjAwV81aNpbFxlh83JAn7iEWmTbPAKo8WIODcDnhCtRt4nTwsqNi4dRTOdjhL9v
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -102,5 +101,4 @@ ALTER TABLE ONLY public.cargo_driver_recommendations
 -- PostgreSQL database dump complete
 --
 
-\unrestrict mjAwV81aNpbFxlh83JAn7iEWmTbPAKo8WIODcDnhCtRt4nTwsqNi4dRTOdjhL9v
 

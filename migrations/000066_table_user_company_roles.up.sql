@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict F5dSg4FRR6UIDAfPFR4N82uK38xdoTCvftTFiNI4Uj0dZ57Ji9rAfeYsSc2SMzo
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -94,5 +93,4 @@ ALTER TABLE ONLY public.user_company_roles
 -- PostgreSQL database dump complete
 --
 
-\unrestrict F5dSg4FRR6UIDAfPFR4N82uK38xdoTCvftTFiNI4Uj0dZ57Ji9rAfeYsSc2SMzo
 

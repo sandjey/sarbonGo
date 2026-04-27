@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict YMrq85TCqpmKJxRZSXZChYuEHqKAgH0WIc3BpBiGgKgGq2TNX2hWRUWI1sFNGCq
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -82,5 +81,4 @@ ALTER TABLE ONLY public.audit_log
 -- PostgreSQL database dump complete
 --
 
-\unrestrict YMrq85TCqpmKJxRZSXZChYuEHqKAgH0WIc3BpBiGgKgGq2TNX2hWRUWI1sFNGCq
 

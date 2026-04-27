@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict zynOUbXIqqYW2HcHvixxiQC6oCegb519gyTilYLOMgrerXWbbmgcn9wHoebak4l
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -85,5 +84,4 @@ ALTER TABLE ONLY public.driver_cargo_favorites
 -- PostgreSQL database dump complete
 --
 
-\unrestrict zynOUbXIqqYW2HcHvixxiQC6oCegb519gyTilYLOMgrerXWbbmgcn9wHoebak4l
 

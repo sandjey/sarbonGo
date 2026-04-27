@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict TsAa56XwxDgWiMIHBPED1KXDMWuHBBxaNg412WUmgwK8YXafLir9d7BYyI23N1v
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -50,5 +49,4 @@ ALTER TABLE ONLY public.trip_stats
 -- PostgreSQL database dump complete
 --
 
-\unrestrict TsAa56XwxDgWiMIHBPED1KXDMWuHBBxaNg412WUmgwK8YXafLir9d7BYyI23N1v
 

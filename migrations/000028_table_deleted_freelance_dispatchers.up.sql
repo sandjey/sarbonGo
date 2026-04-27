@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict QkCWHlqd2eVabfMZYW8dTVLZKd2sAGRv0vQwQTt23v0eB0nkEwaSqMWlMEMKg00
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -91,5 +90,4 @@ CREATE INDEX idx_deleted_freelance_dispatchers_pinfl ON public.deleted_freelance
 -- PostgreSQL database dump complete
 --
 
-\unrestrict QkCWHlqd2eVabfMZYW8dTVLZKd2sAGRv0vQwQTt23v0eB0nkEwaSqMWlMEMKg00
 

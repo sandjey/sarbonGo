@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict uwAiJBAVQixIR9Yl0jdYRGky371huoLm3UDx0SuTUdHzWWwexJ2oAV5RDmCyK0a
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -118,5 +117,4 @@ ALTER TABLE ONLY public.cargo_manager_dm_offers
 -- PostgreSQL database dump complete
 --
 
-\unrestrict uwAiJBAVQixIR9Yl0jdYRGky371huoLm3UDx0SuTUdHzWWwexJ2oAV5RDmCyK0a
 

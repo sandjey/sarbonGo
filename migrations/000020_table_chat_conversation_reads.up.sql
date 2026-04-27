@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict Jzvbf8hCqj9Fbo0EJvf5THqg81djl8Xca9RZnUnq6QhgSD7RSmcm9QfANk8BjwP
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -62,5 +61,4 @@ ALTER TABLE ONLY public.chat_conversation_reads
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Jzvbf8hCqj9Fbo0EJvf5THqg81djl8Xca9RZnUnq6QhgSD7RSmcm9QfANk8BjwP
 

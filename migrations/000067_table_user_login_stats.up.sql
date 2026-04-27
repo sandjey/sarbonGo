@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict TO5yailhOttzRfJeTjYjRKLruJCGtdSEvt0rDLs5L7odcmzcngnJlCI2bivhEgH
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -53,5 +52,4 @@ ALTER TABLE ONLY public.user_login_stats
 -- PostgreSQL database dump complete
 --
 
-\unrestrict TO5yailhOttzRfJeTjYjRKLruJCGtdSEvt0rDLs5L7odcmzcngnJlCI2bivhEgH
 

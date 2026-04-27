@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict RYAoiVAsyjDPbbSD6e2ZsKkQWuyl0UCKxg3ys5n8U5R6aED9WcypYhIePWM2CJr
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -85,5 +84,4 @@ ALTER TABLE ONLY public.freelance_dispatcher_driver_favorites
 -- PostgreSQL database dump complete
 --
 
-\unrestrict RYAoiVAsyjDPbbSD6e2ZsKkQWuyl0UCKxg3ys5n8U5R6aED9WcypYhIePWM2CJr
 

@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict DzxQz8nmb5ciuhPjrdfaRgWFcGlHJUZ5SLcPpNcuJSDk0R0qh3bX0ds1GVr2Qvt
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -70,5 +69,4 @@ CREATE INDEX idx_chat_conversations_user_b ON public.chat_conversations USING bt
 -- PostgreSQL database dump complete
 --
 
-\unrestrict DzxQz8nmb5ciuhPjrdfaRgWFcGlHJUZ5SLcPpNcuJSDk0R0qh3bX0ds1GVr2Qvt
 

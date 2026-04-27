@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict jTdQxspVh4CgUO1CXbyMDxa0axhkp09XeQGeU7pMyRk9IXVOC5HwOgsYH8Nqb75
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -57,5 +56,4 @@ CREATE INDEX idx_geo_stats_day_city ON public.geo_stats USING btree (day_utc DES
 -- PostgreSQL database dump complete
 --
 
-\unrestrict jTdQxspVh4CgUO1CXbyMDxa0axhkp09XeQGeU7pMyRk9IXVOC5HwOgsYH8Nqb75
 

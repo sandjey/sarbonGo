@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict fhGjbNdJ2bROlkBOkNlhYSXIDtQuAElhU8qtpMa9iN1PM8yA6QhsmGcCizZ5JsW
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -67,5 +66,4 @@ CREATE INDEX idx_deleted_drivers_phone ON public.deleted_drivers USING btree (ph
 -- PostgreSQL database dump complete
 --
 
-\unrestrict fhGjbNdJ2bROlkBOkNlhYSXIDtQuAElhU8qtpMa9iN1PM8yA6QhsmGcCizZ5JsW
 

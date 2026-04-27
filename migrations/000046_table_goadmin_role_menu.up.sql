@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict sMvXTKh2VUdcDFnAPRclmX61hJ7c8L8Kx8s2MEsLDiXFwocSaVHuw9YNntTnbOi
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -54,5 +53,4 @@ CREATE INDEX goadmin_role_menu_role_id_menu_id_idx ON public.goadmin_role_menu U
 -- PostgreSQL database dump complete
 --
 
-\unrestrict sMvXTKh2VUdcDFnAPRclmX61hJ7c8L8Kx8s2MEsLDiXFwocSaVHuw9YNntTnbOi
 

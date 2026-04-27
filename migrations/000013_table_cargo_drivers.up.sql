@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict 0Jdzsloayo1AJ3j6q1aABTcFs0eVysxwzNdkql5dTgmwN7DFh7kWKIDFA8BXZhj
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -95,5 +94,4 @@ ALTER TABLE ONLY public.cargo_drivers
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 0Jdzsloayo1AJ3j6q1aABTcFs0eVysxwzNdkql5dTgmwN7DFh7kWKIDFA8BXZhj
 

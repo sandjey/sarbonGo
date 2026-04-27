@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict Td4TfVSQvgpGQ4N6VOOnX6ertEow01vYXOATzjW6PVTNh2HEnyc9K9Xfd0DrmCf
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -83,5 +82,4 @@ CREATE INDEX idx_drivers_phone ON public.drivers USING btree (phone);
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Td4TfVSQvgpGQ4N6VOOnX6ertEow01vYXOATzjW6PVTNh2HEnyc9K9Xfd0DrmCf
 

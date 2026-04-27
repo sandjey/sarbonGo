@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict Li0XraKti60UAX1bCB3XBTPXHqtW1qUKrrfHAFNfrYzB1LOYHnXsAtsfpOBw1PY
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -76,5 +75,4 @@ CREATE INDEX idx_sessions_user_started ON public.sessions USING btree (user_id, 
 -- PostgreSQL database dump complete
 --
 
-\unrestrict Li0XraKti60UAX1bCB3XBTPXHqtW1qUKrrfHAFNfrYzB1LOYHnXsAtsfpOBw1PY
 

@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict zdea0moofleOZM7LKfqcF1Vtvj5pID0a1Jesz7ToEHdFK5rszMBu35s8D8emKiE
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -72,5 +71,4 @@ CREATE TRIGGER admins_before_save_password BEFORE INSERT OR UPDATE OF password O
 -- PostgreSQL database dump complete
 --
 
-\unrestrict zdea0moofleOZM7LKfqcF1Vtvj5pID0a1Jesz7ToEHdFK5rszMBu35s8D8emKiE
 

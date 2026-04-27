@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict LOTgpqLZsW8sRKWXm0p5cC3XgQU5sKxp6ddudIcrHBX6khLM4MkssBLUyBQv9kk
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -64,5 +63,4 @@ CREATE INDEX idx_regions_country ON public.regions USING btree (country_code);
 -- PostgreSQL database dump complete
 --
 
-\unrestrict LOTgpqLZsW8sRKWXm0p5cC3XgQU5sKxp6ddudIcrHBX6khLM4MkssBLUyBQv9kk
 

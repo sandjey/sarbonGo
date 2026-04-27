@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict OyjvHovuooEXyhxOhSQrVoKt65CxGHWeT43QA3xoDVaeBc019i11mdDTh2YF4c7
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -76,5 +75,4 @@ ALTER TABLE ONLY public.driver_manager_relations
 -- PostgreSQL database dump complete
 --
 
-\unrestrict OyjvHovuooEXyhxOhSQrVoKt65CxGHWeT43QA3xoDVaeBc019i11mdDTh2YF4c7
 

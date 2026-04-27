@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict RvrWopCCTRCIDSam05iVavaao4QJlDcdf4lwR7bgj5nZanX4z6kpKeoxESHiTAY
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -59,5 +58,4 @@ ALTER TABLE ONLY public.cargo_types
 -- PostgreSQL database dump complete
 --
 
-\unrestrict RvrWopCCTRCIDSam05iVavaao4QJlDcdf4lwR7bgj5nZanX4z6kpKeoxESHiTAY
 

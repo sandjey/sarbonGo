@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict pCw54Cbuc9oIUPU3Pc1Ar6McO3Zss7v5S8Dgso26lwzMbLPgMc7ALCVzeq79Fos
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -88,5 +87,4 @@ ALTER TABLE ONLY public.dispatcher_invitations
 -- PostgreSQL database dump complete
 --
 
-\unrestrict pCw54Cbuc9oIUPU3Pc1Ar6McO3Zss7v5S8Dgso26lwzMbLPgMc7ALCVzeq79Fos
 

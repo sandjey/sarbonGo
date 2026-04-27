@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict YRqNeUIauy5fybKLdjhBwWW6ISuf2mDjqAG2z5e9Illb9qpQpFbE5PgpVSNK43g
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -50,5 +49,4 @@ ALTER TABLE ONLY public.cargo_stats
 -- PostgreSQL database dump complete
 --
 
-\unrestrict YRqNeUIauy5fybKLdjhBwWW6ISuf2mDjqAG2z5e9Illb9qpQpFbE5PgpVSNK43g
 

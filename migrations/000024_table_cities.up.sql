@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict odjFa3bBy0zcfnMbPcCMadkHegrORhaYHFDm6D2EwE2BsA1BmcKFaKAL4qwaQaX
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -66,5 +65,4 @@ CREATE INDEX idx_cities_country ON public.cities USING btree (country_code);
 -- PostgreSQL database dump complete
 --
 
-\unrestrict odjFa3bBy0zcfnMbPcCMadkHegrORhaYHFDm6D2EwE2BsA1BmcKFaKAL4qwaQaX
 

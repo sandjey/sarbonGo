@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict ZSim3c32VJQ91csjRnkwRW4KaY4mhWLcQnXayTGdTlt3Ix2k0eBEkBlInRnvfT5
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -77,5 +76,4 @@ ALTER TABLE ONLY public.driver_trailers
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ZSim3c32VJQ91csjRnkwRW4KaY4mhWLcQnXayTGdTlt3Ix2k0eBEkBlInRnvfT5
 

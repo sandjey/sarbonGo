@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict rrqcInmd6OiLG14l0mJUEcGGYKwZR56cxWRXwMWpcehv1pOxxOymiRqlv1K4bw5
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -85,5 +84,4 @@ ALTER TABLE ONLY public.driver_dispatcher_favorites
 -- PostgreSQL database dump complete
 --
 
-\unrestrict rrqcInmd6OiLG14l0mJUEcGGYKwZR56cxWRXwMWpcehv1pOxxOymiRqlv1K4bw5
 

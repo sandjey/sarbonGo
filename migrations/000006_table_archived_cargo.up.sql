@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict RaPY3I1bqpVaY2ab6nzsLcCypFaFgUUWQGeqDQEwgLIYsvZ97eTaZ10gwK07kxk
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -53,5 +52,4 @@ CREATE INDEX idx_archived_cargo_archived_at ON public.archived_cargo USING btree
 -- PostgreSQL database dump complete
 --
 
-\unrestrict RaPY3I1bqpVaY2ab6nzsLcCypFaFgUUWQGeqDQEwgLIYsvZ97eTaZ10gwK07kxk
 

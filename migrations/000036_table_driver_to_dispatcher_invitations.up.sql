@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict kLuZmL3jTUHV64PUDTbnkscUIp5foxmjpFE9giwLV03PaqMWlT0fKQHpN03g6t9
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -96,5 +95,4 @@ ALTER TABLE ONLY public.driver_to_dispatcher_invitations
 -- PostgreSQL database dump complete
 --
 
-\unrestrict kLuZmL3jTUHV64PUDTbnkscUIp5foxmjpFE9giwLV03PaqMWlT0fKQHpN03g6t9
 

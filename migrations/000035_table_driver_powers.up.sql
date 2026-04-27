@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict MAdMiv0f21yXD3xwYasmF5IhUO1EXCQAZChRkf9VL5M18l568DRIbfHVqEwmJVo
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -77,5 +76,4 @@ ALTER TABLE ONLY public.driver_powers
 -- PostgreSQL database dump complete
 --
 
-\unrestrict MAdMiv0f21yXD3xwYasmF5IhUO1EXCQAZChRkf9VL5M18l568DRIbfHVqEwmJVo
 

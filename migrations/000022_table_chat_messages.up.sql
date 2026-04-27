@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict x89gHNgXl5q2RNcNuJVc32FTzRrgWKXwmrGACbYNYqU6yfoABkqafrz2VPCBik9
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -89,5 +88,4 @@ ALTER TABLE ONLY public.chat_messages
 -- PostgreSQL database dump complete
 --
 
-\unrestrict x89gHNgXl5q2RNcNuJVc32FTzRrgWKXwmrGACbYNYqU6yfoABkqafrz2VPCBik9
 

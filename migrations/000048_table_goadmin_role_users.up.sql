@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict C8x9iHCbihtedMQDJa9zlNM4prrp82Z0wrTedjeByeKWodM2ziaR8ZfPGymMQiN
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -47,5 +46,4 @@ ALTER TABLE ONLY public.goadmin_role_users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict C8x9iHCbihtedMQDJa9zlNM4prrp82Z0wrTedjeByeKWodM2ziaR8ZfPGymMQiN
 

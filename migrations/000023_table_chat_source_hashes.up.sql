@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict 0PIfi9WgrJc4iYfC2DULRK6w44vZPISeUpvRQcDHhJGr23cig4DiKNJx4Qk48vD
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -83,5 +82,4 @@ ALTER TABLE ONLY public.chat_source_hashes
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 0PIfi9WgrJc4iYfC2DULRK6w44vZPISeUpvRQcDHhJGr23cig4DiKNJx4Qk48vD
 

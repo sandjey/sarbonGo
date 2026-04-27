@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict OCWylaytlyXVHAW7uNaDmNXun1XBRcNWswKW24HPrrJxsA5hCow7YA5fgTaDLiG
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -99,5 +98,4 @@ CREATE INDEX idx_analytics_events_user_time ON public.analytics_events USING btr
 -- PostgreSQL database dump complete
 --
 
-\unrestrict OCWylaytlyXVHAW7uNaDmNXun1XBRcNWswKW24HPrrJxsA5hCow7YA5fgTaDLiG
 

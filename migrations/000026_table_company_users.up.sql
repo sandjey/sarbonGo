@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict h23ctr6C5eemumffZRyBWd1rDCWoKAtBxYzsUhZurOKGkmF1DviqV79de0Rf2UL
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -89,5 +88,4 @@ ALTER TABLE ONLY public.company_users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict h23ctr6C5eemumffZRyBWd1rDCWoKAtBxYzsUhZurOKGkmF1DviqV79de0Rf2UL
 

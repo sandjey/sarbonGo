@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict JKfHVxUFmqgFdUT3JXPjkdcFRWdKzbfw1IESE82nA8qYEWMUMMZMbuahRgI0TdY
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -111,5 +110,4 @@ ALTER TABLE ONLY public.chat_attachments
 -- PostgreSQL database dump complete
 --
 
-\unrestrict JKfHVxUFmqgFdUT3JXPjkdcFRWdKzbfw1IESE82nA8qYEWMUMMZMbuahRgI0TdY
 

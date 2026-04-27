@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict f7rXuhwobbHObgWcEbTA2VopSAKRy0m3LTxhMYBVzT8ExT4OvQMxZn3L1OYeqxY
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -181,5 +180,4 @@ ALTER TABLE ONLY public.cargo
 -- PostgreSQL database dump complete
 --
 
-\unrestrict f7rXuhwobbHObgWcEbTA2VopSAKRy0m3LTxhMYBVzT8ExT4OvQMxZn3L1OYeqxY
 

@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict rP80VmM8gxJFpcdTfYfxOLOlfeIFnYsw2JFH337otHBoGdWvlQgRDCVYO8XrNHf
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -104,5 +103,4 @@ ALTER TABLE ONLY public.invitations
 -- PostgreSQL database dump complete
 --
 
-\unrestrict rP80VmM8gxJFpcdTfYfxOLOlfeIFnYsw2JFH337otHBoGdWvlQgRDCVYO8XrNHf
 

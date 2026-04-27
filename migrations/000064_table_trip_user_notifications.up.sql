@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict zQ9Gxw99OAyETQfYPDDsibKLTlRBKKbWN96KWRg0XtnSV2KpgSXLCdHKU5mAPlJ
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -83,5 +82,4 @@ CREATE INDEX idx_tun_unread ON public.trip_user_notifications USING btree (recip
 -- PostgreSQL database dump complete
 --
 
-\unrestrict zQ9Gxw99OAyETQfYPDDsibKLTlRBKKbWN96KWRg0XtnSV2KpgSXLCdHKU5mAPlJ
 

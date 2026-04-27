@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict aY8kaCKy2gYIIkkyhBcqCS2SLVdQFyj3kiuW0mqw1GGSZ2JgVmp90MV6FDW45mb
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -69,5 +68,4 @@ CREATE INDEX idx_archived_trips_cargo_id ON public.archived_trips USING btree (c
 -- PostgreSQL database dump complete
 --
 
-\unrestrict aY8kaCKy2gYIIkkyhBcqCS2SLVdQFyj3kiuW0mqw1GGSZ2JgVmp90MV6FDW45mb
 

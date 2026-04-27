@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict oFatVa5LdGir7MbeFaYxtYxM2gQWUlClU8sPuPmAADTK69OOFxcbCEl7Ol5Gkc8
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -91,5 +90,4 @@ ALTER TABLE ONLY public.calls
 -- PostgreSQL database dump complete
 --
 
-\unrestrict oFatVa5LdGir7MbeFaYxtYxM2gQWUlClU8sPuPmAADTK69OOFxcbCEl7Ol5Gkc8
 

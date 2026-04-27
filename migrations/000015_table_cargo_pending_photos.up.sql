@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict I2UPInM4swJ9fsm99qQl4VyEuU6oRxOiLJk1mpZvr8x2F0FfqhUKdAbzgUXHUpl
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -56,5 +55,4 @@ CREATE INDEX idx_cargo_pending_photos_created ON public.cargo_pending_photos USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict I2UPInM4swJ9fsm99qQl4VyEuU6oRxOiLJk1mpZvr8x2F0FfqhUKdAbzgUXHUpl
 

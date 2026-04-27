@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict KKhasbgcIs7bnzNiYrlc4H4L1PnrGAUpqfSEWiAutPaU7luMLLVkRYySaNl2qGc
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -101,5 +100,4 @@ CREATE INDEX idx_freelance_dispatchers_pinfl ON public.freelance_dispatchers USI
 -- PostgreSQL database dump complete
 --
 
-\unrestrict KKhasbgcIs7bnzNiYrlc4H4L1PnrGAUpqfSEWiAutPaU7luMLLVkRYySaNl2qGc
 

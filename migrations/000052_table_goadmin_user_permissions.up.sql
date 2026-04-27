@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict DFO9xG1gpDGrTCkFL5qiNPL7Jh6Tjxkxt4P2OVVvv93Qmn1hpHsnhPwymiHVbGa
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -47,5 +46,4 @@ ALTER TABLE ONLY public.goadmin_user_permissions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict DFO9xG1gpDGrTCkFL5qiNPL7Jh6Tjxkxt4P2OVVvv93Qmn1hpHsnhPwymiHVbGa
 

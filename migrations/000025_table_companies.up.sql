@@ -1,8 +1,7 @@
-﻿--
+--
 -- PostgreSQL database dump
 --
 
-\restrict bqXyVIHnKnS7pyAQ6ul6ytyB8aOAYTbRLpGUvfttkHb9exqbJSBA8cfIdbwIuGE
 
 -- Dumped from database version 18.3
 -- Dumped by pg_dump version 18.3
@@ -139,5 +138,4 @@ ALTER TABLE ONLY public.companies
 -- PostgreSQL database dump complete
 --
 
-\unrestrict bqXyVIHnKnS7pyAQ6ul6ytyB8aOAYTbRLpGUvfttkHb9exqbJSBA8cfIdbwIuGE
 
